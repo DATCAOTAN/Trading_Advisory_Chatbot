@@ -1,7 +1,0 @@
-Singleton Pattern (Áp dụng tại src/core/database.py)
-Facade Pattern (Áp dụng tại src/orchestrator.py)
-python -m src.services.parser_service
-python -m src.services.vector_service
-python -m src.services.llm_service
-python -m src.orchestrator
-streamlit run src/app.py

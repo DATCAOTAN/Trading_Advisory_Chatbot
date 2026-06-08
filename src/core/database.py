@@ -2,38 +2,87 @@ import os
 import threading
 import streamlit as st
 from qdrant_client import QdrantClient
-from sentence_transformers import SentenceTransformer
 from src.config import Config
 
-# Lock cấp module để bảo vệ việc khởi tạo trong môi trường đa luồng (Streamlit)
-_init_lock = threading.Lock()
 
+# =============================================================================
+# SINGLETON RESOURCES — @st.cache_resource đảm bảo thread-safe, chỉ load 1 lần
+# =============================================================================
 
 @st.cache_resource
 def _get_qdrant_client() -> QdrantClient:
-    """
-    Dùng @st.cache_resource để đảm bảo chỉ tạo đúng 1 QdrantClient
-    duy nhất trong suốt vòng đời ứng dụng Streamlit (thread-safe).
-    """
+    """Kết nối Qdrant Local duy nhất."""
     os.makedirs(Config.QDRANT_DIR, exist_ok=True)
-    print(f"🔌 [Qdrant] Đang kết nối đến kho dữ liệu: {Config.QDRANT_DIR}")
+    print(f"🔌 [Qdrant] Kết nối kho dữ liệu: {Config.QDRANT_DIR}")
     return QdrantClient(path=str(Config.QDRANT_DIR))
 
 
 @st.cache_resource
-def _get_embedding_model() -> SentenceTransformer:
+def _get_embedding_model():
     """
-    Dùng @st.cache_resource để nạp mô hình nhúng vào RAM đúng 1 lần,
-    chia sẻ chung cho tất cả các phiên Streamlit (thread-safe).
+    Nạp BGE-M3 qua SentenceTransformer — ổn định, đã kiểm chứng.
+    Import bên trong function để không block quá trình khởi động.
     """
-    print("🧠 [Singleton] Đang nạp mô hình nhúng BAEI/bge-m3 vào RAM...")
-    return SentenceTransformer(Config.EMBEDDING_MODEL_NAME)
+    print(f"🧠 [Embedding] Đang nạp mô hình {Config.EMBEDDING_MODEL_NAME}...")
+    try:
+        from sentence_transformers import SentenceTransformer
+        model = SentenceTransformer(Config.EMBEDDING_MODEL_NAME)
+        print(f"✅ [Embedding] Đã nạp xong {Config.EMBEDDING_MODEL_NAME}")
+        return model
+    except Exception as e:
+        print(f"❌ [Embedding] Lỗi nghiêm trọng: {e}")
+        raise
 
+
+@st.cache_resource
+def _get_bgem3_model():
+    """
+    BGEM3FlagModel cho Hybrid Search (Dense + Sparse cùng lúc).
+    Trả về None nếu FlagEmbedding chưa cài — app vẫn chạy bình thường.
+    """
+    try:
+        from FlagEmbedding import BGEM3FlagModel
+        print(f"⚡ [BGEM3] Nạp FlagEmbedding model cho Hybrid Search...")
+        return BGEM3FlagModel(Config.EMBEDDING_MODEL_NAME, use_fp16=True)
+    except ImportError:
+        print("ℹ️ [BGEM3] FlagEmbedding chưa cài → Hybrid Search dùng Dense-only")
+        return None
+    except Exception as e:
+        print(f"⚠️ [BGEM3] Lỗi: {e} → Hybrid Search dùng Dense-only")
+        return None
+
+
+@st.cache_resource
+def _get_reranker_model():
+    """
+    BGE-Reranker — CHỈ nạp khi được gọi tường minh.
+    Trả về None nếu FlagEmbedding chưa cài.
+    """
+    try:
+        from FlagEmbedding import FlagReranker
+        print(f"🎯 [Reranker] Nạp mô hình: {Config.RERANKER_MODEL_NAME}")
+        return FlagReranker(Config.RERANKER_MODEL_NAME, use_fp16=True)
+    except ImportError:
+        print("ℹ️ [Reranker] FlagEmbedding chưa cài → Reranker tắt")
+        return None
+    except Exception as e:
+        print(f"⚠️ [Reranker] Lỗi: {e} → Reranker tắt")
+        return None
+
+
+# =============================================================================
+# SINGLETON PROVIDER
+# =============================================================================
 
 class QdrantDatabaseProvider:
     """
-    Singleton Pattern: Đảm bảo chỉ có một thực thể duy nhất quản lý vòng đời.
-    Sử dụng @st.cache_resource bên dưới để xử lý thread-safety trong Streamlit.
+    Singleton Provider: Cổng truy cập duy nhất đến tất cả AI resources.
+    
+    Thứ tự nạp (tuần tự, KHÔNG đồng thời):
+    1. qdrant_client    → Nhẹ, nạp ngay
+    2. embedding_model  → BGE-M3 ~1.5GB, nạp khi cần
+    3. bgem3_model      → Chỉ khi FlagEmbedding đã cài
+    4. reranker_model   → Chỉ khi user dùng tính năng reranker
     """
     _instance = None
     _instance_lock = threading.Lock()
@@ -41,15 +90,24 @@ class QdrantDatabaseProvider:
     def __new__(cls):
         with cls._instance_lock:
             if cls._instance is None:
-                cls._instance = super(QdrantDatabaseProvider, cls).__new__(cls)
+                cls._instance = super().__new__(cls)
         return cls._instance
 
     @property
     def qdrant_client(self) -> QdrantClient:
-        """Trả về QdrantClient duy nhất được cache bởi Streamlit (thread-safe)"""
         return _get_qdrant_client()
 
     @property
-    def embedding_model(self) -> SentenceTransformer:
-        """Trả về mô hình nhúng được cache bởi Streamlit (thread-safe)"""
+    def embedding_model(self):
+        """Dense embedding — luôn khả dụng."""
         return _get_embedding_model()
+
+    @property
+    def bgem3_model(self):
+        """Hybrid model — None nếu FlagEmbedding chưa cài."""
+        return _get_bgem3_model()
+
+    @property
+    def reranker_model(self):
+        """Reranker — None nếu FlagEmbedding chưa cài."""
+        return _get_reranker_model()
