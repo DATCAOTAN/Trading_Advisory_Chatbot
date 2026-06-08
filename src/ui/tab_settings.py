@@ -112,11 +112,12 @@ def render(orchestrator, feature_flags: dict):
 
     # ── Phần 5: Thông tin phiên bản ─────────────────────────────────────
     st.markdown("#### ℹ️ Thông Tin Phiên Bản")
+    embedding_model_name = "Cohere Embed (v3.0)" if Config.COHERE_API_KEY else "BGE-M3 (Local)"
     st.code(
-        "📦 Trading Advisory Chatbot v2.0\n"
-        "🧠 LLM: Qwen 2.5 7B (Ollama)\n"
-        "📐 Embedding: BAAI/bge-m3 (1024d)\n"
-        "🎯 Reranker: BAAI/bge-reranker-v2-m3\n"
+        "📦 Trading Advisory Chatbot v3.0\n"
+        f"🧠 LLM: {Config.OPENROUTER_MODEL_NAME if Config.LLM_PROVIDER=='openrouter' else Config.LLM_MODEL_NAME}\n"
+        f"📐 Embedding: {embedding_model_name}\n"
+        f"🎯 Reranker: {'Cohere API' if Config.ENABLE_RERANKER else 'Tắt'}\n"
         "💾 Vector DB: Qdrant Local\n"
         "🚪 Intent Router: LLM Gatekeeper (Few-Shot)\n"
         "📊 Architecture: Facade + Component-Based + Incremental Ingestion",

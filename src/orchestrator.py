@@ -148,7 +148,7 @@ class RAGOrchestrator:
                 "timestamp": current_time
             }
 
-        # ── Bước 3: Multi-Hop Streaming Generation (Qwen 2.5) ──
+        # ── Bước 3: Multi-Hop Streaming Generation ──
         if enable_self_correction:
             # Non-streaming: thu toàn bộ → self-correct → stream lại
             stream = self._self_correction_pipeline(

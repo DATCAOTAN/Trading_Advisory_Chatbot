@@ -1,7 +1,8 @@
 pymupdf==1.24.2
-sentence-transformers==3.0.1
 qdrant-client==1.9.1
 streamlit==1.35.0
 ollama==0.2.1
-FlagEmbedding>=1.2.10
 plotly>=5.22.0
+openai>=1.0.0
+cohere>=5.0.0
+python-dotenv>=1.0.0

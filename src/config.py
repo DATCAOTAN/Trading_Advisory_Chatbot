@@ -12,6 +12,10 @@ Defensive Programming:
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load biến môi trường từ file .env (nếu có)
+load_dotenv()
 
 
 class Config:
@@ -35,9 +39,22 @@ class Config:
     LOGS_DIR = BASE_DIR / "logs"
 
     # =========================================================================
-    # 2. CẤU HÌNH MÔ HÌNH AI
+    # 2. CẤU HÌNH MÔ HÌNH AI & PROVIDER
     # =========================================================================
-    LLM_MODEL_NAME         = "qwen2.5:7b"
+    LLM_PROVIDER           = os.getenv("LLM_PROVIDER", "openrouter").lower()
+    
+    # ── OpenRouter API ──
+    OPENROUTER_API_KEY     = os.getenv("OPENROUTER_API_KEY", "")
+    OPENROUTER_MODEL_NAME  = os.getenv("OPENROUTER_MODEL_NAME", "nvidia/nemotron-3-super-120b-a12b:free")
+    
+    # ── Groq API (Fallback hoặc Tùy chọn) ──
+    GROQ_API_KEY           = os.getenv("GROQ_API_KEY", "")
+    GROQ_MODEL_NAME        = os.getenv("GROQ_MODEL_NAME", "qwen-3-32b")
+    
+    # ── Cohere API (Reranker) ──
+    COHERE_API_KEY         = os.getenv("COHERE_API_KEY", "")
+    
+    LLM_MODEL_NAME         = "qwen2.5:7b"           # Model Local Ollama
     EMBEDDING_MODEL_NAME   = "BAAI/bge-m3"
     RERANKER_MODEL_NAME    = "BAAI/bge-reranker-v2-m3"
     VECTOR_COLLECTION_NAME = "xauusd_knowledge_v2"

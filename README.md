@@ -1,15 +1,16 @@
 <div align="center">
 
-# 📈 AI Trading Advisory Chatbot — XAUUSD (v2.0)
+# 📈 AI Trading Advisory Chatbot — XAUUSD (v3.0)
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Ollama](https://img.shields.io/badge/Ollama-Local_LLM-orange)](https://ollama.com/)
+[![OpenRouter API](https://img.shields.io/badge/OpenRouter-Cloud_LLM-4A90E2)](https://openrouter.ai/)
+[![Cohere API](https://img.shields.io/badge/Cohere-Reranker-FF0000)](https://cohere.com/)
+[![Ollama](https://img.shields.io/badge/Ollama-Fallback_LLM-orange)](https://ollama.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B)](https://streamlit.io/)
 [![Qdrant](https://img.shields.io/badge/Qdrant-Vector_DB-purple)](https://qdrant.tech/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Hệ thống Cố vấn Giao dịch Vàng (XAUUSD) & Ngoại hối (Forex) sử dụng Kiến trúc Advanced RAG.**  
-*Hoàn toàn Offline — Độc lập — Thông minh & Tối ưu hóa hiệu suất.*
+*Tốc độ mili-giây với OpenRouter & Cohere Cloud — Tự động Fallback về Local — Trí nhớ vĩnh viễn.*
 
 </div>
 
@@ -17,27 +18,30 @@
 
 ## 📖 Giới Thiệu
 
-**Trading Advisory Chatbot** là một nền tảng tư vấn tài chính được phát triển dựa trên sức mạnh của các mô hình ngôn ngữ lớn (LLMs) chạy hoàn toàn cục bộ (offline). Dự án áp dụng kiến trúc **Advanced RAG (Retrieval-Augmented Generation)** để tổng hợp, phân tích dữ liệu vĩ mô, cấu trúc giá (SMC/Price Action), và đưa ra các khuyến nghị giao dịch sát với thực tế, hoàn toàn dựa trên kho tài liệu kiến thức (PDF) của riêng bạn.
+**Trading Advisory Chatbot** là một nền tảng tư vấn tài chính được phát triển dựa trên sức mạnh của các mô hình ngôn ngữ lớn (LLMs). Dự án áp dụng kiến trúc **Advanced RAG (Retrieval-Augmented Generation)** để tổng hợp, phân tích dữ liệu vĩ mô, cấu trúc giá (SMC/Price Action), và đưa ra các khuyến nghị giao dịch sát với thực tế, hoàn toàn dựa trên kho tài liệu kiến thức (PDF) của riêng bạn.
 
-Phiên bản **v2.0** đại diện cho một bước nhảy vọt về mặt kiến trúc phần mềm, chuyển đổi từ một ứng dụng monolithic sang **Component-Based Architecture**, đi kèm với cơ chế bảo vệ Guardrails và LLM Gatekeeper nhạy bén.
+Phiên bản **v3.0 (Cloud Migration)** đánh dấu một bước đại nhảy vọt về hiệu năng: Loại bỏ hoàn toàn nút thắt cổ chai phần cứng bằng việc chuyển dịch luồng suy luận lên **OpenRouter (NVIDIA Nemotron 120B)** và **Cohere Reranker** (tốc độ mili-giây), kết hợp cùng **Bộ nhớ hội thoại toàn cục (Global Session Memory)** và **Bộ lọc tư duy thông minh (Think Tag Filter)**.
 
 ---
 
-## ✨ Các Tính Năng Đột Phá (v2.0)
+## ✨ Các Tính Năng Đột Phá (v3.0)
 
-### 🧩 1. Kiến Trúc Flexible UI & Facade Pattern
-- **Main Shell Gọn Nhẹ:** `app.py` được tối giản hóa chỉ còn làm nhiệm vụ điều phối (Facade).
+### 🚀 1. Dynamic LLM Router & Tốc độ ánh sáng
+- **OpenRouter Cloud Integration:** Kết nối thẳng với dòng model siêu khủng NVIDIA Nemotron 120B chuyên ngành tài chính, mang lại tốc độ Stream text theo thời gian thực.
+- **Cohere Reranker API:** Rút phích cắm hệ thống BGE Reranker cục bộ để chuyển lên Cloud với tốc độ xé gió, tiết kiệm hàng GB RAM máy trạm.
+- **Auto Fallback Mechanism:** Cơ chế tự động phòng vệ. Nếu mạng mất kết nối hoặc API bị nghẽn, hệ thống tự động đánh lái êm ái luồng xử lý về **Ollama Local** mà không làm crash ứng dụng.
+- **Stream Think Tag Filter:** Tự động lọc sạch các nội dung lập luận nội bộ (`<think>...</think>`) trên luồng Stream, đảm bảo UI luôn sạch sẽ và chuyên nghiệp.
+
+### 🧠 2. Global Conversation Memory (Trí Nhớ Vĩnh Viễn)
+- **Persistent State:** Lịch sử chat được quản lý tập trung bởi `HistoryService` (Singleton) và sao lưu xuống file JSON. Không còn tình trạng mất trí nhớ khi người dùng tải lại trang web hoặc chuyển tab.
+- **Context-Aware Intent Router:** Kế thừa bộ nhớ hội thoại để phân tích ý định (Gatekeeper). Bot có khả năng hiểu các câu nói nối tiếp như *"vậy cuối năm 2026 thì sao?"* mà không bị lệch ngữ cảnh.
+
+### 🧩 3. Kiến Trúc Flexible UI & Facade Pattern
 - **Isolated Components:** Các chức năng Chatbot, Dashboard, và Cài đặt được tách biệt hoàn toàn vào từng module riêng (`src/ui/`). Việc thêm/bớt tính năng không bao giờ làm gãy (break) ứng dụng lõi.
+- **Context Trimming:** Tối ưu hóa số lượng tài liệu giữ lại (Top-3) sau khi Rerank qua Cohere, giúp giảm tải token nhồi vào LLM và tăng cường độ tập trung cho câu trả lời.
 
-### 🧠 2. Trí Tuệ Nhân Tạo (AI Pipeline) Toàn Diện
-- **LLM Gatekeeper (Intent Router v3):** Bức tường lửa phân loại ý định người dùng với độ trễ ~0s. Phân biệt rõ rệt 3 luồng: `GREETING` (Chào hỏi & Hỏi hệ thống), `TRASH` (Rác/Lạc đề), và `FINANCIAL_RAG` (Truy vấn tài chính).
-- **Query Rewriting Guardrails:** Chống LLM tự bịa từ khóa (Hallucination). Chỉ mở rộng ngữ nghĩa khi câu hỏi đã chứa thực thể tài chính.
-- **Context-Aware Formatting:** Trợ lý không trả lời rập khuôn. Nếu hỏi khái niệm → Giải thích lý thuyết. Nếu hỏi xu hướng → Phân tích từ Vĩ mô đến Kỹ thuật (Entry/SL/TP).
-- **Hybrid Search & Reranking:** Kết hợp sức mạnh của Vector Semantics và Keyword Matching, sau đó dùng mô hình Reranker (`BAAI/bge-reranker-v2-m3`) chấm điểm lại để chọn ra top 3 tài liệu chính xác nhất.
-
-### ⚡ 3. Đồng Bộ Thông Minh (Smart Incremental Ingestion)
-- Cơ chế quản lý trạng thái tài liệu bằng **Mã băm SHA-256** và **Idempotency**.
-- Khác biệt so với truyền thống: Hệ thống chỉ đọc và index **những file PDF mới hoặc bị sửa đổi**, bỏ qua hoàn toàn các file không thay đổi. Giảm thiểu thời gian đồng bộ từ vài phút xuống còn vài mili-giây.
+### ⚡ 4. Đồng Bộ Thông Minh (Smart Incremental Ingestion)
+- Chống lãng phí CPU bằng cơ chế quản lý trạng thái tài liệu với **Mã băm SHA-256**. Hệ thống chỉ đọc và index **những file PDF mới hoặc bị sửa đổi**, bỏ qua hoàn toàn các file cũ.
 
 ---
 
@@ -49,51 +53,47 @@ graph TD
     UI -->|Router| Gatekeeper{LLM Gatekeeper}
     
     Gatekeeper -->|TRASH| Reject[Cảnh báo tĩnh]
-    Gatekeeper -->|GREETING| ChitChat[Trả lời xã giao / Hướng dẫn hệ thống]
-    Gatekeeper -->|FINANCIAL_RAG| QR[Query Rewriting]
+    Gatekeeper -->|GREETING| ChitChat[Trả lời xã giao]
+    Gatekeeper -->|FINANCIAL_RAG| QR[Query Rewriting Sync API]
     
-    QR -->|Truy vấn chuẩn hóa| VS[Vector Service / Hybrid Search]
+    QR -->|Truy vấn chuẩn hóa| VS[Vector Service / Pure Dense Search]
     
     subgraph Data Layer
-        PDF[PDF Files] -->|Extract & Chunk| Ingest[Ingestion Tracker SHA-256]
-        Ingest -->|Chỉ cập nhật thay đổi| Qdrant[(Qdrant Vector DB)]
+        PDF[PDF Files] -->|Extract| Ingest[SHA-256 Tracker]
+        Ingest -->|Cập nhật| Qdrant[(Qdrant Vector DB)]
     end
     
-    Qdrant -->|Retrieve Top-K| VS
-    VS -->|Rerank Top-3| Reranker[BGE Reranker v2]
-    Reranker --> LLM[Qwen 2.5 7B - Multi-Hop Generation]
+    Qdrant -->|Retrieve| VS
+    VS -->|Rerank Top-3| Reranker[Cohere Reranker Cloud]
+    Reranker --> Client[LLM Client Router]
     
-    LLM --> SC[Self-Correction / Anti-Hallucination]
-    SC --> UI
+    subgraph AI Brain
+        Client -->|Ưu tiên| OpenRouter[OpenRouter API Cloud]
+        Client -->|Fallback| Ollama[Ollama Local]
+    end
+    
+    OpenRouter --> Filter[Think Tag Filter]
+    Ollama --> Filter
+    Filter --> UI
 ```
 
 ---
 
 ## 💻 Yêu Cầu Hệ Thống
 
-Dự án hoạt động cục bộ, không tốn phí API nhưng yêu cầu cấu hình phần cứng:
-
-| Thành phần | Yêu cầu tối thiểu | Khuyến nghị (Để mượt mà) |
-|:---|:---|:---|
-| **OS** | Windows 10/11, macOS, Linux | Ubuntu 22.04+ / Windows 11 |
-| **Python** | `3.10.x` | `3.11.x` |
-| **RAM** | 8 GB | 16 GB - 32 GB |
-| **GPU / VRAM** | CPU-only (Chạy chậm) | NVIDIA RTX (Tối thiểu 6GB VRAM) |
-| **Disk** | 10 GB trống | SSD (NVMe để truy xuất Vector DB nhanh) |
-| **Ollama** | Đã cài đặt và đang chạy nền | Phiên bản mới nhất |
+| Thành phần | Yêu cầu cấu hình |
+|:---|:---|
+| **OS** | Windows 10/11, macOS, Linux |
+| **Python** | `3.10.x` hoặc `3.11.x` |
+| **API** | OpenRouter API Key và Cohere API Key |
+| **Phần cứng** | Chỉ cần CPU và 8GB RAM (Vì LLM và Reranker chạy trên Cloud) |
+| **Ollama** *(Tùy chọn)* | Cài đặt nếu bạn muốn có hệ thống Fallback nội bộ phòng khi rớt mạng |
 
 ---
 
 ## 🚀 Hướng Dẫn Cài Đặt Khởi Đầu
 
-### 1. Cài đặt Ollama và Model
-Tải và cài đặt Ollama từ [trang chủ](https://ollama.com/download). Sau khi cài xong, mở Terminal/PowerShell và kéo model về:
-```bash
-ollama pull qwen2.5:7b
-```
-> *Mẹo: Hãy gõ `ollama list` để kiểm tra xem model đã sẵn sàng chưa.*
-
-### 2. Thiết lập dự án
+### 1. Thiết lập dự án
 
 **Clone mã nguồn:**
 ```bash
@@ -103,13 +103,9 @@ cd Trading_Advisory_Chatbot
 
 **Tạo môi trường ảo (Virtual Environment):**
 ```bash
-# Trên Windows
 python -m venv venv
-.\venv\Scripts\Activate.ps1
-
-# Trên Linux / macOS
-python3 -m venv venv
-source venv/bin/activate
+.\venv\Scripts\Activate.ps1   # Trên Windows
+source venv/bin/activate      # Trên Linux/macOS
 ```
 
 **Cài đặt thư viện phụ thuộc:**
@@ -117,13 +113,23 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### 2. Cấu Hình API (OpenRouter & Cohere)
+Đổi tên file `.env.example` thành `.env` (hoặc tạo file `.env` mới) tại thư mục gốc và nhập cấu hình:
+```env
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_MODEL_NAME=nvidia/nemotron-3-super-120b-a12b:free
+
+COHERE_API_KEY=your_cohere_api_key_here
+```
+
 ### 3. Nạp tài liệu kiến thức
-Sao chép các file `.pdf` chứa chiến lược giao dịch, lý thuyết SMC, hoặc báo cáo kinh tế của bạn vào thư mục (hệ thống sẽ tự tạo nếu chưa có):
+Sao chép các file `.pdf` chứa chiến lược giao dịch của bạn vào:
 - `data/raw_pdfs/static/`: Cho sách, lý thuyết nền tảng.
-- `data/raw_pdfs/dynamic/`: Cho báo cáo tuần, phân tích ngắn hạn.
+- `data/raw_pdfs/dynamic/`: Cho báo cáo vĩ mô tuần/tháng.
 
 ### 4. Khởi chạy Ứng dụng
-Sử dụng tệp `launcher.py` để khởi động an toàn (file này sẽ nạp trước các thư viện AI nặng để chống lỗi crash cục bộ):
+Khởi chạy hệ thống bằng tệp gốc (sẽ khởi động mọi module an toàn):
 ```bash
 python launcher.py
 ```
@@ -131,82 +137,38 @@ python launcher.py
 
 ---
 
-## 🛠️ Hướng Dẫn Vận Hành Hệ Thống
-
-Giao diện (UI) được chia làm 3 phân hệ độc lập:
-
-1. ⚙️ **Tab Cấu Hình Hệ Thống:**
-   - **Đồng Bộ Thông Minh:** Nút bấm quan trọng nhất. Mỗi khi bạn thêm file PDF mới, hãy bấm nút này. Hệ thống sẽ tự động quét và chỉ mã hóa những file thay đổi.
-   - **Tính năng AI:** Cho phép bật/tắt `Query Rewriting`, `BGE Reranker`, và `Self-Correction` tùy vào nhu cầu khắt khe hay cần tốc độ phản hồi nhanh.
-
-2. 📊 **Tab Dashboard Tổng Quan:**
-   - Cung cấp cái nhìn toàn cảnh về tình trạng hoạt động của Vector DB.
-   - Hiển thị chi tiết số lượng Chunk (đoạn dữ liệu) và danh sách các file PDF đã được đưa vào bộ nhớ.
-
-3. 💬 **Tab Chatbot Tư Vấn:**
-   - Nhập truy vấn để Bot tư vấn.
-   - **Social / Help:** Bạn có thể thử hỏi *"Bạn giúp gì được tôi?"*, *"Hybrid Search là gì?"*. Bot sẽ trả lời như một IT Support mà không gọi tới RAG.
-   - **Tài chính:** Hãy hỏi *"Cấu trúc SMC tuần này cho giá Vàng ra sao?"*, bot sẽ tra xuất từ PDF và đưa ra luồng suy luận logic chuyên sâu.
-
----
-
 ## 📂 Cấu Trúc Mã Nguồn (Directory Structure)
-
-Dự án tuân thủ nghiêm ngặt nguyên tắc SOLID và Clean Code:
 
 ```text
 Trading_Advisory_Chatbot/
-├── data/                       # Dữ liệu cục bộ
-│   ├── raw_pdfs/               # Chứa các file PDF kiến thức
-│   ├── qdrant_db/              # CSDL Vector (Tự sinh)
-│   └── ingestion_state.json    # SHA-256 hash file để theo dõi sự thay đổi
-├── logs/                       # Tệp tin logs quá trình chạy
-├── src/                        # Mã nguồn cốt lõi
+├── data/
+│   ├── chat_history.json       # Trí nhớ hội thoại vĩnh viễn (Mới)
+│   ├── raw_pdfs/               
+│   ├── qdrant_db/              
+│   └── ingestion_state.json    
+├── src/                        
 │   ├── core/
-│   │   └── database.py         # Kết nối Qdrant Database (Singleton)
+│   │   ├── database.py         
+│   │   └── llm_client.py       # Dynamic LLM Router & Stream Filter (Mới)
 │   ├── pipelines/
-│   │   └── intent_router.py    # LLM Gatekeeper & Phân loại Intent v3
+│   │   └── intent_router.py    
 │   ├── services/
-│   │   ├── ingestion_tracker.py# Quản lý Idempotency, theo dõi trạng thái PDF
-│   │   ├── parser_service.py   # Bóc tách & phân mảnh (Parent-Child Chunking)
-│   │   ├── vector_service.py   # Xử lý Vector, Hybrid Search & Reranking
-│   │   └── llm_service.py      # Tương tác Ollama API & Multi-Hop Generation
-│   ├── ui/                     # Isolated UI Components
-│   │   ├── tab_chatbot.py
-│   │   ├── tab_dashboard.py
-│   │   └── tab_settings.py
-│   ├── config.py               # Trung tâm cấu hình thông số kỹ thuật (Path resolve)
-│   ├── orchestrator.py         # Bức tường Facade điều phối các dịch vụ
-│   └── app.py                  # Streamlit Main Shell
-├── launcher.py                 # File khởi động chính, pre-load PyTorch/Arrow
-├── test_architecture.py        # Tệp kiểm thử Smoke Test cho kiến trúc
-└── requirements.txt            # Thư viện yêu cầu
+│   │   ├── history_service.py  # Quản lý Session State tập trung (Mới)
+│   │   ├── vector_service.py   # Cohere Embed & Reranker Cloud (Mới)
+│   │   └── llm_service.py      # LLM Agent
+│   ├── ui/                     
+│   ├── config.py               
+│   ├── orchestrator.py         
+│   └── app.py                  
+├── .env.example                
+├── launcher.py                 
+└── requirements.txt            
 ```
 
 ---
 
-## 🛡️ Gỡ Lỗi & Xử Lý Sự Cố (Troubleshooting)
-
-| Vấn đề | Biểu hiện / Lỗi Log | Cách xử lý |
-| :--- | :--- | :--- |
-| **Lỗi kết nối Ollama** | `ConnectionRefusedError: ...` | Ollama chưa được bật. Hãy mở terminal khác gõ `ollama serve`. |
-| **Thiếu mô hình AI** | `model 'qwen2.5:7b' not found` | Gõ lệnh: `ollama pull qwen2.5:7b` để tải. |
-| **Qdrant DB bị khóa** | `AlreadyLocked: Database is locked` | Do bạn mở quá nhiều tab Streamlit cùng lúc. Đóng tab thừa và khởi động lại. |
-| **Lỗi Import Python** | `ModuleNotFoundError: ...` | Không chạy trực tiếp file trong `src/`. Hãy luôn gọi từ gốc dự án: `python launcher.py`. |
-
----
-
 ## 👨‍💻 Đóng Góp (Contributing)
-
-Chúng tôi hoan nghênh các đóng góp từ cộng đồng (Pull Requests, Issues). Nếu bạn muốn thêm một chiến lược giao dịch mới (VD: Wyckoff, Elliott Waves), xin vui lòng:
-1. Fork dự án.
-2. Tạo nhánh tính năng (`git checkout -b feature/AmazingFeature`).
-3. Commit các thay đổi (`git commit -m 'Thêm tính năng AmazingFeature'`).
-4. Push lên nhánh (`git push origin feature/AmazingFeature`).
-5. Tạo một Pull Request.
-
----
+Hoan nghênh các đóng góp từ cộng đồng! Hãy Fork, tạo nhánh `feature/`, Commit và gửi Pull Request.
 
 ## 📜 Giấy Phép (License)
-
-Dự án được phân phối dưới giấy phép **MIT**. Xem tệp `LICENSE` để biết thêm thông tin chi tiết. Hoàn toàn miễn phí cho sử dụng cá nhân và thương mại.
+Dự án được phân phối dưới giấy phép **MIT**. Hoàn toàn miễn phí cho sử dụng cá nhân và thương mại.

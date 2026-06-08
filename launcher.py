@@ -57,12 +57,7 @@ try:
 except ImportError:
     print("   ⚠️ torch chưa cài")
 
-# 3. Sentence Transformers (kéo theo datasets, transformers, tokenizers)
-try:
-    from sentence_transformers import SentenceTransformer
-    print("   ✅ sentence_transformers")
-except ImportError:
-    print("   ⚠️ sentence_transformers chưa cài")
+# 3. Đã gỡ bỏ Sentence Transformers (Chuyển sang Cohere Cloud)
 
 # 4. Các thư viện native khác
 for lib_name in ["sklearn", "pandas", "numpy"]:

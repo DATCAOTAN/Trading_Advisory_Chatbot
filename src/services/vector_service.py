@@ -37,157 +37,88 @@ class VectorService:
     """
 
     DENSE_VECTOR_NAME  = "dense"
-    SPARSE_VECTOR_NAME = "sparse"
 
     def __init__(self):
         db = QdrantDatabaseProvider()
         self.client      = db.qdrant_client
-        self.embed_model = db.embedding_model   # SentenceTransformer — luôn OK, nạp sẵn
-        self._db         = db                   # Giữ ref để lazy-get BGEM3/Reranker sau
 
-        # Warm-up phase: Tải TẤT CẢ mô hình lên RAM/VRAM NGAY LẬP TỨC theo thiết kế Singleton.
-        print("🔥 [VectorService] WARM-UP Phase: Đang nạp tất cả mô hình AI...")
-        self._bgem3 = db.bgem3_model
-        self._hybrid_enabled = (self._bgem3 is not None)
-        self._reranker = db.reranker_model
-        self._bgem3_checked = True
-        print("✅ [VectorService] Hoàn tất nạp mô hình vào RAM/VRAM.")
+        # Khởi tạo Cohere Client cho Embedding và Reranker
+        import cohere
+        import os
+        cohere_api_key = Config.COHERE_API_KEY
+        if not cohere_api_key:
+            raise ValueError("COHERE_API_KEY chưa được cấu hình.")
+        self.cohere_client = cohere.ClientV2(cohere_api_key)
 
+        print("🔥 [VectorService] WARM-UP Phase: Khởi tạo kết nối Qdrant & Cohere Cloud...")
         self._init_collection()
-
-    # =========================================================================
-    # LAZY LOADERS
-    # =========================================================================
-    def _ensure_bgem3(self):
-        """Đã load ở init. Hàm giữ nguyên để backward compat."""
-        pass
-
-    def _ensure_reranker(self):
-        """Đã load ở init. Hàm giữ nguyên để backward compat."""
-        pass
 
     # =========================================================================
     # KHỞI TẠO COLLECTION
     # =========================================================================
-    def _get_schema_type(self) -> str:
-        """Xác định schema cần dùng: 'hybrid' hoặc 'dense'."""
-        self._ensure_bgem3()
-        return "hybrid" if self._hybrid_enabled else "dense"
-
     def _init_collection(self):
-        """Tạo collection Qdrant nếu chưa tồn tại."""
+        """Tạo collection Qdrant (Dense-only) nếu chưa tồn tại."""
         existing = [c.name for c in self.client.get_collections().collections]
         if Config.VECTOR_COLLECTION_NAME not in existing:
             print(f"📦 [Qdrant] Tạo collection: {Config.VECTOR_COLLECTION_NAME}")
-            schema = self._get_schema_type()
-
-            if schema == "hybrid":
-                self.client.create_collection(
-                    collection_name=Config.VECTOR_COLLECTION_NAME,
-                    vectors_config={
-                        self.DENSE_VECTOR_NAME: VectorParams(
-                            size=1024, distance=Distance.COSINE
-                        )
-                    },
-                    sparse_vectors_config={
-                        self.SPARSE_VECTOR_NAME: SparseVectorParams(
-                            index=SparseIndexParams(on_disk=False)
-                        )
-                    }
-                )
-                print("   ↳ Schema: Hybrid (Dense + Sparse)")
-            else:
-                self.client.create_collection(
-                    collection_name=Config.VECTOR_COLLECTION_NAME,
-                    vectors_config={
-                        self.DENSE_VECTOR_NAME: VectorParams(
-                            size=1024, distance=Distance.COSINE
-                        )
-                    }
-                )
-                print("   ↳ Schema: Dense-only")
+            self.client.create_collection(
+                collection_name=Config.VECTOR_COLLECTION_NAME,
+                vectors_config={
+                    self.DENSE_VECTOR_NAME: VectorParams(
+                        size=1024, distance=Distance.COSINE
+                    )
+                }
+            )
+            print("   ↳ Schema: Dense-only (Cohere 1024d)")
             print(f"✅ [Qdrant] Collection '{Config.VECTOR_COLLECTION_NAME}' đã sẵn sàng.")
         else:
             print(f"📦 [Qdrant] Collection '{Config.VECTOR_COLLECTION_NAME}' đã tồn tại.")
 
     def _reset_collection(self):
-        """Xóa và tạo lại collection khi re-index toàn bộ."""
-        existing = [c.name for c in self.client.get_collections().collections]
-        if Config.VECTOR_COLLECTION_NAME in existing:
+        """Xóa và khởi tạo lại collection Qdrant để quét sạch toàn bộ point rác cũ."""
+        if self.client.collection_exists(collection_name=Config.VECTOR_COLLECTION_NAME):
             print(f"🗑️ [Qdrant] Xóa collection cũ: {Config.VECTOR_COLLECTION_NAME}")
-            self.client.delete_collection(Config.VECTOR_COLLECTION_NAME)
-        # Reset lazy state để _init_collection dùng đúng schema
-        self._bgem3_checked  = False
-        self._bgem3          = None
-        self._hybrid_enabled = False
-        self._init_collection()
+            self.client.delete_collection(collection_name=Config.VECTOR_COLLECTION_NAME)
+            
+        self.client.create_collection(
+            collection_name=Config.VECTOR_COLLECTION_NAME,
+            vectors_config={
+                self.DENSE_VECTOR_NAME: VectorParams(
+                    size=1024, distance=Distance.COSINE
+                )
+            }
+        )
+        print("✅ [Qdrant] Đã khởi tạo lại Collection mới (1024d).")
 
     # =========================================================================
     # ENCODE
     # =========================================================================
-    def _encode_dense(self, text: str) -> List[float]:
-        """Dense vector 1024d qua SentenceTransformer — luôn hoạt động."""
-        return self.embed_model.encode(text, normalize_embeddings=True).tolist()
-
-    def _encode_hybrid(self, text: str) -> Tuple[List[float], Optional[Dict]]:
+    def _encode_dense(self, texts: List[str], input_type: str = "search_document") -> List[List[float]]:
         """
-        Dense + Sparse trong 1 forward pass nếu BGEM3FlagModel có sẵn.
-        Trả về (dense_vec, sparse_dict) hoặc (dense_vec, None).
+        Dense vector 1024d qua Cohere API Cloud.
+        input_type: "search_document" khi nạp PDF, "search_query" khi tìm kiếm.
         """
-        self._ensure_bgem3()
-        if self._bgem3 is not None:
+        import time
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                out = self._bgem3.encode(
-                    [text],
-                    return_dense=True,
-                    return_sparse=True,
-                    return_colbert_vecs=False,
-                    batch_size=1,
+                response = self.cohere_client.embed(
+                    texts=texts,
+                    model="embed-multilingual-v3.0",
+                    input_type=input_type,
+                    embedding_types=["float"]
                 )
-                dense      = out["dense_vecs"][0].tolist()
-                sparse_raw = out.get("lexical_weights", [{}])[0]
-                indices    = [int(k) for k in sparse_raw.keys()]
-                values     = [float(v) for v in sparse_raw.values()]
-                return dense, {"indices": indices, "values": values}
+                return response.embeddings.float
             except Exception as e:
-                print(f"⚠️ BGEM3 hybrid encode lỗi: {e} → fallback dense-only")
-
-        # Fallback: SentenceTransformer dense-only
-        return self._encode_dense(text), None
-
-    # =========================================================================
-    # MANUAL RRF FUSION
-    # =========================================================================
-    @staticmethod
-    def _rrf_merge(dense_hits, sparse_hits, k: int = 60) -> List[Any]:
-        """
-        Reciprocal Rank Fusion — Kết hợp dense + sparse search results.
-        rrf_score(d) = Σ 1/(k + rank)   (k=60, chuẩn paper RRF 2009)
-        """
-        scores:   Dict[str, float] = {}
-        payloads: Dict[str, Any]   = {}
-
-        for rank, hit in enumerate(dense_hits):
-            hid          = str(hit.id)
-            scores[hid]  = scores.get(hid, 0.0) + 1.0 / (k + rank + 1)
-            payloads[hid] = hit.payload
-
-        for rank, hit in enumerate(sparse_hits):
-            hid          = str(hit.id)
-            scores[hid]  = scores.get(hid, 0.0) + 1.0 / (k + rank + 1)
-            if hid not in payloads:
-                payloads[hid] = hit.payload
-
-        sorted_ids = sorted(scores, key=lambda x: scores[x], reverse=True)
-
-        class _Hit:
-            __slots__ = ("id", "score", "payload")
-            def __init__(self_, hid, sc, pl):
-                self_.id      = hid
-                self_.score   = sc
-                self_.payload = pl
-
-        return [_Hit(hid, scores[hid], payloads[hid]) for hid in sorted_ids]
+                error_str = str(e).lower()
+                if "429" in error_str or "rate limit" in error_str:
+                    wait_time = 60  # Trial API limit is strictly per minute
+                    print(f"⚠️ [Embedding] Cohere Rate Limit (429). Đang chờ {wait_time}s rồi thử lại (Lần {attempt+1}/{max_retries})...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"❌ [Embedding] Lỗi gọi Cohere API: {e}")
+                    raise
+        raise RuntimeError("❌ [Embedding] Đã thử lại nhiều lần nhưng vẫn bị Rate Limit từ Cohere.")
 
     # =========================================================================
     # SMART INCREMENTAL SYNC (thay thế index_documents cũ)
@@ -210,7 +141,6 @@ class VectorService:
         """
         from src.services.ingestion_tracker import IngestionTracker, IngestionReport
 
-        self._ensure_bgem3()
         tracker = IngestionTracker()
 
         # Force Re-index: xóa sạch state + collection
@@ -281,32 +211,24 @@ class VectorService:
             return 0
 
         parent_map = {p["parent_id"]: p for p in parents}
-        batch_size = 16
+        batch_size = 8  # Giảm batch size xuống 8 để tránh bú quá nhanh token của bản Trial Cohere
         total = 0
 
         for batch_start in range(0, len(children), batch_size):
             batch  = children[batch_start: batch_start + batch_size]
             points = []
 
-            for child in batch:
+            # Gom text để gọi API 1 lần (Batching)
+            batch_texts = [child["text"] for child in batch]
+            dense_vectors = self._encode_dense(batch_texts, input_type="search_document")
+
+            for i, child in enumerate(batch):
                 parent_id  = child["parent_id"]
                 parent     = parent_map.get(parent_id, {})
                 child_text = child["text"]
+                dense_vec  = dense_vectors[i]
 
-                if self._hybrid_enabled:
-                    dense_vec, sparse_dict = self._encode_hybrid(child_text)
-                    if sparse_dict and sparse_dict["indices"]:
-                        vectors = {
-                            self.DENSE_VECTOR_NAME: dense_vec,
-                            self.SPARSE_VECTOR_NAME: SparseVector(
-                                indices=sparse_dict["indices"],
-                                values=sparse_dict["values"],
-                            )
-                        }
-                    else:
-                        vectors = {self.DENSE_VECTOR_NAME: dense_vec}
-                else:
-                    vectors = {self.DENSE_VECTOR_NAME: self._encode_dense(child_text)}
+                vectors = {self.DENSE_VECTOR_NAME: dense_vec}
 
                 points.append(PointStruct(
                     id=str(uuid.uuid4()),
@@ -374,27 +296,24 @@ class VectorService:
         enable_reranker: bool = None,
     ) -> Tuple[str, List[Dict]]:
         """
-        Pipeline truy vấn đầy đủ:
-        1. Encode query → Dense (+ Sparse nếu BGEM3 có sẵn)
-        2. Dense search + (Sparse search) → Manual RRF merge
+        Pipeline truy vấn đầy đủ (Pure Dense Cloud):
+        1. Encode query → Dense Vector qua Cohere API (search_query)
+        2. Dense search trên Qdrant
         3. De-duplicate theo parent_id → lấy parent text đầy đủ
-        4. Lazy-load Reranker → chấm điểm lại top_n tốt nhất
+        4. Lazy-load Reranker → chấm điểm lại top_n tốt nhất bằng Cohere Reranker
         5. Format context string + sources list
         """
         if top_k          is None: top_k          = Config.RETRIEVAL_TOP_K
         if top_n          is None: top_n          = Config.RERANK_TOP_N
         if enable_reranker is None: enable_reranker = Config.ENABLE_RERANKER
 
-        # Lazy load reranker lần đầu gọi
-        if enable_reranker:
-            self._ensure_reranker()
-
         # ── Bước 1: Encode ─────────────────────────────────────────────────
-        dense_vec, sparse_dict = self._encode_hybrid(query)
+        dense_vecs = self._encode_dense([query], input_type="search_query")
+        dense_vec = dense_vecs[0]
 
         # ── Bước 2: Dense Search ───────────────────────────────────────────
         try:
-            dense_results = self.client.search(
+            merged = self.client.search(
                 collection_name=Config.VECTOR_COLLECTION_NAME,
                 query_vector=(self.DENSE_VECTOR_NAME, dense_vec),
                 limit=top_k,
@@ -403,34 +322,6 @@ class VectorService:
         except Exception as e:
             print(f"⚠️ [VectorService] Dense search lỗi: {e}")
             return "Kho tri thức chưa có dữ liệu. Hãy bấm 'Cập Nhật Kho Tri Thức' trước.", []
-
-        # ── Bước 3: Sparse Search (nếu có) ────────────────────────────────
-        sparse_results = []
-        if (self._hybrid_enabled
-                and sparse_dict
-                and sparse_dict.get("indices")):
-            try:
-                sparse_results = self.client.search(
-                    collection_name=Config.VECTOR_COLLECTION_NAME,
-                    query_vector=NamedSparseVector(
-                        name=self.SPARSE_VECTOR_NAME,
-                        vector=SparseVector(
-                            indices=sparse_dict["indices"],
-                            values=sparse_dict["values"],
-                        )
-                    ),
-                    limit=top_k,
-                    with_payload=True,
-                )
-                print(f"   ↳ Sparse: {len(sparse_results)} hits | Dense: {len(dense_results)} hits")
-            except Exception as e:
-                print(f"⚠️ [VectorService] Sparse search không khả dụng: {e}")
-
-        # ── Bước 4: Manual RRF Merge ───────────────────────────────────────
-        if sparse_results:
-            merged = self._rrf_merge(dense_results, sparse_results)
-        else:
-            merged = dense_results
 
         if not merged:
             return "Không tìm thấy dữ liệu liên quan trong kho tri thức.", []
@@ -450,19 +341,39 @@ class VectorService:
                     "score":       getattr(hit, "score", 0.0),
                 })
 
-        # ── Bước 6: BGE Reranker (lazy-loaded) ────────────────────────────
-        if enable_reranker and self._reranker is not None and len(candidates) > top_n:
-            pairs = [[query, p["parent_text"]] for p in candidates]
+        # ── Bước 6: Cohere API Reranker ────────────────────────────
+        if enable_reranker and len(candidates) > top_n:
             try:
-                scores = self._reranker.compute_score(pairs, normalize=True)
-                if not isinstance(scores, list):
-                    scores = list(scores)
-                for i, sc in enumerate(scores):
-                    candidates[i]["rerank_score"] = float(sc)
-                candidates.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
-                print(f"   ↳ Reranked {len(candidates)} → lấy top {top_n}")
+                import cohere
+                cohere_api_key = Config.COHERE_API_KEY
+                if not cohere_api_key:
+                    raise ValueError("COHERE_API_KEY chưa được cấu hình.")
+                cohere_client = cohere.ClientV2(cohere_api_key)
+                
+                print("🔍 [Reranker] Đang gửi request Rerank lên Cohere API Cloud...")
+                documents_text = [p["parent_text"] for p in candidates]
+                
+                response = cohere_client.rerank(
+                    model="rerank-multilingual-v3.0",
+                    query=query,
+                    documents=documents_text,
+                    top_n=top_n
+                )
+                
+                reranked_candidates = []
+                for hit in response.results:
+                    idx = hit.index
+                    doc = candidates[idx]
+                    doc["rerank_score"] = hit.relevance_score
+                    reranked_candidates.append(doc)
+                    
+                candidates = reranked_candidates
+                print(f"✅ [Reranker] Cohere Rerank hoàn tất xé gió -> Đã lấy Top {top_n} tài liệu tối ưu nhất.")
             except Exception as e:
-                print(f"⚠️ [Reranker] Lỗi: {e}")
+                print(f"⚠️ [Reranker] Lỗi Cohere API: {e} -> Fallback dùng điểm gốc")
+                candidates = candidates[:top_n]
+        elif len(candidates) > top_n:
+            candidates = candidates[:top_n]
 
         # ── Bước 7: Format output ──────────────────────────────────────────
         final   = candidates[:top_n]

@@ -125,7 +125,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**📡 Trạng Thái**")
     col1, col2 = st.columns(2)
-    col1.metric("LLM", "Qwen 2.5")
+    col1.metric("LLM", Config.OPENROUTER_MODEL_NAME if Config.LLM_PROVIDER=="openrouter" else Config.LLM_MODEL_NAME)
     col2.metric("DB", "Qdrant")
     st.caption(f"💬 Chat: {len(st.session_state.messages)} lượt")
     
@@ -144,7 +144,7 @@ with st.sidebar:
 st.markdown("""
 <div class="main-header">
     <h1>📈 AI Cố Vấn Tài Chính Chiến Lược XAUUSD</h1>
-    <p>Qwen 2.5 7B · Hybrid Search · BGE-Reranker · Parent-Child RAG · Multi-Hop Reasoning</p>
+    <p>Cloud LLM · Hybrid Search · Cohere Reranker · Parent-Child RAG · Multi-Hop Reasoning</p>
 </div>
 """, unsafe_allow_html=True)
 

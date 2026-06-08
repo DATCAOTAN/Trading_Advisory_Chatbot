@@ -11,6 +11,25 @@ import streamlit as st
 from src.config import Config
 
 
+import json
+import streamlit as st
+from src.config import Config
+
+
+@st.cache_data(ttl=5)
+def load_tracker_state():
+    """Đọc Ingestion State từ ổ cứng và cache lại để tránh nghẽn luồng Stream."""
+    if Config.INGESTION_STATE_FILE.exists():
+        try:
+            with open(Config.INGESTION_STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                files = data.get("files", {})
+                print(f"📋 [Tracker Cache] Đã load state: {len(files)} file vào RAM.")
+                return files
+        except (json.JSONDecodeError, IOError):
+            return {}
+    return {}
+
 # =============================================================================
 # PUBLIC API — Được gọi từ app.py Main Shell
 # =============================================================================
@@ -28,9 +47,11 @@ def render(orchestrator):
     st.markdown("#### 🤖 Trạng Thái Hệ Thống AI")
     col1, col2, col3, col4 = st.columns(4)
 
-    col1.metric("🧠 LLM", "Qwen 2.5 7B", help="Mô hình ngôn ngữ chính")
-    col2.metric("📐 Embedding", "BGE-M3", help="Mô hình nhúng vector 1024d")
-    col3.metric("🎯 Reranker", "BGE-v2-M3", help="Chấm điểm lại top chunks")
+    embedding_model_name = "Cohere Embed (v3.0)" if Config.COHERE_API_KEY else "BGE-M3 (Local)"
+
+    col1.metric("🧠 LLM", Config.OPENROUTER_MODEL_NAME if Config.LLM_PROVIDER=="openrouter" else Config.LLM_MODEL_NAME, help="Mô hình ngôn ngữ chính")
+    col2.metric("📐 Embedding", embedding_model_name, help="Mô hình nhúng vector 1024d")
+    col3.metric("🎯 Reranker", "Cohere API" if Config.ENABLE_RERANKER else "Tắt", help="Chấm điểm lại top chunks")
     col4.metric("💾 Vector DB", "Qdrant Local", help="Cơ sở dữ liệu vector")
 
     st.markdown("---")
@@ -44,13 +65,13 @@ def render(orchestrator):
         collection_names = [c.name for c in collections]
 
         if Config.VECTOR_COLLECTION_NAME in collection_names:
-            info = client.get_collection(Config.VECTOR_COLLECTION_NAME)
-            points_count = info.points_count
-            vectors_count = info.vectors_count if hasattr(info, 'vectors_count') else points_count
+            # Lấy state từ hàm Cache thay vì gọi IngestionTracker trực tiếp
+            state = load_tracker_state()
+            real_points_count = sum(info.get("chunk_count", 0) for info in state.values())
 
             col_a, col_b, col_c = st.columns(3)
             col_a.metric("📦 Collection", Config.VECTOR_COLLECTION_NAME)
-            col_b.metric("🔢 Tổng Chunks", f"{points_count:,}")
+            col_b.metric("🔢 Tổng Chunks", f"{real_points_count:,}")
             col_c.metric("📏 Vector Dim", "1024d")
 
             # Hiển thị trạng thái ingestion
@@ -102,9 +123,7 @@ def render(orchestrator):
 def _render_ingestion_state():
     """Hiển thị trạng thái file đã index từ ingestion_state.json."""
     try:
-        from src.services.ingestion_tracker import IngestionTracker
-        tracker = IngestionTracker()
-        state = tracker._state.get("files", {})
+        state = load_tracker_state()
 
         if state:
             with st.expander(f"📋 Chi tiết file đã index ({len(state)} file)"):

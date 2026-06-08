@@ -2,18 +2,18 @@
 LLM Service — Nâng cấp toàn diện với:
 1. Streaming response (stream=True → generator)
 2. Query Rewriting: mở rộng câu hỏi tiếng lóng → chuẩn tài chính
-3. Multi-Hop Generation: ép Qwen suy luận theo chuỗi logic tài chính
+3. Multi-Hop Generation: ép LLM suy luận theo chuỗi logic tài chính
 4. Self-Correction: vòng kiểm tra hallucination (tùy chọn)
 """
 
 from typing import Iterator, List, Dict, Optional
-import ollama
 from src.config import Config
+from src.core.llm_client import LLMClient
 
 
 class LLMService:
     """
-    Tầng giao tiếp với Ollama Qwen 2.5 7B.
+    Tầng giao tiếp với Cloud LLM (OpenRouter) và Local Fallback.
     Tất cả response đều hỗ trợ streaming để hiển thị chữ chạy từng token trên UI.
     """
 
@@ -52,7 +52,7 @@ class LLMService:
     )
 
     def __init__(self):
-        self.model = Config.LLM_MODEL_NAME
+        self.llm_client = LLMClient()
 
     def _call(
         self,
@@ -60,12 +60,11 @@ class LLMService:
         stream: bool = False,
         temperature: float = 0.2,
     ):
-        """Gọi Ollama API, hỗ trợ cả stream và non-stream."""
-        return ollama.chat(
-            model=self.model,
+        """Gọi LLM Router (OpenRouter/Ollama) hỗ trợ cả stream và non-stream."""
+        return self.llm_client.chat(
             messages=messages,
             stream=stream,
-            options={"temperature": temperature},
+            temperature=temperature,
         )
 
     # =========================================================================
@@ -81,6 +80,8 @@ class LLMService:
         """
         if not Config.ENABLE_QUERY_REWRITING:
             return query
+            
+        print(f"\n✏️ [QueryRewrite] Đầu vào gốc nhận được: '{query}'")
 
         history_summary = ""
         if chat_history:
@@ -97,36 +98,23 @@ class LLMService:
             {
                 "role": "system",
                 "content": (
-                    "Bạn là chuyên gia tài chính. Nhiệm vụ: Viết lại câu hỏi của Trader "
-                    "thành một câu truy vấn TÌM KIẾM TRONG VĂN BẢN chuẩn, đầy đủ thuật ngữ tài chính.\n\n"
+                    "Bạn là một Kỹ sư Cấu trúc Dữ liệu chuyên trách tối ưu hóa câu lệnh tìm kiếm (Query Expansion Expert) "
+                    "cho Vector Database (Qdrant) trong hệ thống RAG tài chính chuyên sâu về Vàng (XAUUSD) và Forex.\n"
+                    "Nhiệm vụ của bạn: Đọc câu hỏi hoặc câu thoại của người dùng, phân tích ý định ngầm (Intent) của họ. "
+                    "Sau đó, hãy tạo ra một chuỗi các từ khóa mở rộng mang tính chất định hướng tri thức (Semantic Search Terms) "
+                    "để hệ thống đi quét các tài liệu kỹ thuật liên quan.\n\n"
 
-                    "GUARDRAIL BẮT BUỘC:\n"
-                    "- 1. CHỈ được mở rộng ngữ nghĩa khi câu hỏi GỐC ĐÃ CHỨA thuật ngữ chuyên ngành "
-                    "(tên tài sản, chỉ báo kỹ thuật, sự kiện kinh tế...).\n"
-                    "- 2. Giữ vững tính chính xác về mặt chính tả và thuật ngữ tài chính gốc của người dùng. "
-                    "(Ví dụ: \"Lạm phát\" KHÔNG ĐƯỢC PHÉP biến đổi thành cụm từ sai lỗi bộ gõ như \"làm phát hành\").\n"
-                    "- 3. TÂM LÝ ĐÍNH CHÍNH (QUAN TRỌNG): Nếu câu hỏi mang tính chất đính chính, phủ định, hoặc thu hẹp phạm vi "
-                    "(vd: 'tôi bảo là... chứ không phải...', 'chỉ phân tích... thôi'), "
-                    "BẮT BUỘC BỎ QUA các vế bị phủ định. CHỈ bóc tách và tập trung vào TỪ KHÓA CỐT LÕI mà người dùng muốn nhấn mạnh.\n"
-                    "- 4. Nếu câu hỏi đã quá rõ ràng, ưu tiên GIỮ NGUYÊN cấu trúc gốc.\n"
-                    "- 5. TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ Ý BỊA THÊM từ khóa tài chính nếu câu gốc là câu mở/xã giao.\n"
-                    "- 6. KIỂM SOÁT BỐI CẢNH (CHỐNG ÁM ẢNH): Khi dùng lịch sử chat để điền khuyết cho câu hỏi rút gọn, CHỈ kế thừa TÊN TÀI SẢN (XAUUSD, Vàng, DXY). "
-                    "TUYỆT ĐỐI KHÔNG bê nguyên chủ đề cũ (như lạm phát, lãi suất) sang câu hỏi mới nếu câu hỏi mới đã chuyển sang mốc thời gian hoặc chủ đề khác.\n\n"
+                    "HƯỚNG DẪN TƯ DUY EXPANSION:\n"
+                    "- Nếu người dùng hỏi chung chung về thị trường, hãy tự động bổ sung các cụm từ khóa nền tảng: "
+                    "'Cấu trúc thị trường (Market Structure), Mô hình nến, Xu hướng giá vĩ mô, Quản lý vốn, Tâm lý giao dịch Forex, Phân tích kỹ thuật XAUUSD'.\n"
+                    "- Nếu người dùng hỏi về chiến lược cụ thể, hãy bổ sung các từ khóa chuyên sâu: "
+                    "'Phương pháp SMC (Smart Money Concept), Vùng thanh khoản (Liquidity Pool), Khối lệnh (Order Block), "
+                    "Vùng mất cân bằng cung cầu (Fair Value Gap - FVG), Quét thanh khoản (Liquidity Sweep)'.\n\n"
 
-                    "VÍ DỤ ĐÚNG:\n"
-                    '- "vàng lên hay xuống?" → "Xu hướng giá XAUUSD hiện tại?" (✅ gốc đã có "vàng")\n'
-                    '- [Lịch sử: lạm phát tác động vàng?] "cuối năm 2026 đi về đâu" → "Dự báo xu hướng giá và mốc kỹ thuật của Vàng XAUUSD vào cuối năm 2026" (✅ Chỉ kế thừa XAUUSD, vứt bỏ "lạm phát")\n'
-                    '- "tôi bảo là lạm phát ảnh hưởng chứ có phải các yếu tố khác đâu" → "Tác động chuyên sâu của lạm phát đến giá vàng XAUUSD?" (✅ Lọc bỏ vế rác, tập trung "lạm phát")\n'
-                    '- "chỉ phân tích SMC thôi, bỏ qua vĩ mô" → "Chiến lược giao dịch XAUUSD theo phương pháp SMC (Smart Money Concepts)" (✅ Thu hẹp đúng yêu cầu)\n'
-                    '- "Fed tăng lãi suất thì sao" → "Tác động của việc Fed tăng lãi suất đến giá vàng XAUUSD?" (✅ gốc đã có "Fed", "lãi suất")\n\n"
-
-                    "VÍ DỤ SAI (CẤM LÀM):\n"
-                    '- [Lịch sử: lạm phát tác động vàng?] "cuối năm 2026 đi về đâu" → "Lạm phát tác động đến vàng cuối năm 2026?" (❌ Ám ảnh bối cảnh cũ)\n'
-                    '- "tôi bảo là lạm phát..." → "lạm phát và các yếu tố khác tác động đến vàng?" (❌ Đưa thêm "các yếu tố khác" đi ngược lại lệnh đính chính)\n'
-                    '- "Lạm phát" → "làm phát hành" (❌ Viết sai chính tả / bóp méo từ gốc)\n'
-                    '- "bạn giúp gì được?" → "xu hướng thị trường vàng gần đây?" (❌ BỊA thêm "thị trường vàng")\n\n'
-
-                    "Chỉ trả về câu truy vấn mới, KHÔNG giải thích."
+                    "QUY TẮC ĐẦU RA BẮT BUỘC:\n"
+                    "- KHÔNG giải thích dòng vo, KHÔNG chào hỏi, KHÔNG bọc thẻ mã code block (```).\n"
+                    "- Chỉ trả về DUY NHẤT chuỗi văn bản chứa các từ khóa ngữ nghĩa đã được mở rộng.\n"
+                    "- Chuỗi trả về bắt buộc phải có nghĩa, độ dài tối thiểu trên 10 ký tự, tuyệt đối không trả về ký tự đơn rác rưởi hoặc chỉ chứa dấu câu."
                 )
             },
             {
@@ -134,16 +122,51 @@ class LLMService:
                 "content": (
                     f"{history_summary}"
                     f"Câu hỏi gốc: \"{query}\"\n\n"
-                    "Hãy viết lại thành câu truy vấn chuẩn tài chính (1-2 câu, tiếng Việt):"
+                    "Tạo chuỗi từ khóa Semantic Search:"
                 )
             }
         ]
 
         try:
-            resp = self._call(messages, stream=False, temperature=0.1)
-            rewritten = resp["message"]["content"].strip().strip('"').strip("'")
-            print(f"✏️ [QueryRewrite] '{query}' → '{rewritten}'")
-            return rewritten if rewritten else query
+            # Thực hiện gọi đồng bộ (Sync) lên OpenRouter
+            response = self.llm_client.openrouter_client.chat.completions.create(
+                model=self.llm_client.openrouter_model,
+                messages=messages,
+                temperature=0.5,
+                stream=False
+            )
+            raw_rewritten = response.choices[0].message.content.strip()
+            rewritten = raw_rewritten.strip('"').strip("'")
+            
+            # --- VALIDATION CHECK (FALLBACK TO ORIGINAL QUERY) ---
+            # 1. Chống Rỗng & Ngắn
+            if len(rewritten) < 5 or not any(c.isalnum() for c in rewritten):
+                print(f"⚠️ [QueryRewrite] VALIDATION FAILED!")
+                print(f"   -> Câu hỏi gốc của User: '{query}'")
+                print(f"   -> Chuỗi LLM viết lại lỗi: '{rewritten}'")
+                print(f"   -> Quyết định: HỦY BỎ chuỗi lỗi, tự động bốc câu gốc chuyển sang Qdrant.")
+                return query
+                
+            # 2. Chống Mất Thực Thể (Entity Validation Guardrail)
+            query_lower = query.lower()
+            rewritten_lower = rewritten.lower()
+            core_entities = ["vàng", "gold", "xauusd", "dxy", "forex", "smc", "fvg", "lãi suất", "fed"]
+            
+            # Xác định các thực thể trọng tâm có trong câu hỏi gốc
+            found_entities = [ent for ent in core_entities if ent in query_lower]
+            if found_entities:
+                # Nếu câu rewrite KHÔNG bảo toàn được ít nhất một thực thể liên quan -> Hủy bỏ
+                # (Vì bộ não LLM gọt quá tay)
+                if not any(ent in rewritten_lower for ent in found_entities):
+                    print(f"⚠️ [QueryRewrite] VALIDATION FAILED! (Mất từ khóa {found_entities})")
+                    print(f"   -> Câu hỏi gốc của User: '{query}'")
+                    print(f"   -> Chuỗi LLM viết lại lỗi: '{rewritten}'")
+                    print(f"   -> Quyết định: HỦY BỎ chuỗi lỗi, tự động bốc câu gốc chuyển sang Qdrant.")
+                    return query
+
+            print(f"✏️ [QueryRewrite] Viết lại thành công: '{rewritten}'")
+            return rewritten
+
         except Exception as e:
             print(f"⚠️ [QueryRewrite] Lỗi: {e}")
             return query
@@ -194,11 +217,10 @@ class LLMService:
             if defense_preamble:
                 yield defense_preamble
             for chunk in stream:
-                token = chunk["message"]["content"]
-                if token:
-                    yield token
+                if chunk:
+                    yield chunk
         except Exception as e:
-            yield f"\n\n❌ Lỗi kết nối Ollama: {e}"
+            yield f"\n\n❌ Lỗi kết nối AI: {e}"
 
     # =========================================================================
     # 3. SELF-CORRECTION (NON-STREAMING — Vòng kiểm tra ẩn)
@@ -206,7 +228,7 @@ class LLMService:
     def self_correct(self, answer: str, context: str) -> str:
         """
         Vòng kiểm tra hallucination: Gửi câu trả lời + context gốc,
-        yêu cầu Qwen xác nhận hoặc hiệu chỉnh số liệu không có trong PDF.
+        yêu cầu LLM xác nhận hoặc hiệu chỉnh số liệu không có trong PDF.
 
         Chạy 1 lần non-stream sau khi đã có full answer.
         """

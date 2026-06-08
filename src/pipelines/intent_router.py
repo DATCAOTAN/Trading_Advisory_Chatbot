@@ -1,7 +1,7 @@
 """
 Intent Router v3 — LLM Gatekeeper + Few-Shot Prompting + Phản hồi GREETING linh hoạt.
 
-Sử dụng Qwen 2.5 7B (qua Ollama, temperature=0.0) để phân loại ý định
+Sử dụng LLM (qua OpenRouter/Ollama) để phân loại ý định
 người dùng thành 3 nhóm:
 
   GREETING      → Chào hỏi, tạm biệt, cảm ơn, chúc tụng  → Qwen trả lời xã giao linh hoạt
@@ -20,8 +20,8 @@ import re
 from enum import Enum
 from typing import Dict, Optional, Iterator
 
-import ollama
 from src.config import Config
+from src.core.llm_client import LLMClient
 
 
 # =============================================================================
@@ -91,52 +91,46 @@ VÍ DỤ ĐỂ HỌC (FEW-SHOT EXAMPLES):
 # =============================================================================
 _GREETING_RESPONDER_PROMPT = """\
 Bạn là AI Cố vấn Tài chính chuyên về thị trường Vàng (XAUUSD) và Forex.
+Bạn là một AI Cố vấn Tài chính chuyên về thị trường Vàng (XAUUSD) và Forex. 
 Người dùng vừa gửi một câu giao tiếp xã giao, hỏi về khả năng/phạm vi tư vấn, hoặc hỏi về cách sử dụng/tính năng kỹ thuật của hệ thống.
-
+Nhiệm vụ của bạn: Hãy trả lời câu chào của người dùng một cách thân thiện, ngắn gọn và chuyên nghiệp trong vòng 2-3 câu. Giới thiệu nhanh bạn có thể giúp họ phân tích kỹ thuật, SMC hoặc dữ liệu vĩ mô. 
+QUY TẮC CHÍ MẠNG: Không dài dòng, không bịa kiến thức khi chưa có tài liệu RAG, nhả chữ ngay lập tức.\
 NHIỆM VỤ: Đọc câu nói của người dùng và phản hồi một cách TỰ NHIÊN, LỊCH SỰ, CHUYÊN NGHIỆP.
-
 QUY TẮC:
 1. Nếu người dùng CHÀO HỎI → Chào lại và tự giới thiệu ngắn gọn.
 2. Nếu người dùng TẠM BIỆT → Chào tạm biệt, chúc giao dịch thuận lợi.
 3. Nếu người dùng CẢM ƠN → Đáp lại lịch sự.
 4. Nếu người dùng GỬI LỜI CHÚC → Đáp lại bằng lời chúc tương xứng.
-5. Nếu người dùng HỎI BẠN LÀ AI → Giới thiệu ngắn: AI Cố vấn Tài chính XAUUSD, nền Qwen 2.5 7B, kiến trúc RAG.
+5. Nếu người dùng HỎI BẠN LÀ AI → Giới thiệu ngắn: Bạn là AI Cố vấn Tài chính XAUUSD, được vận hành bởi mô hình {model_name} thông qua kiến trúc RAG.
 6. Nếu người dùng HỎI NĂNG LỰC / GIÚP GÌ → Liệt kê ngắn gọn phạm vi kiến thức bằng gạch đầu dòng.
 7. Nếu người dùng HỎI VỀ TÍNH NĂNG / CẤU HÌNH HỆ THỐNG → Giải thích kỹ thuật dễ hiểu dựa trên kiến thức sau:
-
    KIẾN THỨC VỀ CÁC TÍNH NĂNG HỆ THỐNG (dùng để trả lời khi user hỏi):
-
    • **Query Rewriting (Viết lại câu hỏi):**
      Tự động mở rộng câu hỏi ngắn/tiếng lóng của Trader thành câu truy vấn chuẩn tài chính.
      Ví dụ: "vàng lên hay xuống?" → "Xu hướng giá XAUUSD trong bối cảnh DXY và lãi suất Fed?"
      → BẬT khi hỏi nhanh bằng tiếng lóng. TẮT khi câu hỏi đã đầy đủ thuật ngữ chuyên ngành.
-
    • **Hybrid Search (Tìm kiếm lai):**
      Kết hợp Dense Vector (ngữ nghĩa) + Sparse Vector (từ khóa chính xác) để tìm tài liệu.
      → BẬT để tìm kiếm sâu hơn, đặc biệt với câu hỏi phức tạp có thuật ngữ chuyên ngành.
      → TẮT nếu muốn tiết kiệm thời gian xử lý cho câu hỏi đơn giản.
-
    • **BGE Reranker (Chấm điểm lại):**
      Sau khi tìm được top 10 đoạn tài liệu, Reranker chấm điểm lại để chọn 3 đoạn chính xác nhất.
      → BẬT khi cần câu trả lời chính xác cao (phân tích chiến lược, mốc giá cụ thể).
      → TẮT khi muốn phản hồi nhanh hơn (~1-2 giây), chấp nhận độ chính xác thấp hơn.
-
    • **Self-Correction (Tự kiểm tra):**
      Sau khi AI trả lời, hệ thống chạy thêm 1 vòng kiểm tra hallucination — so sánh câu trả lời
      với tài liệu gốc, đánh dấu cảnh báo nếu phát hiện số liệu bịa.
      → BẬT khi cần độ tin cậy tuyệt đối (báo cáo cho khách hàng, ra quyết định giao dịch).
      → TẮT cho chat thông thường vì chậm thêm ~30-50%.
-
    • **Tổng hợp — Khi nào bật tất cả?**
      Bật đầy đủ AI Pipeline (Query Rewrite + Hybrid Search + Reranker + Self-Correction) khi:
      cần phân tích chiến lược sâu, xác định mốc Entry/SL/TP, hoặc đưa ra quyết định giao dịch.
      Tắt bớt khi chỉ chat xã giao, hỏi khái niệm đơn giản, hoặc muốn tiết kiệm tài nguyên.
-
 PHONG CÁCH:
 - Tiếng Việt tự nhiên, thân thiện nhưng chuyên nghiệp.
 - Trả lời phù hợp với độ phức tạp của câu hỏi: xã giao → 2-3 câu, hướng dẫn kỹ thuật → chi tiết hơn.
 - KHÔNG rập khuôn, mỗi lần trả lời nên khác nhau một chút.
-- Có emoji phù hợp.
+- Có emoji phù hợp.\
 """
 
 
@@ -156,7 +150,7 @@ class IntentRouter:
     @staticmethod
     def classify(query: str, chat_history: list = None) -> IntentType:
         """
-        Gửi câu hỏi tới Qwen 2.5 (temperature=0.0) để phân loại ý định.
+        Gửi câu hỏi tới LLM Gatekeeper (temperature=0.0) để phân loại ý định.
 
         Args:
             query: Câu hỏi thô từ người dùng
@@ -177,15 +171,15 @@ class IntentRouter:
 
             prompt_content = f"{history_text}CÂU HỎI MỚI CỦA NGƯỜI DÙNG: {query}"
 
-            # ── Gọi Ollama với temperature=0.0 (logic cố định, không sáng tạo) ──
-            response = ollama.chat(
-                model=Config.LLM_MODEL_NAME,
+            # ── Gọi LLM Router (temperature=0.0) ──
+            client = LLMClient()
+            response = client.chat(
                 messages=[
                     {"role": "system", "content": _GATEKEEPER_SYSTEM_PROMPT},
                     {"role": "user",   "content": prompt_content},
                 ],
                 stream=False,
-                options={"temperature": 0.0},
+                temperature=0.0,
             )
 
             raw_output = response["message"]["content"].strip()
@@ -213,7 +207,7 @@ class IntentRouter:
             return intent
 
         except Exception as e:
-            print(f"❌ [Gatekeeper] Lỗi Ollama: {e} → fallback FINANCIAL_RAG")
+            print(f"❌ [Gatekeeper] Lỗi API: {e} → fallback FINANCIAL_RAG")
             return IntentType.FINANCIAL_RAG
 
     # =========================================================================
@@ -222,7 +216,7 @@ class IntentRouter:
     @staticmethod
     def get_greeting_response(query: str) -> Iterator[str]:
         """
-        Gọi Qwen 2.5 để sinh câu phản hồi xã giao TỰ NHIÊN dựa trên
+        Gọi LLM để sinh câu phản hồi xã giao TỰ NHIÊN dựa trên
         nội dung câu nói của người dùng (chào/biệt/cảm ơn/chúc).
 
         Không dùng if/elif rẽ nhánh thủ công — hoàn toàn do LLM quyết định
@@ -234,23 +228,32 @@ class IntentRouter:
         Yields:
             Từng token/chunk text để streaming lên Streamlit
         """
-        print(f"👋 [Greeting] Qwen sinh phản hồi cho: '{query}'")
+        print(f"👋 [Greeting] LLM sinh phản hồi cho: '{query}'")
 
         try:
-            stream = ollama.chat(
-                model=Config.LLM_MODEL_NAME,
+            # Xác định tên model đang chạy thực tế
+            if Config.LLM_PROVIDER == "openrouter":
+                active_model = Config.OPENROUTER_MODEL_NAME
+            elif Config.LLM_PROVIDER == "groq":
+                active_model = Config.GROQ_MODEL_NAME
+            else:
+                active_model = Config.LLM_MODEL_NAME
+
+            dynamic_prompt = _GREETING_RESPONDER_PROMPT.format(model_name=active_model)
+
+            client = LLMClient()
+            stream = client.chat(
                 messages=[
-                    {"role": "system", "content": _GREETING_RESPONDER_PROMPT},
+                    {"role": "system", "content": dynamic_prompt},
                     {"role": "user",   "content": query},
                 ],
                 stream=True,
-                options={"temperature": 0.5},  # Hơi sáng tạo để không rập khuôn
+                temperature=0.7,
             )
 
             for chunk in stream:
-                token = chunk["message"]["content"]
-                if token:
-                    yield token
+                if chunk:
+                    yield chunk
 
         except Exception as e:
             # Fallback tĩnh nếu Ollama lỗi
