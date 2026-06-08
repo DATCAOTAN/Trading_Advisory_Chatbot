@@ -56,8 +56,9 @@ class Config:
     # =========================================================================
     # 4. PIPELINE RETRIEVAL
     # =========================================================================
-    RETRIEVAL_TOP_K = 10
-    RERANK_TOP_N    = 3
+    # ── HYBRID SEARCH & RERANK ──
+    RETRIEVAL_TOP_K = 10     # Số tài liệu thô lấy ra từ Vector DB
+    RERANK_TOP_N    = 3      # Số tài liệu chất lượng nhất giữ lại sau khi Rerank (Context Trimming)
 
     # =========================================================================
     # 5. FEATURE FLAGS — Bật/tắt qua Sidebar hoặc đây

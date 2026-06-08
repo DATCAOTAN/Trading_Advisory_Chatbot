@@ -19,6 +19,7 @@ Pipeline điều phối:
 """
 
 from typing import Iterator, List, Dict, Tuple, Optional
+import time
 
 from src.services.vector_service import VectorService
 from src.services.llm_service import LLMService
@@ -41,6 +42,11 @@ class RAGOrchestrator:
         self.vector_service = VectorService()
         self.llm_service    = LLMService()
         self.live_service   = get_live_service()
+        
+        # ── In-Memory Caching Layer (TTL: 15 minutes) ──
+        self._context_cache = {}
+        self._CACHE_TTL = 15 * 60  # 15 phút
+        
         print("✅ [Orchestrator] Hệ thống sẵn sàng!")
 
     # =========================================================================
@@ -92,7 +98,7 @@ class RAGOrchestrator:
         # =====================================================================
         # TẦNG 1: LLM GATEKEEPER — Phân loại ý định trước khi làm bất cứ gì
         # =====================================================================
-        intent = IntentRouter.classify(user_query)
+        intent = IntentRouter.classify(user_query, chat_history)
 
         # ── EARLY EXIT: Chào hỏi xã giao → Qwen phản hồi linh hoạt, không RAG ──
         if intent == IntentType.GREETING:
@@ -120,11 +126,27 @@ class RAGOrchestrator:
         # ── Bước 1: Query Rewriting (mở rộng câu hỏi tiếng lóng → chuẩn) ──
         rewritten_query = self.llm_service.rewrite_query(user_query, chat_history)
 
-        # ── Bước 2: Hybrid Search + Reranker (Qdrant + BGE) ──
-        context_str, sources = self.vector_service.retrieve_context(
-            rewritten_query,
-            enable_reranker=enable_reranker,
-        )
+        # ── Bước 2: In-Memory Caching Layer (Bỏ qua Vector DB nếu trùng cache) ──
+        current_time = time.time()
+        cached_data = self._find_cache_match(rewritten_query)
+        
+        if cached_data:
+            print("⚡ [Cache] HIT! Lấy context từ bộ nhớ đệm (0s latency).")
+            context_str = cached_data["context"]
+            sources = cached_data["sources"]
+        else:
+            print("🔍 [Cache] MISS! Đang thực hiện Hybrid Search & Reranker...")
+            # Bước 2.1: Hybrid Search + Reranker (Qdrant + BGE)
+            context_str, sources = self.vector_service.retrieve_context(
+                rewritten_query,
+                enable_reranker=enable_reranker,
+            )
+            # Lưu vào cache
+            self._context_cache[rewritten_query] = {
+                "context": context_str,
+                "sources": sources,
+                "timestamp": current_time
+            }
 
         # ── Bước 3: Multi-Hop Streaming Generation (Qwen 2.5) ──
         if enable_self_correction:
@@ -161,19 +183,58 @@ class RAGOrchestrator:
         sources: List[Dict],
     ) -> Iterator[str]:
         """
-        Thu toàn bộ answer → kiểm tra hallucination → stream lại kết quả.
+        Stream trực tiếp lên UI (Non-blocking), đồng thời thu thập text.
+        Sau khi luồng chính kết thúc mới chạy kiểm tra ngầm và đính chính.
         """
-        print("🔍 [SelfCorrect] Thu thập câu trả lời để kiểm tra...")
-        full_answer = "".join(
-            self.llm_service.generate_multihop_stream(query, context, history)
-        )
+        print("⚡ [Pipeline] Đang stream kết quả trực tiếp...")
+        full_answer = ""
+        for token in self.llm_service.generate_multihop_stream(query, context, history):
+            full_answer += token
+            yield token
 
-        print("🔍 [SelfCorrect] Đang kiểm tra hallucination...")
-        corrected = self.llm_service.self_correct(full_answer, context)
+        print("🔍 [SelfCorrect] Chạy kiểm tra ngầm (Background Task)...")
+        correction_note = self.llm_service.self_correct(full_answer, context)
 
-        corrected_with_note = corrected + "\n\n*🔍 Đã qua vòng kiểm tra Self-Correction.*"
-        yield from self._static_stream(corrected_with_note)
+        if correction_note and "[OK]" not in correction_note:
+            print("⚠️ [SelfCorrect] Phát hiện sai sót, đang thêm đính chính...")
+            yield correction_note
 
+    def _find_cache_match(self, query: str) -> Optional[Dict]:
+        """
+        Tìm kiếm Cache dựa trên cơ sở So khớp mờ (Fuzzy Keyword Match).
+        Tránh Cache Miss cứng nhắc do sai khác một vài từ không quan trọng.
+        """
+        current_time = time.time()
+        
+        # Lọc từ khóa: bỏ dấu câu và stop words cơ bản
+        def get_keywords(text: str) -> set:
+            import re
+            clean_text = re.sub(r'[^\w\s]', '', text.lower())
+            words = clean_text.split()
+            stop_words = {"của", "và", "như", "thế", "nào", "đến", "các", "có", "là", "gì", "cho", "việc", "thì", "sao", "đi", "về", "đâu"}
+            return set(w for w in words if w not in stop_words and len(w) > 1)
+            
+        q_words = get_keywords(query)
+        if not q_words:
+            return None
+            
+        for cached_q, data in list(self._context_cache.items()):
+            if current_time - data["timestamp"] > self._CACHE_TTL:
+                del self._context_cache[cached_q]
+                continue
+                
+            c_words = get_keywords(cached_q)
+            if not c_words:
+                continue
+                
+            # Tính tỷ lệ Overlap (trùng khớp)
+            intersection = q_words.intersection(c_words)
+            overlap_ratio = len(intersection) / max(len(q_words), len(c_words))
+            
+            if overlap_ratio >= 0.75:  # Trùng > 75% từ khóa
+                return data
+                
+        return None
 
 if __name__ == "__main__":
     print("=== KIỂM THỬ TÍCH HỢP TOÀN PIPELINE ===")

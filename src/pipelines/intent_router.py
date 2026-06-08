@@ -154,12 +154,13 @@ class IntentRouter:
     """
 
     @staticmethod
-    def classify(query: str) -> IntentType:
+    def classify(query: str, chat_history: list = None) -> IntentType:
         """
         Gửi câu hỏi tới Qwen 2.5 (temperature=0.0) để phân loại ý định.
 
         Args:
             query: Câu hỏi thô từ người dùng
+            chat_history: Lịch sử hội thoại để kế thừa bối cảnh
 
         Returns:
             IntentType enum (GREETING | TRASH | FINANCIAL_RAG)
@@ -167,12 +168,21 @@ class IntentRouter:
         print(f"🚪 [Gatekeeper] Phân loại: '{query}'")
 
         try:
+            # ── Bổ sung lịch sử để kế thừa bối cảnh ──
+            history_text = ""
+            if chat_history:
+                recent = chat_history[-4:] # Lấy 4 tin nhắn gần nhất
+                lines = [f"[{m['role'].upper()}]: {m['content'][:100]}" for m in recent]
+                history_text = "LỊCH SỬ GẦN ĐÂY:\n" + "\n".join(lines) + "\n\n"
+
+            prompt_content = f"{history_text}CÂU HỎI MỚI CỦA NGƯỜI DÙNG: {query}"
+
             # ── Gọi Ollama với temperature=0.0 (logic cố định, không sáng tạo) ──
             response = ollama.chat(
                 model=Config.LLM_MODEL_NAME,
                 messages=[
                     {"role": "system", "content": _GATEKEEPER_SYSTEM_PROMPT},
-                    {"role": "user",   "content": query},
+                    {"role": "user",   "content": prompt_content},
                 ],
                 stream=False,
                 options={"temperature": 0.0},

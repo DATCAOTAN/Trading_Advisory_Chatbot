@@ -49,7 +49,10 @@ def render(orchestrator, feature_flags: dict):
     if user_query := st.chat_input("Hỏi về xu hướng vàng, chiến lược SMC, dữ liệu vĩ mô..."):
 
         # Hiển thị tin nhắn user
-        st.session_state.messages.append({"role": "user", "content": user_query})
+        user_msg = {"role": "user", "content": user_query}
+        st.session_state.messages.append(user_msg)
+        from src.services.history_service import HistoryService
+        HistoryService().append_message(user_msg)
         with st.chat_message("user"):
             st.markdown(user_query)
 
@@ -85,12 +88,14 @@ def render(orchestrator, feature_flags: dict):
                 st.code(traceback.format_exc())
 
         # Lưu vào lịch sử
-        st.session_state.messages.append({
+        assistant_msg = {
             "role":    "assistant",
             "content": full_answer,
-            "sources": sources,
+            "sources": [s for s in sources] if sources else [],
             "intent":  intent,
-        })
+        }
+        st.session_state.messages.append(assistant_msg)
+        HistoryService().append_message(assistant_msg)
 
 
 # =============================================================================

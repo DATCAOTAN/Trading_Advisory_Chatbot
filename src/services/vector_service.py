@@ -45,11 +45,13 @@ class VectorService:
         self.embed_model = db.embedding_model   # SentenceTransformer — luôn OK, nạp sẵn
         self._db         = db                   # Giữ ref để lazy-get BGEM3/Reranker sau
 
-        # Lazy state — KHÔNG gọi db.bgem3_model hay db.reranker_model ở đây
-        self._bgem3_checked  = False
-        self._bgem3          = None             # BGEM3FlagModel hoặc None
-        self._hybrid_enabled = False            # Xác định khi BGEM3 check lần đầu
-        self._reranker       = None             # FlagReranker hoặc None
+        # Warm-up phase: Tải TẤT CẢ mô hình lên RAM/VRAM NGAY LẬP TỨC theo thiết kế Singleton.
+        print("🔥 [VectorService] WARM-UP Phase: Đang nạp tất cả mô hình AI...")
+        self._bgem3 = db.bgem3_model
+        self._hybrid_enabled = (self._bgem3 is not None)
+        self._reranker = db.reranker_model
+        self._bgem3_checked = True
+        print("✅ [VectorService] Hoàn tất nạp mô hình vào RAM/VRAM.")
 
         self._init_collection()
 
@@ -57,22 +59,12 @@ class VectorService:
     # LAZY LOADERS
     # =========================================================================
     def _ensure_bgem3(self):
-        """Lazy-check BGEM3FlagModel. Chỉ load 1 lần, tái sử dụng mãi."""
-        if not self._bgem3_checked:
-            self._bgem3_checked = True
-            bgem3 = self._db.bgem3_model   # @st.cache_resource — an toàn
-            if bgem3 is not None:
-                self._bgem3          = bgem3
-                self._hybrid_enabled = Config.ENABLE_HYBRID_SEARCH and _QDRANT_SPARSE_OK
-                status = "BẬT" if self._hybrid_enabled else "TẮT (thiếu Sparse Qdrant)"
-                print(f"⚡ [VectorService] Hybrid Search: {status}")
-            else:
-                print("ℹ️ [VectorService] Hybrid Search: TẮT (FlagEmbedding chưa cài)")
+        """Đã load ở init. Hàm giữ nguyên để backward compat."""
+        pass
 
     def _ensure_reranker(self):
-        """Lazy-load Reranker khi lần đầu retrieve. Không block init()."""
-        if self._reranker is None:
-            self._reranker = self._db.reranker_model  # None nếu chưa cài
+        """Đã load ở init. Hàm giữ nguyên để backward compat."""
+        pass
 
     # =========================================================================
     # KHỞI TẠO COLLECTION

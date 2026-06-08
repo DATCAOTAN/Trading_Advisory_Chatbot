@@ -22,13 +22,19 @@ class LLMService:
         "hoạt động tại Việt Nam năm 2026.\n\n"
 
         "QUY TẮC CỐT LÕI:\n"
-        "1. CHỈ dùng thông tin trong 'BỐI CẢNH TÀI LIỆU' để trả lời. TUYỆT ĐỐI không bịa số liệu.\n"
-        "2. Nếu thiếu thông tin, nói rõ: 'Kho tài liệu chưa có dữ liệu về vấn đề này.'\n"
-        "3. Văn phong: Tiếng Việt chuyên ngành tài chính — nghiêm túc, gãy gọn, lập luận logic.\n"
-        "4. TỪ CHỐI mọi câu hỏi ngoài phạm vi tài chính, kinh tế, trading.\n\n"
+        "1. KHÓA NGÔN NGỮ (LANGUAGE LOCK - BẮT BUỘC): Bất kể tài liệu ngữ cảnh trích xuất chứa ngôn ngữ gì (Tiếng Anh, Tiếng Trung...), BẠN PHẢI DỊCH và TỔNG HỢP toàn bộ thành TIẾNG VIỆT 100% chuẩn ngữ pháp. TUYỆT ĐỐI KHÔNG để lọt bất kỳ ký tự tiếng nước ngoài nào chưa được dịch vào câu trả lời (trừ mã tài sản viết tắt như XAUUSD, DXY, SMC, FVG).\n"
+        "2. CHỈ dùng thông tin trong 'BỐI CẢNH TÀI LIỆU' để trả lời. TUYỆT ĐỐI không bịa số liệu.\n"
+        "3. Nếu thiếu thông tin, nói rõ: 'Kho tài liệu chưa có dữ liệu về vấn đề này.'\n"
+        "4. Văn phong: Tiếng Việt chuyên ngành tài chính — nghiêm túc, gãy gọn, lập luận logic.\n"
+        "5. TỪ CHỐI mọi câu hỏi ngoài phạm vi tài chính, kinh tế, trading.\n\n"
+
+        "CÔ LẬP KẾT QUẢ ĐẦU RA (OUTPUT ISOLATION - RẤT QUAN TRỌNG):\n"
+        "- TUYỆT ĐỐI KHÔNG in ra quá trình suy nghĩ, phân tích ý định, hay các tiêu đề nội bộ (như 'Phân tích mục đích...', 'Trả lời dựa trên tài liệu...', 'Định dạng phù hợp...').\n"
+        "- TUYỆT ĐỐI KHÔNG lặp lại câu hỏi thô hoặc câu hỏi đã được làm sạch của người dùng trong bài làm.\n"
+        "- Trả về kết quả SẠCH SẼ, đi THẲNG VÀO TRỌNG TÂM câu hỏi. Bắt đầu ngay bằng nội dung phân tích.\n\n"
 
         "NGUYÊN TẮC PHẢN HỒI — NƯƠNG THEO CÂU HỎI (Context-Aware Formatting):\n"
-        "Trước khi trả lời, hãy phân tích 'MỤC ĐÍCH CỐT LÕI' của câu hỏi, rồi chọn định dạng PHÙ HỢP NHẤT:\n\n"
+        "Hãy chọn định dạng PHÙ HỢP NHẤT dựa trên mục đích câu hỏi:\n\n"
 
         "• Nếu người dùng hỏi về KHÁI NIỆM / ĐỊNH NGHĨA (vd: 'Order Block là gì?', 'FVG hoạt động thế nào?'):\n"
         "  → Tập trung giải thích bản chất lý thuyết, cơ chế hoạt động, kèm ví dụ minh họa từ tài liệu.\n"
@@ -95,20 +101,30 @@ class LLMService:
                     "thành một câu truy vấn TÌM KIẾM TRONG VĂN BẢN chuẩn, đầy đủ thuật ngữ tài chính.\n\n"
 
                     "GUARDRAIL BẮT BUỘC:\n"
-                    "- CHỈ được mở rộng ngữ nghĩa khi câu hỏi GỐC ĐÃ CHỨA thuật ngữ chuyên ngành "
+                    "- 1. CHỈ được mở rộng ngữ nghĩa khi câu hỏi GỐC ĐÃ CHỨA thuật ngữ chuyên ngành "
                     "(tên tài sản, chỉ báo kỹ thuật, sự kiện kinh tế...).\n"
-                    "- Nếu câu hỏi gốc là câu hỏi MỞ, CHUNG CHUNG, hoặc CHƯA có thực thể tài chính rõ ràng "
-                    "→ GIỮ NGUYÊN nội dung gốc hoặc chỉ sửa lỗi chính tả. "
-                    "TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ Ý BỊA THÊM từ khóa tài chính.\n\n"
+                    "- 2. Giữ vững tính chính xác về mặt chính tả và thuật ngữ tài chính gốc của người dùng. "
+                    "(Ví dụ: \"Lạm phát\" KHÔNG ĐƯỢC PHÉP biến đổi thành cụm từ sai lỗi bộ gõ như \"làm phát hành\").\n"
+                    "- 3. TÂM LÝ ĐÍNH CHÍNH (QUAN TRỌNG): Nếu câu hỏi mang tính chất đính chính, phủ định, hoặc thu hẹp phạm vi "
+                    "(vd: 'tôi bảo là... chứ không phải...', 'chỉ phân tích... thôi'), "
+                    "BẮT BUỘC BỎ QUA các vế bị phủ định. CHỈ bóc tách và tập trung vào TỪ KHÓA CỐT LÕI mà người dùng muốn nhấn mạnh.\n"
+                    "- 4. Nếu câu hỏi đã quá rõ ràng, ưu tiên GIỮ NGUYÊN cấu trúc gốc.\n"
+                    "- 5. TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ Ý BỊA THÊM từ khóa tài chính nếu câu gốc là câu mở/xã giao.\n"
+                    "- 6. KIỂM SOÁT BỐI CẢNH (CHỐNG ÁM ẢNH): Khi dùng lịch sử chat để điền khuyết cho câu hỏi rút gọn, CHỈ kế thừa TÊN TÀI SẢN (XAUUSD, Vàng, DXY). "
+                    "TUYỆT ĐỐI KHÔNG bê nguyên chủ đề cũ (như lạm phát, lãi suất) sang câu hỏi mới nếu câu hỏi mới đã chuyển sang mốc thời gian hoặc chủ đề khác.\n\n"
 
                     "VÍ DỤ ĐÚNG:\n"
                     '- "vàng lên hay xuống?" → "Xu hướng giá XAUUSD hiện tại?" (✅ gốc đã có "vàng")\n'
-                    '- "OB là gì" → "Order Block là gì trong phân tích SMC?" (✅ gốc đã có "OB")\n'
-                    '- "Fed tăng lãi suất thì sao" → "Tác động của việc Fed tăng lãi suất đến giá vàng XAUUSD?" (✅ gốc đã có "Fed", "lãi suất")\n\n'
+                    '- [Lịch sử: lạm phát tác động vàng?] "cuối năm 2026 đi về đâu" → "Dự báo xu hướng giá và mốc kỹ thuật của Vàng XAUUSD vào cuối năm 2026" (✅ Chỉ kế thừa XAUUSD, vứt bỏ "lạm phát")\n'
+                    '- "tôi bảo là lạm phát ảnh hưởng chứ có phải các yếu tố khác đâu" → "Tác động chuyên sâu của lạm phát đến giá vàng XAUUSD?" (✅ Lọc bỏ vế rác, tập trung "lạm phát")\n'
+                    '- "chỉ phân tích SMC thôi, bỏ qua vĩ mô" → "Chiến lược giao dịch XAUUSD theo phương pháp SMC (Smart Money Concepts)" (✅ Thu hẹp đúng yêu cầu)\n'
+                    '- "Fed tăng lãi suất thì sao" → "Tác động của việc Fed tăng lãi suất đến giá vàng XAUUSD?" (✅ gốc đã có "Fed", "lãi suất")\n\n"
 
                     "VÍ DỤ SAI (CẤM LÀM):\n"
-                    '- "bạn giúp gì được?" → "xu hướng thị trường vàng gần đây?" (❌ BỊA thêm "thị trường vàng")\n'
-                    '- "hello" → "phân tích XAUUSD tuần này?" (❌ BỊA hoàn toàn)\n\n'
+                    '- [Lịch sử: lạm phát tác động vàng?] "cuối năm 2026 đi về đâu" → "Lạm phát tác động đến vàng cuối năm 2026?" (❌ Ám ảnh bối cảnh cũ)\n'
+                    '- "tôi bảo là lạm phát..." → "lạm phát và các yếu tố khác tác động đến vàng?" (❌ Đưa thêm "các yếu tố khác" đi ngược lại lệnh đính chính)\n'
+                    '- "Lạm phát" → "làm phát hành" (❌ Viết sai chính tả / bóp méo từ gốc)\n'
+                    '- "bạn giúp gì được?" → "xu hướng thị trường vàng gần đây?" (❌ BỊA thêm "thị trường vàng")\n\n'
 
                     "Chỉ trả về câu truy vấn mới, KHÔNG giải thích."
                 )
@@ -163,9 +179,8 @@ class LLMService:
             f"BỐI CẢNH TÀI LIỆU TRÍCH XUẤT TỪ QDRANT DB:\n{context}\n\n"
             "─" * 40 + "\n\n"
             f"CÂU HỎI CỦA TRADER: {query}\n\n"
-            "Hãy phân tích mục đích cốt lõi của câu hỏi trên, "
-            "sau đó trả lời DỰA TRÊN TÀI LIỆU với định dạng phù hợp nhất.\n"
-            "CÂU TRẢ LỜI:"
+            "Hãy trả lời CÂU HỎI CỦA TRADER trực tiếp, đi thẳng vào trọng tâm DỰA TRÊN TÀI LIỆU.\n"
+            "LƯU Ý: KHÔNG nhắc lại câu hỏi, KHÔNG giải thích quá trình suy nghĩ. BẮT ĐẦU TRẢ LỜI NGAY:\n"
         )
 
         messages = [
@@ -202,8 +217,8 @@ class LLMService:
                     "Bạn là kiểm duyệt viên tài chính. Nhiệm vụ: "
                     "So sánh CÂU TRẢ LỜI với TÀI LIỆU GỐC. "
                     "Nếu có số liệu, tỷ lệ % hoặc điểm giá trong câu trả lời KHÔNG xuất hiện trong tài liệu gốc, "
-                    "hãy thêm ghi chú '⚠️ [Cảnh báo: Số liệu X có thể không chính xác]' vào câu trả lời. "
-                    "Nếu tất cả đều đúng, trả về câu trả lời nguyên bản."
+                    "hãy trả về CHỈ MỘT DÒNG DUY NHẤT: '\n\n⚠️ **Đính chính tự động:** Số liệu [X] không có trong tài liệu.' "
+                    "Nếu tất cả đều đúng, trả về chính xác chữ: '[OK]'."
                 )
             },
             {

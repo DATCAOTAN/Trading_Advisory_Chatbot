@@ -104,7 +104,8 @@ if "orchestrator" not in st.session_state:
             st.stop()
 
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    from src.services.history_service import HistoryService
+    st.session_state.messages = HistoryService().load_history()
 
 if "feature_flags" not in st.session_state:
     st.session_state.feature_flags = {
@@ -127,6 +128,13 @@ with st.sidebar:
     col1.metric("LLM", "Qwen 2.5")
     col2.metric("DB", "Qdrant")
     st.caption(f"💬 Chat: {len(st.session_state.messages)} lượt")
+    
+    if st.button("🗑️ Xóa Lịch Sử"):
+        from src.services.history_service import HistoryService
+        HistoryService().clear_history()
+        st.session_state.messages = []
+        st.rerun()
+        
     st.markdown("---")
     st.caption("v2.0 — Facade + Component-Based Architecture")
 
