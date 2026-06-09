@@ -50,9 +50,16 @@ def render(orchestrator, feature_flags: dict):
 
         # Hiển thị tin nhắn user
         user_msg = {"role": "user", "content": user_query}
-        st.session_state.messages.append(user_msg)
         from src.services.history_service import HistoryService
-        HistoryService().append_message(user_msg)
+        history_svc = HistoryService()
+        
+        # Tự động đổi tên "New Chat" thành nội dung câu hỏi đầu tiên
+        if len(st.session_state.messages) == 0:
+            auto_title = user_query[:30] + "..." if len(user_query) > 30 else user_query
+            history_svc.rename_session(st.session_state.current_session_id, auto_title)
+            
+        st.session_state.messages.append(user_msg)
+        history_svc.append_message(st.session_state.current_session_id, user_msg)
         with st.chat_message("user"):
             st.markdown(user_query)
 
@@ -95,7 +102,7 @@ def render(orchestrator, feature_flags: dict):
             "intent":  intent,
         }
         st.session_state.messages.append(assistant_msg)
-        HistoryService().append_message(assistant_msg)
+        HistoryService().append_message(st.session_state.current_session_id, assistant_msg)
 
 
 # =============================================================================

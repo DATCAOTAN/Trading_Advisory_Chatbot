@@ -103,9 +103,18 @@ if "orchestrator" not in st.session_state:
             st.code(traceback.format_exc())
             st.stop()
 
+if "current_session_id" not in st.session_state:
+    from src.services.history_service import HistoryService
+    history_svc = HistoryService()
+    sessions = history_svc.get_all_sessions()
+    if sessions:
+        st.session_state.current_session_id = sessions[0]["_id"]
+    else:
+        st.session_state.current_session_id = history_svc.create_session("New Chat")
+
 if "messages" not in st.session_state:
     from src.services.history_service import HistoryService
-    st.session_state.messages = HistoryService().load_history()
+    st.session_state.messages = HistoryService().load_history(st.session_state.current_session_id)
 
 if "feature_flags" not in st.session_state:
     st.session_state.feature_flags = {
@@ -138,11 +147,57 @@ with st.sidebar:
     col2.metric("DB", "Qdrant")
     st.caption(f"💬 Chat: {len(st.session_state.messages)} lượt")
     
-    if st.button("🗑️ Xóa Lịch Sử"):
-        from src.services.history_service import HistoryService
-        HistoryService().clear_history()
+    
+    st.markdown("---")
+    st.markdown("**💬 Phiên Trò Chuyện**")
+    from src.services.history_service import HistoryService
+    history_svc = HistoryService()
+    
+    # Nút tạo phiên mới
+    if st.button("➕ Tạo Chat Mới"):
+        new_id = history_svc.create_session("New Chat")
+        st.session_state.current_session_id = new_id
         st.session_state.messages = []
         st.rerun()
+
+    # Lấy danh sách session để hiển thị
+    all_sessions = history_svc.get_all_sessions()
+    if all_sessions:
+        # Đảm bảo current_session_id hợp lệ
+        valid_ids = [s["_id"] for s in all_sessions]
+        if st.session_state.current_session_id not in valid_ids:
+            st.session_state.current_session_id = valid_ids[0]
+            
+        for s in all_sessions:
+            s_id = s["_id"]
+            s_title = s.get("title", "New Chat")
+            
+            col1, col2 = st.columns([8, 2])
+            with col1:
+                btn_type = "primary" if s_id == st.session_state.current_session_id else "secondary"
+                if st.button(s_title, key=f"btn_{s_id}", use_container_width=True, type=btn_type):
+                    st.session_state.current_session_id = s_id
+                    st.session_state.messages = history_svc.load_history(s_id)
+                    st.rerun()
+            with col2:
+                with st.popover("⋮", use_container_width=True):
+                    new_title = st.text_input("Tên mới", value=s_title, key=f"rename_{s_id}")
+                    if st.button("✏️ Đổi tên", key=f"save_{s_id}"):
+                        history_svc.rename_session(s_id, new_title)
+                        st.rerun()
+                    st.markdown("---")
+                    if st.button("🗑️ Xóa", key=f"del_{s_id}"):
+                        history_svc.delete_session(s_id)
+                        if s_id == st.session_state.current_session_id:
+                            sessions_after = history_svc.get_all_sessions()
+                            if sessions_after:
+                                st.session_state.current_session_id = sessions_after[0]["_id"]
+                                st.session_state.messages = history_svc.load_history(st.session_state.current_session_id)
+                            else:
+                                new_id = history_svc.create_session("New Chat")
+                                st.session_state.current_session_id = new_id
+                                st.session_state.messages = []
+                        st.rerun()
         
     st.markdown("---")
     st.caption("v3.0 — Facade + Component-Based Architecture")

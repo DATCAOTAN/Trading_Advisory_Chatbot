@@ -39,7 +39,13 @@ class Config:
     LOGS_DIR = BASE_DIR / "logs"
 
     # =========================================================================
-    # 2. CẤU HÌNH MÔ HÌNH AI & PROVIDER
+    # 2. CẤU HÌNH DATABASE / CACHE (HYBRID STORAGE)
+    # =========================================================================
+    REDIS_URL              = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    MONGO_URI              = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+
+    # =========================================================================
+    # 3. CẤU HÌNH MÔ HÌNH AI & PROVIDER
     # =========================================================================
     LLM_PROVIDER           = os.getenv("LLM_PROVIDER", "openrouter").lower()
     
@@ -65,7 +71,7 @@ class Config:
     VECTOR_COLLECTION_NAME = "xauusd_knowledge_v2"
 
     # =========================================================================
-    # 3. CHUNKING — PARENT-CHILD
+    # 4. CHUNKING — PARENT-CHILD
     # =========================================================================
     PARENT_CHUNK_SIZE    = 2000
     PARENT_CHUNK_OVERLAP = 200

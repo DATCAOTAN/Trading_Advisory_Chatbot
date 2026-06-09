@@ -9,6 +9,9 @@
 [![Ollama](https://img.shields.io/badge/Ollama-Fallback_LLM-orange)](https://ollama.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B)](https://streamlit.io/)
 [![Qdrant](https://img.shields.io/badge/Qdrant-Vector_DB-purple)](https://qdrant.tech/)
+[![Docker](https://img.shields.io/badge/Docker-Container-2496ED)](https://www.docker.com/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Storage-47A248)](https://www.mongodb.com/)
+[![Redis](https://img.shields.io/badge/Redis-Cache-DC382D)](https://redis.io/)
 
 **Hệ thống Cố vấn Giao dịch Vàng (XAUUSD) & Ngoại hối (Forex) sử dụng Kiến trúc Advanced RAG.**  
 *Tốc độ mili-giây với OpenRouter & Cohere Cloud — Tự động Fallback về Local — Trí nhớ vĩnh viễn.*
@@ -33,8 +36,9 @@ Phiên bản **v3.0 (Cloud Migration)** đánh dấu một bước đại nhảy
 - **Auto Fallback Mechanism:** Cơ chế tự động phòng vệ. Nếu mạng mất kết nối hoặc API bị nghẽn, hệ thống tự động đánh lái êm ái luồng xử lý về **Ollama Local** mà không làm crash ứng dụng.
 - **Stream Think Tag Filter:** Tự động lọc sạch các nội dung lập luận nội bộ (`<think>...</think>`) trên luồng Stream, đảm bảo UI luôn sạch sẽ và chuyên nghiệp.
 
-### 🧠 2. Global Conversation Memory (Trí Nhớ Vĩnh Viễn)
-- **Persistent State:** Lịch sử chat được quản lý tập trung bởi `HistoryService` (Singleton) và sao lưu xuống file JSON. Không còn tình trạng mất trí nhớ khi người dùng tải lại trang web hoặc chuyển tab.
+### 🧠 2. Global Conversation Memory (Hybrid Storage & Multi-session)
+- **Hybrid Storage:** Lịch sử chat được lưu trữ theo cơ chế kép. Redis làm bộ đệm siêu tốc (In-Memory Cache) cho trải nghiệm tức thời, trong khi MongoDB lưu trữ dữ liệu vĩnh viễn (Persistent Storage) để không bao giờ mất thông tin.
+- **Multi-session Management:** Hỗ trợ đa phiên trò chuyện. Người dùng có thể tạo vô số đoạn chat mới, chuyển đổi qua lại giữa các chủ đề một cách liền mạch tại Sidebar.
 - **Context-Aware Intent Router:** Kế thừa bộ nhớ hội thoại để phân tích ý định (Gatekeeper). Bot có khả năng hiểu các câu nói nối tiếp như *"vậy cuối năm 2026 thì sao?"* mà không bị lệch ngữ cảnh.
 
 ### 🧩 3. Kiến Trúc Flexible UI & Facade Pattern
@@ -85,9 +89,9 @@ graph TD
 | Thành phần | Yêu cầu cấu hình |
 |:---|:---|
 | **OS** | Windows 10/11, macOS, Linux |
-| **Python** | `3.10.x` hoặc `3.11.x` |
-| **API** | OpenRouter API Key và Cohere API Key |
-| **Phần cứng** | Chỉ cần CPU và 8GB RAM (Vì LLM và Reranker chạy trên Cloud) |
+| **Hệ thống** | Đã cài đặt **Docker** và **Docker Compose** |
+| **Phần cứng** | Tối thiểu 8GB RAM (Đủ chạy Streamlit, Redis, Mongo, Qdrant) |
+| **API** | API Key của Google AI Studio (hoặc OpenRouter) & Cohere API |
 | **Ollama** *(Tùy chọn)* | Cài đặt nếu bạn muốn có hệ thống Fallback nội bộ phòng khi rớt mạng |
 
 ---
@@ -100,18 +104,6 @@ graph TD
 ```bash
 git clone https://github.com/DATCAOTAN/Trading_Advisory_Chatbot.git
 cd Trading_Advisory_Chatbot
-```
-
-**Tạo môi trường ảo (Virtual Environment):**
-```bash
-python -m venv venv
-.\venv\Scripts\Activate.ps1   # Trên Windows
-source venv/bin/activate      # Trên Linux/macOS
-```
-
-**Cài đặt thư viện phụ thuộc:**
-```bash
-pip install -r requirements.txt
 ```
 
 ### 2. Cấu Hình API (OpenRouter, Google & Cohere)
@@ -132,10 +124,10 @@ Sao chép các file `.pdf` chứa chiến lược giao dịch của bạn vào:
 - `data/raw_pdfs/static/`: Cho sách, lý thuyết nền tảng.
 - `data/raw_pdfs/dynamic/`: Cho báo cáo vĩ mô tuần/tháng.
 
-### 4. Khởi chạy Ứng dụng
-Khởi chạy hệ thống bằng tệp gốc (sẽ khởi động mọi module an toàn):
+### 4. Khởi chạy Ứng dụng (Docker)
+Nhờ kiến trúc Containerized, bạn chỉ cần gõ 1 lệnh duy nhất để hệ thống tự động tải và liên kết toàn bộ Database (Redis, Mongo) và giao diện Streamlit:
 ```bash
-python launcher.py
+docker-compose up --build -d
 ```
 > Giao diện sẽ tự động mở tại: `http://localhost:8501`
 
@@ -146,10 +138,9 @@ python launcher.py
 ```text
 Trading_Advisory_Chatbot/
 ├── data/
-│   ├── chat_history.json       # Trí nhớ hội thoại vĩnh viễn (Mới)
-│   ├── raw_pdfs/               
-│   ├── qdrant_db/              
-│   └── ingestion_state.json    
+│   ├── raw_pdfs/               # Chứa file PDF đầu vào
+│   ├── qdrant_db/              # Thư mục map với Volume của VectorDB
+│   └── ingestion_state.json    # Trạng thái hash SHA-256
 ├── src/                        
 │   ├── core/
 │   │   ├── database.py         
@@ -164,6 +155,8 @@ Trading_Advisory_Chatbot/
 │   ├── config.py               
 │   ├── orchestrator.py         
 │   └── app.py                  
+├── docker-compose.yml          # Trình điều phối Container (Mới)
+├── Dockerfile                  # Đóng gói Streamlit App (Mới)
 ├── .env.example                
 ├── launcher.py                 
 └── requirements.txt            
