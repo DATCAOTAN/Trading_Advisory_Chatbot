@@ -23,6 +23,9 @@ class LLMClient:
         self.groq_api_key = Config.GROQ_API_KEY
         self.groq_model = Config.GROQ_MODEL_NAME
         
+        self.google_api_key = Config.GOOGLE_API_KEY
+        self.google_model = Config.GOOGLE_MODEL_NAME
+        
         self.ollama_model = Config.LLM_MODEL_NAME
 
         # Khởi tạo OpenRouter Client nếu cần
@@ -56,6 +59,23 @@ class LLMClient:
                 print("⚠️ [LLM_Client] Chưa cài thư viện `groq`. Chạy `pip install groq` để dùng. Fallback về Ollama.")
                 self.provider = "ollama"
 
+        # Khởi tạo Google Client (OpenAI-compatible) nếu cần
+        self.google_client = None
+        if self.provider == "google":
+            try:
+                from openai import OpenAI
+                if not self.google_api_key:
+                    print("⚠️ [LLM_Client] GOOGLE_API_KEY trống! Fallback về Ollama.")
+                    self.provider = "ollama"
+                else:
+                    self.google_client = OpenAI(
+                        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                        api_key=self.google_api_key,
+                    )
+            except ImportError:
+                print("⚠️ [LLM_Client] Chưa cài thư viện `openai`. Chạy `pip install openai` để dùng Google. Fallback về Ollama.")
+                self.provider = "ollama"
+
     def chat(self, messages: List[Dict], stream: bool = False, temperature: float = 0.2) -> Any:
         """
         Giao diện gọi chung cho tất cả các request.
@@ -85,6 +105,19 @@ class LLMClient:
                     return resp
                 except Exception as e:
                     print(f"❌ [LLM_Client] GROQ API Lỗi: {e}")
+                    print(f"🔄 [LLM_Client] TỰ ĐỘNG FALLBACK: Đang gọi Ollama ({self.ollama_model})...")
+                    pass # Rơi xuống khối gọi Ollama bên dưới
+
+        elif self.provider == "google" and self.google_client:
+            if stream:
+                return self._filter_think_tags(self._chat_google_stream(messages, temperature))
+            else:
+                try:
+                    resp = self._chat_google_sync(messages, temperature)
+                    resp["message"]["content"] = self._strip_think_sync(resp["message"]["content"])
+                    return resp
+                except Exception as e:
+                    print(f"❌ [LLM_Client] GOOGLE API Lỗi: {e}")
                     print(f"🔄 [LLM_Client] TỰ ĐỘNG FALLBACK: Đang gọi Ollama ({self.ollama_model})...")
                     pass # Rơi xuống khối gọi Ollama bên dưới
 
@@ -199,10 +232,53 @@ class LLMClient:
             model=self.openrouter_model,
             messages=messages,
             temperature=temperature,
-            stream=False
+            stream=False,
+            timeout=30.0
         )
-        content = response.choices[0].message.content if response.choices else ""
-        return {"message": {"content": content}}
+        return {
+            "message": {
+                "content": response.choices[0].message.content or ""
+            }
+        }
+
+    # =========================================================================
+    # GOOGLE IMPLEMENTATION (OpenAI Compatible)
+    # =========================================================================
+    def _chat_google_stream(self, messages: List[Dict], temperature: float) -> Iterator[str]:
+        print(f"🚀 [LLM_Client] Routing to GOOGLE AI STUDIO (model: {self.google_model}) - Streaming")
+        try:
+            response = self.google_client.chat.completions.create(
+                model=self.google_model,
+                messages=messages,
+                temperature=temperature,
+                stream=True,
+                timeout=20.0
+            )
+            for chunk in response:
+                content = chunk.choices[0].delta.content if chunk.choices and chunk.choices[0].delta else None
+                if content:
+                    yield content
+        except Exception as e:
+            print(f"❌ [LLM_Client] GOOGLE API Lỗi khi Stream: {e}")
+            print(f"🔄 [LLM_Client] TỰ ĐỘNG FALLBACK: Chuyển hướng sang Ollama ({self.ollama_model})...")
+            fallback_stream = self._chat_ollama_stream(messages, temperature)
+            for fallback_chunk in fallback_stream:
+                yield fallback_chunk
+
+    def _chat_google_sync(self, messages: List[Dict], temperature: float) -> Dict:
+        print(f"🚀 [LLM_Client] Routing to GOOGLE AI STUDIO (model: {self.google_model}) - Sync")
+        response = self.google_client.chat.completions.create(
+            model=self.google_model,
+            messages=messages,
+            temperature=temperature,
+            stream=False,
+            timeout=30.0
+        )
+        return {
+            "message": {
+                "content": response.choices[0].message.content or ""
+            }
+        }
 
     # =========================================================================
     # GROQ IMPLEMENTATION

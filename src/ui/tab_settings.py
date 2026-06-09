@@ -113,9 +113,18 @@ def render(orchestrator, feature_flags: dict):
     # ── Phần 5: Thông tin phiên bản ─────────────────────────────────────
     st.markdown("#### ℹ️ Thông Tin Phiên Bản")
     embedding_model_name = "Cohere Embed (v3.0)" if Config.COHERE_API_KEY else "BGE-M3 (Local)"
+    if Config.LLM_PROVIDER == "openrouter":
+        active_llm_name = Config.OPENROUTER_MODEL_NAME
+    elif Config.LLM_PROVIDER == "google":
+        active_llm_name = Config.GOOGLE_MODEL_NAME
+    elif Config.LLM_PROVIDER == "groq":
+        active_llm_name = Config.GROQ_MODEL_NAME
+    else:
+        active_llm_name = Config.LLM_MODEL_NAME
+
     st.code(
         "📦 Trading Advisory Chatbot v3.0\n"
-        f"🧠 LLM: {Config.OPENROUTER_MODEL_NAME if Config.LLM_PROVIDER=='openrouter' else Config.LLM_MODEL_NAME}\n"
+        f"🧠 LLM: {active_llm_name}\n"
         f"📐 Embedding: {embedding_model_name}\n"
         f"🎯 Reranker: {'Cohere API' if Config.ENABLE_RERANKER else 'Tắt'}\n"
         "💾 Vector DB: Qdrant Local\n"

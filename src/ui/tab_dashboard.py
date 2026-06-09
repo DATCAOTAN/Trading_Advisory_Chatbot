@@ -49,7 +49,16 @@ def render(orchestrator):
 
     embedding_model_name = "Cohere Embed (v3.0)" if Config.COHERE_API_KEY else "BGE-M3 (Local)"
 
-    col1.metric("🧠 LLM", Config.OPENROUTER_MODEL_NAME if Config.LLM_PROVIDER=="openrouter" else Config.LLM_MODEL_NAME, help="Mô hình ngôn ngữ chính")
+    if Config.LLM_PROVIDER == "openrouter":
+        active_llm_name = Config.OPENROUTER_MODEL_NAME
+    elif Config.LLM_PROVIDER == "google":
+        active_llm_name = Config.GOOGLE_MODEL_NAME
+    elif Config.LLM_PROVIDER == "groq":
+        active_llm_name = Config.GROQ_MODEL_NAME
+    else:
+        active_llm_name = Config.LLM_MODEL_NAME
+
+    col1.metric("🧠 LLM", active_llm_name, help="Mô hình ngôn ngữ chính")
     col2.metric("📐 Embedding", embedding_model_name, help="Mô hình nhúng vector 1024d")
     col3.metric("🎯 Reranker", "Cohere API" if Config.ENABLE_RERANKER else "Tắt", help="Chấm điểm lại top chunks")
     col4.metric("💾 Vector DB", "Qdrant Local", help="Cơ sở dữ liệu vector")

@@ -234,6 +234,8 @@ class IntentRouter:
             # Xác định tên model đang chạy thực tế
             if Config.LLM_PROVIDER == "openrouter":
                 active_model = Config.OPENROUTER_MODEL_NAME
+            elif Config.LLM_PROVIDER == "google":
+                active_model = Config.GOOGLE_MODEL_NAME
             elif Config.LLM_PROVIDER == "groq":
                 active_model = Config.GROQ_MODEL_NAME
             else:

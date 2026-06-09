@@ -125,7 +125,16 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**📡 Trạng Thái**")
     col1, col2 = st.columns(2)
-    col1.metric("LLM", Config.OPENROUTER_MODEL_NAME if Config.LLM_PROVIDER=="openrouter" else Config.LLM_MODEL_NAME)
+    if Config.LLM_PROVIDER == "openrouter":
+        active_llm_name = Config.OPENROUTER_MODEL_NAME
+    elif Config.LLM_PROVIDER == "google":
+        active_llm_name = Config.GOOGLE_MODEL_NAME
+    elif Config.LLM_PROVIDER == "groq":
+        active_llm_name = Config.GROQ_MODEL_NAME
+    else:
+        active_llm_name = Config.LLM_MODEL_NAME
+
+    col1.metric("LLM", active_llm_name)
     col2.metric("DB", "Qdrant")
     st.caption(f"💬 Chat: {len(st.session_state.messages)} lượt")
     
@@ -136,7 +145,7 @@ with st.sidebar:
         st.rerun()
         
     st.markdown("---")
-    st.caption("v2.0 — Facade + Component-Based Architecture")
+    st.caption("v3.0 — Facade + Component-Based Architecture")
 
 # =============================================================================
 # 5. HEADER

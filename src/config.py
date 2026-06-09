@@ -51,6 +51,11 @@ class Config:
     GROQ_API_KEY           = os.getenv("GROQ_API_KEY", "")
     GROQ_MODEL_NAME        = os.getenv("GROQ_MODEL_NAME", "qwen-3-32b")
     
+    # ── Google AI Studio API (OpenAI Compatible) ──
+    GOOGLE_API_KEY         = os.getenv("GOOGLE_API_KEY", "")
+    GOOGLE_MODEL_NAME      = os.getenv("GOOGLE_MODEL_NAME", "gemini-2.5-flash")
+    
+    
     # ── Cohere API (Reranker) ──
     COHERE_API_KEY         = os.getenv("COHERE_API_KEY", "")
     

@@ -4,6 +4,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![OpenRouter API](https://img.shields.io/badge/OpenRouter-Cloud_LLM-4A90E2)](https://openrouter.ai/)
+[![Google AI Studio](https://img.shields.io/badge/Google-Gemini_Flash-blue)](https://aistudio.google.com/)
 [![Cohere API](https://img.shields.io/badge/Cohere-Reranker-FF0000)](https://cohere.com/)
 [![Ollama](https://img.shields.io/badge/Ollama-Fallback_LLM-orange)](https://ollama.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B)](https://streamlit.io/)
@@ -113,10 +114,13 @@ source venv/bin/activate      # Trên Linux/macOS
 pip install -r requirements.txt
 ```
 
-### 2. Cấu Hình API (OpenRouter & Cohere)
+### 2. Cấu Hình API (OpenRouter, Google & Cohere)
 Đổi tên file `.env.example` thành `.env` (hoặc tạo file `.env` mới) tại thư mục gốc và nhập cấu hình:
 ```env
-LLM_PROVIDER=openrouter
+LLM_PROVIDER=google
+GOOGLE_API_KEY=AIzaSy_your_api_key_here
+GOOGLE_MODEL_NAME=gemini-2.5-flash
+
 OPENROUTER_API_KEY=sk-or-v1-...
 OPENROUTER_MODEL_NAME=nvidia/nemotron-3-super-120b-a12b:free
 
