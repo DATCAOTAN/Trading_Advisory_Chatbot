@@ -1,5 +1,5 @@
 docker-compose down : dừng docker và xóa container
 docker-compose stop : dừng container
-docker-compose logs -f app : xem log
-docker-compose restart app: khi thay đổi code chỉ cần  lệnh này là đa update được chức năng vừa mới thêm
+docker-compose logs -f app
+docker-compose restart app
 docker-compose up --build -d: chạy docker

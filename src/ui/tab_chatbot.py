@@ -74,6 +74,7 @@ def render(orchestrator, feature_flags: dict):
                 stream, sources, intent = orchestrator.query_financial_advisor(
                     user_query,
                     chat_history=chat_history,
+                    session_id=st.session_state.current_session_id,
                     enable_self_correction=feature_flags["self_correction"],
                     enable_reranker=feature_flags["reranker"],
                 )
@@ -188,9 +189,10 @@ def _render_sources(sources):
         for i, src in enumerate(sources, 1):
             score = src.get("rerank_score", src.get("score", 0))
             text_preview = src.get("parent_text", "")[:300]
+            source_name = src.get("source", src.get("file_name", "Tài liệu hệ thống"))
             st.markdown(
                 f'<div class="source-card">'
-                f'<strong>#{i} {src["source"]}</strong> '
+                f'<strong>#{i} {source_name}</strong> '
                 f'<span style="color:#68d391">● {score:.3f}</span><br>'
                 f'{text_preview}...'
                 f'</div>',

@@ -107,7 +107,10 @@ if "current_session_id" not in st.session_state:
     from src.services.history_service import HistoryService
     history_svc = HistoryService()
     sessions = history_svc.get_all_sessions()
-    if sessions:
+    if sessions is None:
+        st.error("❌ Mất kết nối CSDL (MongoDB). Vui lòng tải lại trang sau ít phút!")
+        st.stop()
+    elif sessions:
         st.session_state.current_session_id = sessions[0]["_id"]
     else:
         st.session_state.current_session_id = history_svc.create_session("New Chat")
@@ -162,7 +165,9 @@ with st.sidebar:
 
     # Lấy danh sách session để hiển thị
     all_sessions = history_svc.get_all_sessions()
-    if all_sessions:
+    if all_sessions is None:
+        st.error("❌ MongoDB đang gián đoạn, không tải được danh sách chat cũ.")
+    elif all_sessions:
         # Đảm bảo current_session_id hợp lệ
         valid_ids = [s["_id"] for s in all_sessions]
         if st.session_state.current_session_id not in valid_ids:

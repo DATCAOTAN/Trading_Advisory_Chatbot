@@ -55,13 +55,14 @@ Hãy phân loại câu hỏi vào một trong ba nhóm (intent) sau:
 2. 'TRASH': Chuỗi ký tự vô nghĩa do đè phím (jdjdjd, asdasd), gõ sai bộ gõ, hoặc câu hỏi lạc đề
    hoàn toàn không liên quan tài chính VÀ không liên quan đến hệ thống (trưa nay ăn gì, cách nấu phở).
 
-3. 'FINANCIAL_RAG': Câu hỏi PHẢI CHỨA ÍT NHẤT MỘT thực thể/thuật ngữ tài chính cụ thể như:
-   tên tài sản (XAUUSD, vàng, USD, DXY), thuật ngữ kỹ thuật giao dịch (SMC, Order Block, FVG, ChoCh,
-   BOS, Price Action, Entry, SL, TP), hoặc sự kiện kinh tế (Fed, CPI, NFP, lạm phát, lãi suất).
-   LƯU Ý: Các từ "AI Pipeline", "Reranker", "Hybrid Search", "Query Rewrite", "cấu hình hệ thống"
-   là thuật ngữ CỦA HỆ THỐNG, KHÔNG PHẢI thuật ngữ tài chính → phân loại GREETING, không phải FINANCIAL_RAG.
+3. 'FINANCIAL_RAG': Câu hỏi thỏa mãn MỘT TRONG HAI điều kiện sau:
+   - CHỨA ÍT NHẤT MỘT thực thể/thuật ngữ tài chính cụ thể như: tên tài sản (XAUUSD, vàng, USD, DXY), thuật ngữ kỹ thuật giao dịch (SMC, Order Block, FVG, ChoCh, BOS, Price Action, Entry, SL, TP), sự kiện kinh tế (Fed, CPI, NFP, lạm phát, lãi suất).
+   - YÊU CẦU TÓM TẮT/NHẮC LẠI lịch sử hội thoại (Ví dụ: "tóm tắt cuộc hội thoại", "nãy giờ nói gì").
+   LƯU Ý: Các từ "AI Pipeline", "Reranker", "Hybrid Search", "Query Rewrite", "cấu hình hệ thống" là thuật ngữ CỦA HỆ THỐNG, KHÔNG PHẢI thuật ngữ tài chính → phân loại GREETING, không phải FINANCIAL_RAG.
 
 QUY TẮC BẮT BUỘC:
+- Dù LỊCH SỬ GẦN ĐÂY có bàn luận về tài chính chuyên sâu đến đâu, nếu CÂU HỎI MỚI CỦA NGƯỜI DÙNG chỉ đơn thuần là một lời chào (Ví dụ: "chào bạn", "bạn giúp được gì"), BẮT BUỘC phải phân loại là GREETING.
+- Lịch sử chỉ dùng để bổ trợ ngữ cảnh khi Câu hỏi mới là từ nối (Ví dụ: "tiếp tục đi", "tại sao").
 - CHỈ trả về một chuỗi JSON duy nhất có cấu trúc: {"intent": "TÊN_NHÓM", "reason": "lý do ngắn gọn"}
 - Không viết thêm bất kỳ chữ nào ngoài khối JSON.
 
@@ -83,6 +84,7 @@ VÍ DỤ ĐỂ HỌC (FEW-SHOT EXAMPLES):
 - "Vàng xu hướng thế nào em" -> {"intent": "FINANCIAL_RAG", "reason": "Tra cứu xu hướng XAUUSD"}
 - "Order Block là gì?" -> {"intent": "FINANCIAL_RAG", "reason": "Thuật ngữ kỹ thuật SMC cụ thể"}
 - "Lạm phát ảnh hưởng gì đến giá vàng?" -> {"intent": "FINANCIAL_RAG", "reason": "Thực thể kinh tế + tài sản cụ thể"}
+- "Tóm tắt lại cuộc hội thoại nãy giờ" -> {"intent": "FINANCIAL_RAG", "reason": "Yêu cầu tổng hợp dữ liệu lịch sử"}
 """
 
 

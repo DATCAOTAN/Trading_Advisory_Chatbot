@@ -37,9 +37,10 @@ Phiên bản **v3.0 (Cloud Migration)** đánh dấu một bước đại nhảy
 - **Stream Think Tag Filter:** Tự động lọc sạch các nội dung lập luận nội bộ (`<think>...</think>`) trên luồng Stream, đảm bảo UI luôn sạch sẽ và chuyên nghiệp.
 
 ### 🧠 2. Global Conversation Memory (Hybrid Storage & Multi-session)
-- **Hybrid Storage:** Lịch sử chat được lưu trữ theo cơ chế kép. Redis làm bộ đệm siêu tốc (In-Memory Cache) cho trải nghiệm tức thời, trong khi MongoDB lưu trữ dữ liệu vĩnh viễn (Persistent Storage) để không bao giờ mất thông tin.
-- **Multi-session Management:** Hỗ trợ đa phiên trò chuyện. Người dùng có thể tạo vô số đoạn chat mới, chuyển đổi qua lại giữa các chủ đề một cách liền mạch tại Sidebar.
-- **Context-Aware Intent Router:** Kế thừa bộ nhớ hội thoại để phân tích ý định (Gatekeeper). Bot có khả năng hiểu các câu nói nối tiếp như *"vậy cuối năm 2026 thì sao?"* mà không bị lệch ngữ cảnh.
+- **Hybrid Storage Bất Tử:** Lịch sử chat được lưu trữ kép (Redis Cache + MongoDB Persistent). Cơ chế Fallback thông minh: Dù Redis bị flush hoàn toàn do khởi động lại server, hệ thống vẫn tự động câu (fetch) lại toàn bộ tin nhắn cũ từ MongoDB để nạp ngược lại vào Cache.
+- **Push-Only Safety (Chống ghi đè):** Sử dụng toán tử `$push` ở tầng Database giúp bảo toàn 100% lịch sử vĩnh viễn, tuyệt đối không xảy ra tình trạng ghi đè (overwrite) xóa mất dữ liệu cũ dù hệ thống RAM có bị sai lệch hoặc reset.
+- **Multi-session Management:** Hỗ trợ đa phiên trò chuyện. Tích hợp cơ chế tự động bảo vệ Session ID (Graceful Handling): Không tự sinh rác UUID mới nếu kết nối CSDL bị gián đoạn hoặc timeout.
+- **Context-Aware Intent Router (Gatekeeper):** Kế thừa bộ nhớ hội thoại để phân loại. Thông minh vượt trội khi tự nhận biết các lệnh yêu cầu hệ thống như *"tóm tắt cuộc hội thoại"*, *"nãy giờ nói gì"* để cho phép qua cổng (pass-through) vào RAG Pipeline mà không cần phải gượng ép người dùng chèn thêm từ khóa tài chính.
 
 ### 🧩 3. Kiến Trúc Flexible UI & Facade Pattern
 - **Isolated Components:** Các chức năng Chatbot, Dashboard, và Cài đặt được tách biệt hoàn toàn vào từng module riêng (`src/ui/`). Việc thêm/bớt tính năng không bao giờ làm gãy (break) ứng dụng lõi.
@@ -47,6 +48,10 @@ Phiên bản **v3.0 (Cloud Migration)** đánh dấu một bước đại nhảy
 
 ### ⚡ 4. Đồng Bộ Thông Minh (Smart Incremental Ingestion)
 - Chống lãng phí CPU bằng cơ chế quản lý trạng thái tài liệu với **Mã băm SHA-256**. Hệ thống chỉ đọc và index **những file PDF mới hoặc bị sửa đổi**, bỏ qua hoàn toàn các file cũ.
+
+### 🌐 5. Live Data Integration (Thời gian thực)
+- **Lịch Kinh Tế ForexFactory (Bypass Cloudflare):** Tự động cào dữ liệu lịch kinh tế tuần, tích hợp cơ chế chống Rate Limit (Lỗi 429) bằng Memory Cache và thuật toán ngụy trang User-Agent. Tự động quy đổi toàn bộ sự kiện sang **UTC+7 (Giờ Việt Nam)**.
+- **Giá Vàng (XAUUSD) Thời Gian Thực:** Trang bị Live API (với Yahoo Finance Fallback) để lấy giá thị trường và nến (Candle) ngay tại khoảnh khắc trò chuyện, đảm bảo Agent luôn đưa ra nhận định dựa trên giá trị sát thực tế nhất.
 
 ---
 
@@ -148,8 +153,9 @@ Trading_Advisory_Chatbot/
 │   ├── pipelines/
 │   │   └── intent_router.py    
 │   ├── services/
-│   │   ├── history_service.py  # Quản lý Session State tập trung (Mới)
-│   │   ├── vector_service.py   # Cohere Embed & Reranker Cloud (Mới)
+│   │   ├── history_service.py  # Quản lý Session State & Hybrid Cache
+│   │   ├── live_data_service.py# Lấy Giá Vàng & Lịch Kinh tế Live
+│   │   ├── vector_service.py   # Cohere Embed & Reranker Cloud
 │   │   └── llm_service.py      # LLM Agent
 │   ├── ui/                     
 │   ├── config.py               

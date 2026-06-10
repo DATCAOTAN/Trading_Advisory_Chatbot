@@ -70,6 +70,12 @@ class Config:
     RERANKER_MODEL_NAME    = "BAAI/bge-reranker-v2-m3"
     VECTOR_COLLECTION_NAME = "xauusd_knowledge_v2"
 
+    # ── Live Data APIs ──
+    OANDA_API_KEY          = os.getenv("OANDA_API_KEY", "")
+    OANDA_ACCOUNT_ID       = os.getenv("OANDA_ACCOUNT_ID", "")
+    TWELVE_DATA_API_KEY    = os.getenv("TWELVE_DATA_API_KEY", "")
+    BINANCE_API_KEY        = os.getenv("BINANCE_API_KEY", "")
+
     # =========================================================================
     # 4. CHUNKING — PARENT-CHILD
     # =========================================================================

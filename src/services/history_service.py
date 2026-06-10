@@ -54,51 +54,65 @@ class HistoryService:
             return list(cursor)
         except Exception as e:
             print(f"❌ [HistoryService] Lỗi lấy danh sách session: {e}")
-            return []
+            return None
 
-    def load_history(self, session_id: str) -> List[Dict]:
-        """Load tin nhắn của một phiên. Tốc độ <2ms nhờ ưu tiên Cache."""
+    def load_history(self, session_id: str, limit: int = None) -> List[Dict]:
+        """Load tin nhắn của một phiên. Tốc độ <2ms nhờ ưu tiên Cache. Hỗ trợ cắt Sliding Window."""
         if not session_id:
             return []
         
+        messages = None
         # 1. Đọc từ Redis Cache trước
         try:
             cached_data = self.redis_client.get(f"session:{session_id}")
             if cached_data:
-                return json.loads(cached_data)
+                parsed = json.loads(cached_data)
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    messages = parsed
         except Exception as e:
             print(f"⚠️ [HistoryService] Lỗi Redis Cache: {e}")
 
         # 2. Cache Miss -> Đọc từ MongoDB -> Nạp ngược lại vào Redis
-        try:
-            doc = self.sessions_col.find_one({"_id": session_id})
-            if doc and "messages" in doc:
-                messages = doc["messages"]
-                self._cache_session(session_id, messages)
-                return messages
-        except Exception as e:
-            print(f"❌ [HistoryService] Lỗi lấy lịch sử MongoDB: {e}")
+        if not messages:
+            try:
+                doc = self.sessions_col.find_one({"_id": session_id})
+                if doc and "messages" in doc:
+                    messages = doc["messages"]
+                    # Chỉ nạp ngược nếu có thực sự có data để nạp
+                    if messages:
+                        self._cache_session(session_id, messages)
+            except Exception as e:
+                print(f"❌ [HistoryService] Lỗi lấy lịch sử MongoDB: {e}")
+                
+        # Nếu MongoDB cũng rỗng hoặc lỗi -> gán mảng rỗng
+        if messages is None:
+            messages = []
             
-        return []
+        if limit is not None and limit > 0:
+            return messages[-limit:]
+        return messages
 
     def append_message(self, session_id: str, message: Dict):
-        """Lưu tin nhắn song song vào cả Redis và MongoDB."""
+        """Lưu tin nhắn song song vào cả Redis, MongoDB và VectorDB (Long-term Memory)."""
         if not session_id:
             return
             
-        messages = self.load_history(session_id)
+        # Lấy lịch sử hiện tại ra để nạp vào cache Redis
+        messages = self.load_history(session_id, limit=None)
         messages.append(message)
         
         # 1. Ghi vào Redis Cache
         self._cache_session(session_id, messages)
         
-        # 2. Ghi vĩnh viễn vào MongoDB
+        # 2. Ghi vĩnh viễn vào MongoDB (dùng $push để tuyệt đối không ghi đè mất data cũ)
         try:
             self.sessions_col.update_one(
                 {"_id": session_id},
                 {
+                    "$push": {
+                        "messages": message
+                    },
                     "$set": {
-                        "messages": messages,
                         "updated_at": datetime.datetime.utcnow()
                     }
                 },
@@ -106,6 +120,54 @@ class HistoryService:
             )
         except Exception as e:
             print(f"❌ [HistoryService] Lỗi cập nhật MongoDB: {e}")
+            
+        # 3. Ghi vào Long-term Memory (Vector DB)
+        content = message.get("content", "").strip()
+        # Lọc rác: Bỏ qua tin nhắn quá ngắn
+        if len(content) > 15:
+            try:
+                from src.services.vector_service import VectorService
+                from qdrant_client.http.models import PointStruct, VectorParams, Distance
+                import uuid
+                
+                vec_svc = VectorService()
+                collection_name = "chat_history_collection"
+                
+                # Tạo collection nếu chưa tồn tại
+                try:
+                    vec_svc.client.get_collection(collection_name)
+                except Exception:
+                    vec_svc.client.create_collection(
+                        collection_name=collection_name,
+                        vectors_config={
+                            vec_svc.DENSE_VECTOR_NAME: VectorParams(size=1024, distance=Distance.COSINE)
+                        }
+                    )
+                
+                # Mã hóa tin nhắn
+                role_prefix = "USER: " if message["role"] == "user" else "AI: "
+                text_to_encode = f"[{session_id}] {role_prefix}{content}"
+                dense_vec = vec_svc._encode_dense([text_to_encode], input_type="search_document")[0]
+                
+                point_id = str(uuid.uuid4())
+                vec_svc.client.upsert(
+                    collection_name=collection_name,
+                    points=[
+                        PointStruct(
+                            id=point_id,
+                            vector={vec_svc.DENSE_VECTOR_NAME: dense_vec},
+                            payload={
+                                "session_id": session_id,
+                                "role": message["role"],
+                                "content": content,
+                                "timestamp": datetime.datetime.utcnow().isoformat()
+                            }
+                        )
+                    ]
+                )
+                print(f"🧠 [Memory] Đã lưu tin nhắn vào Long-term Vector Memory.")
+            except Exception as e:
+                print(f"⚠️ [Memory] Lỗi lưu Vector History: {e}")
 
     def delete_session(self, session_id: str):
         """Xóa vĩnh viễn một phiên chat."""

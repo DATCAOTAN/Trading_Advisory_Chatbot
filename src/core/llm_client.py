@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from typing import List, Dict, Any, Iterator
 import ollama
 
@@ -82,6 +83,11 @@ class LLMClient:
         Nếu stream=True, trả về Iterator[str] yielding từng chunk (đã lọc thẻ <think>).
         Nếu stream=False, trả về Dict (đã lọc thẻ <think>).
         """
+        # Hãm tốc độ 15 giây nếu xài Google Free Tier để tránh lỗi 429
+        if self.provider == "google":
+            print("⏳ [LLM_Client] Nghỉ 15s để tránh dính Rate Limit của Google...")
+            time.sleep(15)
+
         if self.provider == "openrouter" and self.openrouter_client:
             if stream:
                 return self._filter_think_tags(self._chat_openrouter_stream(messages, temperature))

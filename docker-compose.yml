@@ -9,8 +9,12 @@ services:
       - ./src:/app/src
       - ./.env:/app/.env
     environment:
+      - PYTHONUNBUFFERED=1
+      - OLLAMA_HOST=http://host.docker.internal:11434
       - REDIS_URL=redis://redis:6379/0
       - MONGO_URI=mongodb://mongo:27017/
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - redis
       - mongo

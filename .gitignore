@@ -49,6 +49,7 @@ data/raw_pdfs/
 .env.*
 !.env.example
 *.key
+key_api_gemini.txt
 secrets.toml
 
 # =============================================================================

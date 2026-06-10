@@ -288,24 +288,14 @@ class VectorService:
     # =========================================================================
     # RETRIEVE — HYBRID SEARCH + MANUAL RRF + RERANKER
     # =========================================================================
-    def retrieve_context(
-        self,
-        query:           str,
-        top_k:           int  = None,
-        top_n:           int  = None,
-        enable_reranker: bool = None,
-    ) -> Tuple[str, List[Dict]]:
+    def retrieve_candidates(self, query: str, top_k: int = None) -> List[Dict]:
         """
-        Pipeline truy vấn đầy đủ (Pure Dense Cloud):
+        Pure Dense Search Pipeline:
         1. Encode query → Dense Vector qua Cohere API (search_query)
         2. Dense search trên Qdrant
-        3. De-duplicate theo parent_id → lấy parent text đầy đủ
-        4. Lazy-load Reranker → chấm điểm lại top_n tốt nhất bằng Cohere Reranker
-        5. Format context string + sources list
+        3. De-duplicate theo parent_id → lấy candidate list (Không Rerank)
         """
-        if top_k          is None: top_k          = Config.RETRIEVAL_TOP_K
-        if top_n          is None: top_n          = Config.RERANK_TOP_N
-        if enable_reranker is None: enable_reranker = Config.ENABLE_RERANKER
+        if top_k is None: top_k = Config.RETRIEVAL_TOP_K
 
         # ── Bước 1: Encode ─────────────────────────────────────────────────
         dense_vecs = self._encode_dense([query], input_type="search_query")
@@ -326,7 +316,7 @@ class VectorService:
         if not merged:
             return "Không tìm thấy dữ liệu liên quan trong kho tri thức.", []
 
-        # ── Bước 5: De-duplicate theo parent_id ───────────────────────────
+        # ── Bước 3: De-duplicate theo parent_id ───────────────────────────
         seen_pids: set      = set()
         candidates: List   = []
         for hit in merged:
@@ -335,54 +325,58 @@ class VectorService:
             if parent_id not in seen_pids:
                 seen_pids.add(parent_id)
                 candidates.append({
-                    "parent_text": payload.get("parent_text", payload.get("child_text", "")),
-                    "source":      payload.get("source", "Không rõ nguồn"),
-                    "doc_type":    payload.get("doc_type", "static"),
-                    "score":       getattr(hit, "score", 0.0),
+                    "content": payload.get("parent_text", payload.get("child_text", "")),
+                    "metadata": {
+                        "source": payload.get("source", "Không rõ nguồn"),
+                        "doc_type": payload.get("doc_type", "static"),
+                    },
+                    "score": getattr(hit, "score", 0.0),
                 })
+                
+        return candidates
 
-        # ── Bước 6: Cohere API Reranker ────────────────────────────
-        if enable_reranker and len(candidates) > top_n:
+    def search_chat_history(self, session_id: str, query: str, top_k: int = 5) -> str:
+        """Tìm kiếm trong Long-term Memory (Vector DB) của riêng phiên chat hiện tại."""
+        try:
+            from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+            dense_vec = self._encode_dense([query], input_type="search_query")[0]
+            
+            # Kiểm tra xem collection tồn tại không
             try:
-                import cohere
-                cohere_api_key = Config.COHERE_API_KEY
-                if not cohere_api_key:
-                    raise ValueError("COHERE_API_KEY chưa được cấu hình.")
-                cohere_client = cohere.ClientV2(cohere_api_key)
-                
-                print("🔍 [Reranker] Đang gửi request Rerank lên Cohere API Cloud...")
-                documents_text = [p["parent_text"] for p in candidates]
-                
-                response = cohere_client.rerank(
-                    model="rerank-multilingual-v3.0",
-                    query=query,
-                    documents=documents_text,
-                    top_n=top_n
-                )
-                
-                reranked_candidates = []
-                for hit in response.results:
-                    idx = hit.index
-                    doc = candidates[idx]
-                    doc["rerank_score"] = hit.relevance_score
-                    reranked_candidates.append(doc)
-                    
-                candidates = reranked_candidates
-                print(f"✅ [Reranker] Cohere Rerank hoàn tất xé gió -> Đã lấy Top {top_n} tài liệu tối ưu nhất.")
-            except Exception as e:
-                print(f"⚠️ [Reranker] Lỗi Cohere API: {e} -> Fallback dùng điểm gốc")
-                candidates = candidates[:top_n]
-        elif len(candidates) > top_n:
-            candidates = candidates[:top_n]
+                self.client.get_collection("chat_history_collection")
+            except Exception:
+                return "Lịch sử dài hạn hiện trống."
 
-        # ── Bước 7: Format output ──────────────────────────────────────────
-        final   = candidates[:top_n]
-        parts   = [
-            f"[Nguồn {i}: {p['source']} | Loại: {p['doc_type'].upper()}]\n{p['parent_text']}"
-            for i, p in enumerate(final, 1)
-        ]
-        context_str = ("\n\n" + "─" * 60 + "\n\n").join(parts)
-        return context_str, final
+            hits = self.client.search(
+                collection_name="chat_history_collection",
+                query_vector=(self.DENSE_VECTOR_NAME, dense_vec),
+                query_filter=Filter(
+                    must=[
+                        FieldCondition(
+                            key="session_id",
+                            match=MatchValue(value=session_id)
+                        )
+                    ]
+                ),
+                limit=top_k,
+                with_payload=True
+            )
+            
+            if not hits:
+                return "Không tìm thấy manh mối nào trong lịch sử dài hạn."
+                
+            # Tổng hợp các tin nhắn liên quan
+            parts = []
+            for hit in hits:
+                p = hit.payload
+                parts.append(f"[{p.get('timestamp', '')[:19]}] {p.get('role', '').upper()}: {p.get('content', '')}")
+            
+            # Sắp xếp lại theo thời gian
+            parts.sort()
+            return "\n".join(parts)
+        except Exception as e:
+            print(f"⚠️ [VectorService] Lỗi search chat history: {e}")
+            return "Lỗi trích xuất lịch sử."
 
 
 if __name__ == "__main__":
@@ -396,5 +390,5 @@ if __name__ == "__main__":
 
     if total > 0:
         print("\n🔍 Retrieve context...")
-        ctx, srcs = svc.retrieve_context("Lạm phát ảnh hưởng đến vàng như thế nào?")
-        print(f"📄 {len(srcs)} nguồn | preview: {ctx[:300]}...")
+        cands = svc.retrieve_candidates("Lạm phát ảnh hưởng đến vàng như thế nào?")
+        print(f"📄 Lấy được {len(cands)} candidates.")
