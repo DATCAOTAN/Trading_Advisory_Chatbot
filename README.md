@@ -73,7 +73,7 @@ graph TD
         Orchestrator -->|3. Call| Mem["MongoDB & Redis Cache"]
     end
     
-    Execution Layer -->|4. Augmented Context| MainLLM["Reasoning Engine (Gemini)"]
+    Orchestrator -->|4. Augmented Context| MainLLM["Reasoning Engine (Gemini)"]
     
     MainLLM --> Evaluator["Hallucination Evaluator (Groq)"]
     Evaluator -->|Approved| UI
