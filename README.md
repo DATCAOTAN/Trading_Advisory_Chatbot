@@ -54,28 +54,28 @@ Thay vì phụ thuộc vào một mô hình ngôn ngữ khổng lồ (Monolithic
 
 ```mermaid
 graph TD
-    User([Client / User]) -->|HTTP Request| UI[Streamlit Interface]
-    UI -->|Query| Gatekeeper{Intent Gateway (Groq)}
+    User(["Client / User"]) -->|HTTP Request| UI["Streamlit Interface"]
+    UI -->|Query| Gatekeeper{"Intent Gateway (Groq)"}
     
-    Gatekeeper -->|TRASH| Reject[Static Warning]
-    Gatekeeper -->|GREETING| ChitChat[Social Response]
-    Gatekeeper -->|FINANCIAL_RAG| QR[Query Normalizer (Groq)]
+    Gatekeeper -->|TRASH| Reject["Static Warning"]
+    Gatekeeper -->|GREETING| ChitChat["Social Response"]
+    Gatekeeper -->|FINANCIAL_RAG| QR["Query Normalizer (Groq)"]
     
-    QR --> Orchestrator[Agent Orchestrator]
+    QR --> Orchestrator["Agent Orchestrator"]
     
-    Orchestrator -->|1. Request Tools| ToolSelector[Tool Selector (Groq)]
+    Orchestrator -->|1. Request Tools| ToolSelector["Tool Selector (Groq)"]
     ToolSelector -.->|2. Return JSON| Orchestrator
     
     subgraph Execution Layer
-        Orchestrator -->|3. Call| VS[Qdrant Vector DB]
-        VS -->|Retrieve| Reranker[Cohere Cloud Reranker]
-        Orchestrator -->|3. Call| Live[Data Service (Oanda/YFinance)]
-        Orchestrator -->|3. Call| Mem[MongoDB & Redis Cache]
+        Orchestrator -->|3. Call| VS["Qdrant Vector DB"]
+        VS -->|Retrieve| Reranker["Cohere Cloud Reranker"]
+        Orchestrator -->|3. Call| Live["Data Service (Oanda/YFinance)"]
+        Orchestrator -->|3. Call| Mem["MongoDB & Redis Cache"]
     end
     
-    Execution Layer -->|4. Augmented Context| MainLLM[Reasoning Engine (Gemini)]
+    Execution Layer -->|4. Augmented Context| MainLLM["Reasoning Engine (Gemini)"]
     
-    MainLLM --> Evaluator[Hallucination Evaluator (Groq)]
+    MainLLM --> Evaluator["Hallucination Evaluator (Groq)"]
     Evaluator -->|Approved| UI
     Evaluator -->|Rejected| Orchestrator
 ```
