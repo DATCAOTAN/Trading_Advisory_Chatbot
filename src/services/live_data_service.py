@@ -143,12 +143,20 @@ class LiveDataService:
         else:
             yf_sym = f"{symbol}=X"
             
-        # yfinance map: 1h -> 1h, 1d -> 1d
-        interval_map = {"1h": "1h", "4h": "1h", "1d": "1d"} 
+        # yfinance map
+        interval_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "4h": "1h", "1d": "1d"} 
         yf_interval = interval_map.get(timeframe, "1h")
         
+        # yfinance chỉ cho phép period max 7d với nến 1m, 60d với nến 15m
+        if yf_interval == "1m":
+            period = "5d"
+        elif yf_interval in ["5m", "15m", "30m"]:
+            period = "1mo"
+        else:
+            period = "1mo" if limit > 100 else "5d"
+            
         ticker = yf.Ticker(yf_sym)
-        df = ticker.history(period="1mo" if limit > 100 else "5d", interval=yf_interval)
+        df = ticker.history(period=period, interval=yf_interval)
         
         if df.empty:
             return []
@@ -156,8 +164,14 @@ class LiveDataService:
         df = df.tail(limit)
         candles = []
         for index, row in df.iterrows():
+            # Chuyển đổi timezone về UTC để tránh lỗi lệch giờ với EST của yfinance
+            if index.tzinfo is not None:
+                utc_dt = index.tz_convert('UTC')
+            else:
+                utc_dt = index.tz_localize('UTC')
+                
             candles.append({
-                "timestamp": index.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                "timestamp": utc_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
                 "open": float(row['Open']),
                 "high": float(row['High']),
                 "low": float(row['Low']),
@@ -168,8 +182,8 @@ class LiveDataService:
 
     def _get_oanda_candles(self, symbol: str, timeframe: str, limit: int) -> List[Dict]:
         oanda_sym = f"{symbol[:3]}_{symbol[3:]}" if len(symbol) == 6 else symbol
-        # Oanda map: 1h -> H1, 4h -> H4, 1d -> D
-        tf_map = {"1h": "H1", "4h": "H4", "1d": "D"}
+        # Oanda map
+        tf_map = {"1m": "M1", "5m": "M5", "15m": "M15", "30m": "M30", "1h": "H1", "4h": "H4", "1d": "D"}
         granularity = tf_map.get(timeframe, "H1")
         
         headers = {"Authorization": f"Bearer {self.OANDA_API_KEY}"}

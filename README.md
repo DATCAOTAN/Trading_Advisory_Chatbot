@@ -1,177 +1,170 @@
 <div align="center">
 
-# 📈 AI Trading Advisory Chatbot — XAUUSD (v3.0)
+# AI Trading Advisory System
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![OpenRouter API](https://img.shields.io/badge/OpenRouter-Cloud_LLM-4A90E2)](https://openrouter.ai/)
+[![Groq API](https://img.shields.io/badge/Groq-Llama_3.3-F55036)](https://groq.com/)
+[![OpenRouter](https://img.shields.io/badge/OpenRouter-Cloud_LLM-4A90E2)](https://openrouter.ai/)
 [![Google AI Studio](https://img.shields.io/badge/Google-Gemini_Flash-blue)](https://aistudio.google.com/)
-[![Cohere API](https://img.shields.io/badge/Cohere-Reranker-FF0000)](https://cohere.com/)
-[![Ollama](https://img.shields.io/badge/Ollama-Fallback_LLM-orange)](https://ollama.com/)
+[![Cohere](https://img.shields.io/badge/Cohere-Reranker-FF0000)](https://cohere.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B)](https://streamlit.io/)
 [![Qdrant](https://img.shields.io/badge/Qdrant-Vector_DB-purple)](https://qdrant.tech/)
 [![Docker](https://img.shields.io/badge/Docker-Container-2496ED)](https://www.docker.com/)
-[![MongoDB](https://img.shields.io/badge/MongoDB-Storage-47A248)](https://www.mongodb.com/)
-[![Redis](https://img.shields.io/badge/Redis-Cache-DC382D)](https://redis.io/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Persistent_Storage-47A248)](https://www.mongodb.com/)
+[![Redis](https://img.shields.io/badge/Redis-Memory_Cache-DC382D)](https://redis.io/)
 
-**Hệ thống Cố vấn Giao dịch Vàng (XAUUSD) & Ngoại hối (Forex) sử dụng Kiến trúc Advanced RAG.**  
-*Tốc độ mili-giây với OpenRouter & Cohere Cloud — Tự động Fallback về Local — Trí nhớ vĩnh viễn.*
+**Hệ thống Tư vấn Giao dịch Tài chính (XAUUSD & Forex) dựa trên Kiến trúc Micro-Model Agentic RAG.**
 
 </div>
 
 ---
 
-## 📖 Giới Thiệu
+## Tổng Quan Dự Án
 
-**Trading Advisory Chatbot** là một nền tảng tư vấn tài chính được phát triển dựa trên sức mạnh của các mô hình ngôn ngữ lớn (LLMs). Dự án áp dụng kiến trúc **Advanced RAG (Retrieval-Augmented Generation)** để tổng hợp, phân tích dữ liệu vĩ mô, cấu trúc giá (SMC/Price Action), và đưa ra các khuyến nghị giao dịch sát với thực tế, hoàn toàn dựa trên kho tài liệu kiến thức (PDF) của riêng bạn.
+Trading Advisory System là một hệ thống phần mềm tư vấn tài chính cấp độ chuyên nghiệp, được thiết kế để phân tích hành vi giá (Price Action), cấu trúc thị trường (SMC) và dữ liệu vĩ mô theo thời gian thực. Hệ thống loại bỏ hoàn toàn các điểm nghẽn của một ứng dụng RAG (Retrieval-Augmented Generation) truyền thống bằng cách áp dụng kiến trúc **Micro-Model Agentic Routing**, chia nhỏ các luồng suy luận phức tạp và giao phó cho các mô hình AI chuyên biệt. 
 
-Phiên bản **v3.0 (Cloud Migration)** đánh dấu một bước đại nhảy vọt về hiệu năng: Loại bỏ hoàn toàn nút thắt cổ chai phần cứng bằng việc chuyển dịch luồng suy luận lên **OpenRouter (NVIDIA Nemotron 120B)** và **Cohere Reranker** (tốc độ mili-giây), kết hợp cùng **Bộ nhớ hội thoại toàn cục (Global Session Memory)** và **Bộ lọc tư duy thông minh (Think Tag Filter)**.
-
----
-
-## ✨ Các Tính Năng Đột Phá (v3.0)
-
-### 🚀 1. Dynamic LLM Router & Tốc độ ánh sáng
-- **OpenRouter Cloud Integration:** Kết nối thẳng với dòng model siêu khủng NVIDIA Nemotron 120B chuyên ngành tài chính, mang lại tốc độ Stream text theo thời gian thực.
-- **Cohere Reranker API:** Rút phích cắm hệ thống BGE Reranker cục bộ để chuyển lên Cloud với tốc độ xé gió, tiết kiệm hàng GB RAM máy trạm.
-- **Auto Fallback Mechanism:** Cơ chế tự động phòng vệ. Nếu mạng mất kết nối hoặc API bị nghẽn, hệ thống tự động đánh lái êm ái luồng xử lý về **Ollama Local** mà không làm crash ứng dụng.
-- **Stream Think Tag Filter:** Tự động lọc sạch các nội dung lập luận nội bộ (`<think>...</think>`) trên luồng Stream, đảm bảo UI luôn sạch sẽ và chuyên nghiệp.
-
-### 🧠 2. Global Conversation Memory (Hybrid Storage & Multi-session)
-- **Hybrid Storage Bất Tử:** Lịch sử chat được lưu trữ kép (Redis Cache + MongoDB Persistent). Cơ chế Fallback thông minh: Dù Redis bị flush hoàn toàn do khởi động lại server, hệ thống vẫn tự động câu (fetch) lại toàn bộ tin nhắn cũ từ MongoDB để nạp ngược lại vào Cache.
-- **Push-Only Safety (Chống ghi đè):** Sử dụng toán tử `$push` ở tầng Database giúp bảo toàn 100% lịch sử vĩnh viễn, tuyệt đối không xảy ra tình trạng ghi đè (overwrite) xóa mất dữ liệu cũ dù hệ thống RAM có bị sai lệch hoặc reset.
-- **Multi-session Management:** Hỗ trợ đa phiên trò chuyện. Tích hợp cơ chế tự động bảo vệ Session ID (Graceful Handling): Không tự sinh rác UUID mới nếu kết nối CSDL bị gián đoạn hoặc timeout.
-- **Context-Aware Intent Router (Gatekeeper):** Kế thừa bộ nhớ hội thoại để phân loại. Thông minh vượt trội khi tự nhận biết các lệnh yêu cầu hệ thống như *"tóm tắt cuộc hội thoại"*, *"nãy giờ nói gì"* để cho phép qua cổng (pass-through) vào RAG Pipeline mà không cần phải gượng ép người dùng chèn thêm từ khóa tài chính.
-
-### 🧩 3. Kiến Trúc Flexible UI & Facade Pattern
-- **Isolated Components:** Các chức năng Chatbot, Dashboard, và Cài đặt được tách biệt hoàn toàn vào từng module riêng (`src/ui/`). Việc thêm/bớt tính năng không bao giờ làm gãy (break) ứng dụng lõi.
-- **Context Trimming:** Tối ưu hóa số lượng tài liệu giữ lại (Top-3) sau khi Rerank qua Cohere, giúp giảm tải token nhồi vào LLM và tăng cường độ tập trung cho câu trả lời.
-
-### ⚡ 4. Đồng Bộ Thông Minh (Smart Incremental Ingestion)
-- Chống lãng phí CPU bằng cơ chế quản lý trạng thái tài liệu với **Mã băm SHA-256**. Hệ thống chỉ đọc và index **những file PDF mới hoặc bị sửa đổi**, bỏ qua hoàn toàn các file cũ.
-
-### 🌐 5. Live Data Integration (Thời gian thực)
-- **Lịch Kinh Tế ForexFactory (Bypass Cloudflare):** Tự động cào dữ liệu lịch kinh tế tuần, tích hợp cơ chế chống Rate Limit (Lỗi 429) bằng Memory Cache và thuật toán ngụy trang User-Agent. Tự động quy đổi toàn bộ sự kiện sang **UTC+7 (Giờ Việt Nam)**.
-- **Giá Vàng (XAUUSD) Thời Gian Thực:** Trang bị Live API (với Yahoo Finance Fallback) để lấy giá thị trường và nến (Candle) ngay tại khoảnh khắc trò chuyện, đảm bảo Agent luôn đưa ra nhận định dựa trên giá trị sát thực tế nhất.
+Dự án này là minh chứng cho khả năng thiết kế hệ thống phân tán, tối ưu hóa API đa nền tảng và xử lý dữ liệu tài chính độ trễ thấp, hoàn toàn phù hợp để triển khai trong môi trường thực tế (Production-ready).
 
 ---
 
-## 🏗️ Kiến Trúc Hệ Thống (Architecture Diagram)
+## Kiến Trúc Cốt Lõi & Đột Phá Kỹ Thuật
+
+### 1. Kiến trúc Micro-Model Agentic Routing
+Thay vì phụ thuộc vào một mô hình ngôn ngữ khổng lồ (Monolithic LLM) gây chậm trễ và lãng phí tài nguyên, hệ thống triển khai một Pipeline điều phối thông minh:
+- **Ultra-low Latency Gateway (Groq Llama 3.3 70B):** Chịu trách nhiệm phân loại ý định (Intent Classification), viết lại truy vấn (Query Rewriting) và đánh giá độ chính xác (Hallucination Evaluation). Với tốc độ xử lý >800 tokens/giây, Groq đảm bảo giai đoạn tiền xử lý diễn ra gần như tức thời.
+- **Dynamic Tool Selector (OpenRouter / NVIDIA Nemotron):** Hoạt động như một bộ gọi hàm (Function Calling) chuyên dụng. Hệ thống tự động phân tích ngữ cảnh người dùng để trích xuất các tham số tĩnh như mã tài sản (`symbol`), khung thời gian (`timeframe`), và giới hạn dữ liệu nến (`limit`).
+- **Core Reasoning Engine (Google Gemini 2.5 Flash):** Đóng vai trò là trung tâm phân tích cuối cùng. Khả năng nạp ngữ cảnh lớn (Long-context Window) giúp mô hình này tiêu hóa đồng thời hàng ngàn cụm từ (chunks) từ VectorDB và bảng dữ liệu giá để tổng hợp ra các quyết định giao dịch chiến lược.
+
+### 2. Tích hợp Dữ liệu Thời gian thực & Nhận thức ngữ cảnh
+- **Dynamic Time Awareness:** Hệ thống được cấy ghép module nhận thức thời gian, cho phép AI tính toán chính xác ngày, giờ, múi giờ và các mốc thời gian tương đối (ví dụ: "15 phút trước", "giá mở cửa hôm qua") để gán tham số gọi API chuẩn xác.
+- **Multi-Timeframe OHLCV Parsing:** Tích hợp trực tiếp với Oanda và Yahoo Finance API, tự động trích xuất biểu đồ nến trên các khung thời gian linh hoạt (1m, 5m, 15m, 1h, 1d). Mã nguồn bao gồm cơ chế chuẩn hóa múi giờ (Timezone Normalization) từ EST sang chuẩn UTC để đảm bảo thuật toán AI phân tích độ lệch giá không bị sai số.
+- **Macroeconomic Event Scraper:** Tự động thu thập Lịch kinh tế (ForexFactory) với bộ nhớ đệm (Memory Cache) tích hợp nhằm vượt qua các giới hạn Rate Limit (Lỗi 429), đồng thời quy đổi toàn bộ lịch phát hành tin tức sang múi giờ địa phương (UTC+7).
+
+### 3. Advanced Retrieval-Augmented Generation (RAG)
+- **Hybrid Search & Cloud Reranking:** Kết hợp cơ sở dữ liệu Qdrant (Dense Retrieval) và API Cohere Rerank. Tài liệu được truy xuất sẽ trải qua bước chấm điểm lại (Cross-encoder Reranking) để giữ lại top 3 đoạn văn bản chính xác nhất, giảm thiểu tối đa Token Overhead.
+- **Smart Incremental Ingestion:** Quá trình nạp tài liệu được kiểm soát chặt chẽ bằng thuật toán băm (SHA-256). Hệ thống chỉ thực hiện quy trình Embedding đối với những tệp PDF mới thêm vào hoặc bị thay đổi, giúp tiết kiệm triệt để tài nguyên tính toán nội bộ.
+
+### 4. Hệ thống Bộ nhớ Lai (Resilient Hybrid Memory)
+- **Global Session Memory:** Áp dụng cấu trúc lưu trữ song song: Redis (Cache tốc độ cao phục vụ luồng chat) và MongoDB (Lưu trữ vĩnh cửu dữ liệu JSON).
+- **Graceful Fallback & Push-Only Strategy:** Trong trường hợp Redis Cache bị dọn dẹp hoặc khởi động lại, hệ thống sẽ tự động khôi phục toàn bộ ngữ cảnh từ MongoDB. Cơ chế sử dụng toán tử `$push` đảm bảo dữ liệu luôn được ghi tuần tự, loại trừ tuyệt đối nguy cơ ghi đè hoặc mất mát dữ liệu phiên.
+
+---
+
+## Sơ Đồ Kiến Trúc Hệ Thống (Architecture Diagram)
 
 ```mermaid
 graph TD
-    User([Người dùng]) -->|Chat / Lệnh| UI[Streamlit UI]
-    UI -->|Router| Gatekeeper{LLM Gatekeeper}
+    User([Client / User]) -->|HTTP Request| UI[Streamlit Interface]
+    UI -->|Query| Gatekeeper{Intent Gateway (Groq)}
     
-    Gatekeeper -->|TRASH| Reject[Cảnh báo tĩnh]
-    Gatekeeper -->|GREETING| ChitChat[Trả lời xã giao]
-    Gatekeeper -->|FINANCIAL_RAG| QR[Query Rewriting Sync API]
+    Gatekeeper -->|TRASH| Reject[Static Warning]
+    Gatekeeper -->|GREETING| ChitChat[Social Response]
+    Gatekeeper -->|FINANCIAL_RAG| QR[Query Normalizer (Groq)]
     
-    QR -->|Truy vấn chuẩn hóa| VS[Vector Service / Pure Dense Search]
+    QR --> Orchestrator[Agent Orchestrator]
     
-    subgraph Data Layer
-        PDF[PDF Files] -->|Extract| Ingest[SHA-256 Tracker]
-        Ingest -->|Cập nhật| Qdrant[(Qdrant Vector DB)]
+    Orchestrator --> ToolSelector[Tool Selector (OpenRouter)]
+    
+    subgraph Execution Layer
+        ToolSelector -->|Theory/Docs| VS[Qdrant Vector DB]
+        VS -->|Top-K| Reranker[Cohere Cloud Reranker]
+        ToolSelector -->|Live Price/Candles| Live[Data Service (Oanda/YFinance)]
+        ToolSelector -->|Long-term Context| Mem[MongoDB & Redis Cache]
     end
     
-    Qdrant -->|Retrieve| VS
-    VS -->|Rerank Top-3| Reranker[Cohere Reranker Cloud]
-    Reranker --> Client[LLM Client Router]
+    Execution Layer -->|Augmented Prompt| MainLLM[Reasoning Engine (Gemini)]
     
-    subgraph AI Brain
-        Client -->|Ưu tiên| OpenRouter[OpenRouter API Cloud]
-        Client -->|Fallback| Ollama[Ollama Local]
-    end
-    
-    OpenRouter --> Filter[Think Tag Filter]
-    Ollama --> Filter
-    Filter --> UI
+    MainLLM --> Evaluator[Hallucination Evaluator (Groq)]
+    Evaluator -->|Approved| UI
+    Evaluator -->|Rejected| Orchestrator
 ```
 
 ---
 
-## 💻 Yêu Cầu Hệ Thống
+## Yêu Cầu Cấu Hình Hệ Thống
 
-| Thành phần | Yêu cầu cấu hình |
+| Thành Phần | Yêu Cầu Kỹ Thuật |
 |:---|:---|
-| **OS** | Windows 10/11, macOS, Linux |
-| **Hệ thống** | Đã cài đặt **Docker** và **Docker Compose** |
-| **Phần cứng** | Tối thiểu 8GB RAM (Đủ chạy Streamlit, Redis, Mongo, Qdrant) |
-| **API** | API Key của Google AI Studio (hoặc OpenRouter) & Cohere API |
-| **Ollama** *(Tùy chọn)* | Cài đặt nếu bạn muốn có hệ thống Fallback nội bộ phòng khi rớt mạng |
+| **Hệ Điều Hành** | Tương thích đa nền tảng (Windows, macOS, Linux) |
+| **Môi Trường** | Đòi hỏi **Docker** và **Docker Compose** |
+| **Phần Cứng** | Tối thiểu 4GB RAM (Khuyến nghị 8GB để chạy DB & Qdrant) |
+| **API Keys** | Cần có API từ Google AI Studio, Groq, OpenRouter, Cohere |
 
 ---
 
-## 🚀 Hướng Dẫn Cài Đặt Khởi Đầu
+## Hướng Dẫn Triển Khai (Deployment)
 
-### 1. Thiết lập dự án
-
-**Clone mã nguồn:**
+**Bước 1: Sao chép mã nguồn**
 ```bash
 git clone https://github.com/DATCAOTAN/Trading_Advisory_Chatbot.git
 cd Trading_Advisory_Chatbot
 ```
 
-### 2. Cấu Hình API (OpenRouter, Google & Cohere)
-Đổi tên file `.env.example` thành `.env` (hoặc tạo file `.env` mới) tại thư mục gốc và nhập cấu hình:
+**Bước 2: Cấu hình Môi trường**
+Tạo tệp `.env` tại thư mục gốc và cung cấp các khóa API cần thiết:
 ```env
+# Core Reasoning Engine
 LLM_PROVIDER=google
-GOOGLE_API_KEY=AIzaSy_your_api_key_here
+GOOGLE_API_KEY=your_google_api_key
 GOOGLE_MODEL_NAME=gemini-2.5-flash
 
-OPENROUTER_API_KEY=sk-or-v1-...
+# Pre-processing & Fast Evaluation
+GROQ_API_KEY=your_groq_api_key
+GROQ_MODEL_NAME=llama-3.3-70b-versatile
+
+# Function Calling / Routing
+OPENROUTER_API_KEY=your_openrouter_api_key
 OPENROUTER_MODEL_NAME=nvidia/nemotron-3-super-120b-a12b:free
 
-COHERE_API_KEY=your_cohere_api_key_here
+# Document Reranking
+COHERE_API_KEY=your_cohere_api_key
 ```
 
-### 3. Nạp tài liệu kiến thức
-Sao chép các file `.pdf` chứa chiến lược giao dịch của bạn vào:
-- `data/raw_pdfs/static/`: Cho sách, lý thuyết nền tảng.
-- `data/raw_pdfs/dynamic/`: Cho báo cáo vĩ mô tuần/tháng.
+**Bước 3: Nạp Tri Thức Cốt Lõi**
+Đặt các tài liệu tài chính, chiến lược (định dạng `.pdf`) vào các thư mục tương ứng:
+- `data/raw_pdfs/static/`: Kiến thức nền tảng (Ví dụ: Phương pháp SMC, Price Action).
+- `data/raw_pdfs/dynamic/`: Báo cáo vĩ mô hoặc tin tức cập nhật định kỳ.
 
-### 4. Khởi chạy Ứng dụng (Docker)
-Nhờ kiến trúc Containerized, bạn chỉ cần gõ 1 lệnh duy nhất để hệ thống tự động tải và liên kết toàn bộ Database (Redis, Mongo) và giao diện Streamlit:
+**Bước 4: Khởi chạy bằng Docker**
+Hệ thống được đóng gói Container hoàn chỉnh. Triển khai bằng một lệnh duy nhất:
 ```bash
 docker-compose up --build -d
 ```
-> Giao diện sẽ tự động mở tại: `http://localhost:8501`
+Giao diện người dùng sẽ sẵn sàng tại `http://localhost:8501`.
 
 ---
 
-## 📂 Cấu Trúc Mã Nguồn (Directory Structure)
+## Cấu Trúc Thư Mục (Directory Structure)
 
 ```text
 Trading_Advisory_Chatbot/
 ├── data/
-│   ├── raw_pdfs/               # Chứa file PDF đầu vào
-│   ├── qdrant_db/              # Thư mục map với Volume của VectorDB
-│   └── ingestion_state.json    # Trạng thái hash SHA-256
+│   ├── raw_pdfs/               # Kho lưu trữ tài liệu PDF đầu vào
+│   ├── qdrant_db/              # Phân vùng lưu trữ Vector DB
+│   └── ingestion_state.json    # Trạng thái theo dõi SHA-256
 ├── src/                        
 │   ├── core/
-│   │   ├── database.py         
-│   │   └── llm_client.py       # Dynamic LLM Router & Stream Filter (Mới)
+│   │   ├── database.py         # Kết nối MongoDB & Redis
+│   │   └── llm_client.py       # Bộ gọi API đa nền tảng (Dynamic Provider)
 │   ├── pipelines/
-│   │   └── intent_router.py    
+│   │   ├── intent_router.py    # Phân luồng câu hỏi
+│   │   └── modules/            # Các tác vụ xử lý tiền kỳ (Query Rewriter)
 │   ├── services/
-│   │   ├── history_service.py  # Quản lý Session State & Hybrid Cache
-│   │   ├── live_data_service.py# Lấy Giá Vàng & Lịch Kinh tế Live
-│   │   ├── vector_service.py   # Cohere Embed & Reranker Cloud
-│   │   └── llm_service.py      # LLM Agent
-│   ├── ui/                     
-│   ├── config.py               
-│   ├── orchestrator.py         
-│   └── app.py                  
-├── docker-compose.yml          # Trình điều phối Container (Mới)
-├── Dockerfile                  # Đóng gói Streamlit App (Mới)
-├── .env.example                
-├── launcher.py                 
-└── requirements.txt            
+│   │   ├── history_service.py  # Hybrid Memory Manager
+│   │   ├── live_data_service.py# Tương tác API thị trường (Oanda/Yahoo)
+│   │   ├── vector_service.py   # Embedding & Retrieval Controller
+│   │   └── llm_service.py      # Lõi Orchestrator cho luồng Agent
+│   ├── ui/                     # Giao diện người dùng (Streamlit Components)
+│   ├── config.py               # Quản lý biến môi trường
+│   ├── orchestrator.py         # Bộ não điều phối toàn bộ Agentic Pipeline
+│   └── app.py                  # Entrypoint giao diện UI
+├── docker-compose.yml          # Tệp cấu hình Container
+├── Dockerfile                  # Chỉ thị đóng gói ứng dụng
+├── launcher.py                 # Tệp khởi chạy cục bộ (Non-docker)
+└── requirements.txt            # Danh sách thư viện Python
 ```
 
 ---
 
-## 👨‍💻 Đóng Góp (Contributing)
-Hoan nghênh các đóng góp từ cộng đồng! Hãy Fork, tạo nhánh `feature/`, Commit và gửi Pull Request.
-
-## 📜 Giấy Phép (License)
-Dự án được phân phối dưới giấy phép **MIT**. Hoàn toàn miễn phí cho sử dụng cá nhân và thương mại.
+## Giấy Phép (License)
+Dự án được phân phối dưới giấy phép **MIT**. Hoàn toàn tự do cho các mục đích nghiên cứu, học tập và triển khai thương mại.

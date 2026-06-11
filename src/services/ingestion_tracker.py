@@ -138,7 +138,7 @@ class IngestionTracker:
         pdf_map = {}
         for root, _, files in os.walk(folder_path):
             for fname in files:
-                if fname.lower().endswith(".pdf"):
+                if fname.lower().endswith((".pdf", ".epub")):
                     full_path = os.path.join(root, fname)
                     pdf_map[fname] = full_path
         return pdf_map

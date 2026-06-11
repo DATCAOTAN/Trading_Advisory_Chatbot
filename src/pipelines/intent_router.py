@@ -56,7 +56,7 @@ Hãy phân loại câu hỏi vào một trong ba nhóm (intent) sau:
    hoàn toàn không liên quan tài chính VÀ không liên quan đến hệ thống (trưa nay ăn gì, cách nấu phở).
 
 3. 'FINANCIAL_RAG': Câu hỏi thỏa mãn MỘT TRONG HAI điều kiện sau:
-   - CHỨA ÍT NHẤT MỘT thực thể/thuật ngữ tài chính cụ thể như: tên tài sản (XAUUSD, vàng, USD, DXY), thuật ngữ kỹ thuật giao dịch (SMC, Order Block, FVG, ChoCh, BOS, Price Action, Entry, SL, TP), sự kiện kinh tế (Fed, CPI, NFP, lạm phát, lãi suất).
+   - CHỨA ÍT NHẤT MỘT thực thể/thuật ngữ tài chính cụ thể như: tên tài sản (XAUUSD, vàng, Ngoại hối, Forex, EURUSD, GBPUSD, USDJPY, DXY), thuật ngữ kỹ thuật giao dịch (SMC, Order Block, FVG, ChoCh, BOS, Price Action, Entry, SL, TP), sự kiện kinh tế (Fed, CPI, NFP, lạm phát, lãi suất).
    - YÊU CẦU TÓM TẮT/NHẮC LẠI lịch sử hội thoại (Ví dụ: "tóm tắt cuộc hội thoại", "nãy giờ nói gì").
    LƯU Ý: Các từ "AI Pipeline", "Reranker", "Hybrid Search", "Query Rewrite", "cấu hình hệ thống" là thuật ngữ CỦA HỆ THỐNG, KHÔNG PHẢI thuật ngữ tài chính → phân loại GREETING, không phải FINANCIAL_RAG.
 
@@ -174,7 +174,7 @@ class IntentRouter:
             prompt_content = f"{history_text}CÂU HỎI MỚI CỦA NGƯỜI DÙNG: {query}"
 
             # ── Gọi LLM Router (temperature=0.0) ──
-            client = LLMClient()
+            client = LLMClient(provider_override="groq")
             response = client.chat(
                 messages=[
                     {"role": "system", "content": _GATEKEEPER_SYSTEM_PROMPT},
@@ -245,7 +245,7 @@ class IntentRouter:
 
             dynamic_prompt = _GREETING_RESPONDER_PROMPT.format(model_name=active_model)
 
-            client = LLMClient()
+            client = LLMClient(provider_override="groq")
             stream = client.chat(
                 messages=[
                     {"role": "system", "content": dynamic_prompt},

@@ -107,32 +107,51 @@ class RAGOrchestrator:
         # Tiền xử lý bằng Rewriter để có Query cơ sở tốt nhất
         current_query = self.rewriter_module.process(user_query, chat_history)
 
+        # Lấy thời gian hiện tại một lần cho toàn bộ phiên
+        vn_tz = timezone(timedelta(hours=7))
+        weekdays = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
+        now = datetime.now(vn_tz)
+        weekday_str = weekdays[now.weekday()]
+        now_str = f"{weekday_str}, ngày {now.strftime('%d/%m/%Y %H:%M:%S')} (Giờ VN)"
+
         while current_loop < max_loops:
             current_loop += 1
             print(f"\n🔄 [Agent Loop {current_loop}/{max_loops}] Truy vấn hiện tại: {current_query}")
 
             # ── BƯỚC 1: THOUGHT & ACTION (Tool Selection) ──
-            tools_to_run = self._agent_tool_selector(current_query)
+            tools_to_run = self._agent_tool_selector(current_query, now_str)
             print(f"🛠️ [Agent Action] LLM tự quyết định gọi công cụ: {tools_to_run}")
 
             # ── BƯỚC 2: OBSERVATION (Tổng hợp Context từ Tools) ──
-            vn_tz = timezone(timedelta(hours=7))
-            now_str = datetime.now(vn_tz).strftime('%d/%m/%Y %H:%M:%S (Giờ VN)')
             combined_context = f"【THỜI GIAN HỆ THỐNG HIỆN TẠI】\nHôm nay là: {now_str}\n\n"
             current_sources = []
 
-            if "Live_API" in tools_to_run:
-                print("📡 [Observation] Lấy dữ liệu Live API...")
-                live_price = self.live_service.get_live_price("XAU_USD")
-                live_cal = self.live_service.get_economic_calendar()
-                combined_context += f"【DỮ LIỆU THỜI GIAN THỰC】\n{live_price}\n\n{live_cal}\n\n"
+            # Trích xuất danh sách tên công cụ để kiểm tra logic
+            tool_names = [t.get("tool") if isinstance(t, dict) else t for t in tools_to_run]
 
-            if "Search_Chat_History" in tools_to_run:
+            if "Live_API" in tool_names:
+                # Tìm tham số của Live_API
+                live_args = next((t.get("args", {}) for t in tools_to_run if isinstance(t, dict) and t.get("tool") == "Live_API"), {})
+                symbol = live_args.get("symbol", "XAUUSD")
+                timeframe = live_args.get("timeframe", "1m")
+                limit = live_args.get("limit", 100)
+                
+                print(f"📡 [Observation] Lấy dữ liệu Live API cho {symbol} ({timeframe}, {limit} nến)...")
+                live_price = self.live_service.get_live_price(symbol)
+                live_cal = self.live_service.get_economic_calendar()
+                
+                # Bổ sung lấy nến quá khứ (OHLCV)
+                candles = self.live_service.get_historical_candles(symbol=symbol, timeframe=timeframe, limit=limit)
+                candles_str = json.dumps(candles) if candles else "Không có dữ liệu nến"
+                
+                combined_context += f"【DỮ LIỆU THỜI GIAN THỰC】\nGiá hiện tại:\n{live_price}\n\nLịch kinh tế tuần này:\n{live_cal}\n\nDữ liệu nến quá khứ ({timeframe}, {limit} nến):\n{candles_str}\n\n"
+
+            if "Search_Chat_History" in tool_names:
                 print("⏳ [Observation] Trích xuất Long-term Memory...")
                 history_context = self.vector_service.search_chat_history(session_id, current_query)
                 combined_context += f"【KÝ ỨC LỊCH SỬ DÀI HẠN】\n{history_context}\n\n"
 
-            if "VectorDB_Search" in tools_to_run:
+            if "VectorDB_Search" in tool_names:
                 print("📚 [Observation] Bới tìm VectorDB...")
                 raw_candidates = self.vector_service.retrieve_candidates(current_query)
                 if raw_candidates and not isinstance(raw_candidates, str):
@@ -184,27 +203,38 @@ class RAGOrchestrator:
     # AGENTIC INTERNAL HELPERS
     # =========================================================================
 
-    def _agent_tool_selector(self, query: str) -> List[str]:
+    def _agent_tool_selector(self, query: str, current_time_str: str) -> List[Dict]:
         """Sử dụng LLM để tự quyết định công cụ cần gọi dựa trên câu hỏi."""
         prompt = f"""Bạn là một AI Controller. Bạn có 3 công cụ trong tay:
 1. "VectorDB_Search": Dùng khi câu hỏi cần tìm lý thuyết (SMC, FVG), phân tích vĩ mô tĩnh trong quá khứ, báo cáo cũ.
-2. "Live_API": Dùng khi câu hỏi nhắc đến GIÁ HIỆN TẠI (vàng bao nhiêu tiền), LỊCH KINH TẾ (tuần này có tin gì, hôm nay có tin gì).
-3. "Search_Chat_History": Dùng khi người dùng chủ động hỏi vặn, nhắc lại hoặc hồi tưởng về một chi tiết cụ thể nằm trong cuộc trò chuyện ở quá khứ (Ví dụ: "Hôm trước bạn bảo...", "Cái lỗi hôm bữa sửa sao?", "Phân tích lại lệnh hôm qua"). TUYỆT ĐỐI KHÔNG GỌI công cụ này nếu câu hỏi không mang tính chất lục lọi quá khứ.
+2. "Live_API": Dùng khi câu hỏi nhắc đến GIÁ HIỆN TẠI, GIÁ ĐÓNG CỬA, HOẶC XU HƯỚNG HIỆN TẠI. Hỗ trợ truyền tham số: symbol (ví dụ: XAUUSD, BTCUSDT), timeframe (ví dụ: 1m, 5m, 15m, 1h, 4h, 1d), limit (số lượng nến cần lấy, mặc định 100).
+3. "Search_Chat_History": Dùng khi người dùng chủ động hỏi vặn, nhắc lại hoặc hồi tưởng về một chi tiết cụ thể nằm trong cuộc trò chuyện ở quá khứ. TUYỆT ĐỐI KHÔNG GỌI công cụ này nếu câu hỏi không mang tính chất lục lọi quá khứ.
+
+THÔNG TIN BỐI CẢNH QUAN TRỌNG:
+Thời gian hiện tại của hệ thống: {current_time_str}
+Hãy dùng thời gian này để tính toán nếu người dùng hỏi những câu như "10 phút trước", "hôm qua", "tuần trước" để truyền limit và timeframe cho phù hợp.
 
 Nhiệm vụ: CÂU HỎI dưới đây cần gọi công cụ nào? Bạn có thể gọi 1 công cụ hoặc kết hợp nhiều công cụ cùng lúc. Trả về mảng rỗng [] nếu câu hỏi chỉ là chào hỏi xã giao hoặc không cần gọi công cụ.
-Output BẮT BUỘC phải là mảng JSON hợp lệ chứa tên các công cụ. Không xuất thêm bất cứ text nào khác.
-Ví dụ: ["Search_Chat_History", "VectorDB_Search"], ["Live_API"], hoặc [].
+Output BẮT BUỘC phải là mảng JSON hợp lệ chứa các object. Mỗi object gồm trường "tool" (tên công cụ) và "args" (các tham số cần thiết, nếu không cần tham số thì để trống). Không xuất thêm bất cứ text nào khác.
+Ví dụ:
+[
+  {{"tool": "Live_API", "args": {{"symbol": "XAUUSD", "timeframe": "1d", "limit": 1}}}},
+  {{"tool": "VectorDB_Search", "args": {{}}}}
+]
+hoặc []
 
 CÂU HỎI: {query}"""
         try:
-            resp = self.llm_service.llm_client.chat([{"role": "user", "content": prompt}], stream=False, temperature=0.0)
+            from src.core.llm_client import LLMClient
+            openrouter_client = LLMClient(provider_override="groq")
+            resp = openrouter_client.chat([{"role": "user", "content": prompt}], stream=False, temperature=0.0)
             clean_resp = resp["message"]["content"].replace("```json", "").replace("```", "").strip()
             tools = json.loads(clean_resp)
             if isinstance(tools, list):
                 return tools
         except Exception as e:
             print(f"⚠️ [Agent Tool Selector] Lỗi parse JSON: {e} -> Fallback dùng VectorDB_Search.")
-        return ["VectorDB_Search"]
+        return [{"tool": "VectorDB_Search", "args": {}}]
 
     def _agent_reflector(self, original_query: str, feedback: str, previous_query: str) -> str:
         """LLM đọc Feedback từ Evaluator và tự sinh Query mới để tìm bù thông tin."""
@@ -215,7 +245,9 @@ CÂU TRUY VẤN LẦN TRƯỚC BẠN DÙNG: {previous_query}
 Nhiệm vụ: Hãy đọc LÝ DO bị từ chối, và viết ra MỘT câu truy vấn TỪ KHÓA MỚI để tìm đúng đoạn kiến thức còn thiếu đó. 
 CHỈ output câu truy vấn mới, tuyệt đối không giải thích."""
         try:
-            new_q = self.llm_service.llm_client.chat([{"role": "user", "content": prompt}], stream=False, temperature=0.3)
+            from src.core.llm_client import LLMClient
+            openrouter_client = LLMClient(provider_override="groq")
+            new_q = openrouter_client.chat([{"role": "user", "content": prompt}], stream=False, temperature=0.3)
             return new_q["message"]["content"].strip('"').strip()
         except Exception:
             return f"{previous_query} {feedback}"

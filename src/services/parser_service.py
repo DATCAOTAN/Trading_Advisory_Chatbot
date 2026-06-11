@@ -125,15 +125,19 @@ class PDFParserService:
         # Xác định loại tài liệu (static/dynamic)
         doc_type = "dynamic" if "dynamic" in pdf_path else "static"
 
+        # Lấy tên thư mục mẹ để áp dụng Adaptive Chunking
+        folder_name = os.path.basename(os.path.dirname(pdf_path))
+        chunk_cfg = Config.ADAPTIVE_CHUNK_CONFIG.get(folder_name, Config.ADAPTIVE_CHUNK_CONFIG["default"])
+
         parents: List[Dict[str, Any]]  = []
         children: List[Dict[str, Any]] = []
         parent_id_counter = parent_id_start
 
-        # Bước 1: Tạo Parent chunks
+        # Bước 1: Tạo Parent chunks theo cấu hình thích ứng
         parent_chunks_raw = PDFParserService._make_sliding_chunks(
             full_text,
-            chunk_size=Config.PARENT_CHUNK_SIZE,
-            overlap=Config.PARENT_CHUNK_OVERLAP,
+            chunk_size=chunk_cfg["parent_size"],
+            overlap=chunk_cfg["parent_overlap"],
         )
 
         for parent_start, parent_text in parent_chunks_raw:
@@ -150,11 +154,11 @@ class PDFParserService:
                 }
             })
 
-            # Bước 2: Tạo Child chunks từ văn bản của Parent
+            # Bước 2: Tạo Child chunks từ văn bản của Parent theo cấu hình thích ứng
             child_chunks_raw = PDFParserService._make_sliding_chunks(
                 parent_text,
-                chunk_size=Config.CHILD_CHUNK_SIZE,
-                overlap=Config.CHILD_CHUNK_OVERLAP,
+                chunk_size=chunk_cfg["child_size"],
+                overlap=chunk_cfg["child_overlap"],
             )
 
             for _, child_text in child_chunks_raw:

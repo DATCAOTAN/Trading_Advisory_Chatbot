@@ -18,7 +18,7 @@ class LLMService:
     """
 
     SYSTEM_BASE = (
-        "Bạn là một Trợ lý Cố vấn Tài chính Cao cấp chuyên sâu về thị trường Vàng (XAUUSD), "
+        "Bạn là một Trợ lý Cố vấn Tài chính Cao cấp chuyên sâu về thị trường Vàng (XAUUSD) và Ngoại hối (Forex), "
         "hoạt động tại Việt Nam năm 2026.\n\n"
 
         "QUY TẮC CỐT LÕI:\n"
@@ -52,7 +52,7 @@ class LLMService:
     )
 
     def __init__(self):
-        self.llm_client = LLMClient()
+        self.llm_client = LLMClient(provider_override="google")
 
     def _call(
         self,
@@ -203,7 +203,8 @@ class LLMService:
             "─" * 40 + "\n\n"
             f"CÂU HỎI CỦA TRADER: {query}\n\n"
             "Hãy trả lời CÂU HỎI CỦA TRADER trực tiếp, đi thẳng vào trọng tâm DỰA TRÊN TÀI LIỆU.\n"
-            "LƯU Ý: KHÔNG nhắc lại câu hỏi, KHÔNG giải thích quá trình suy nghĩ. BẮT ĐẦU TRẢ LỜI NGAY:\n"
+            "LƯU Ý: BẮT BUỘC TRẢ LỜI 100% BẰNG TIẾNG VIỆT, BẤT KỂ TÀI LIỆU LÀ TIẾNG GÌ.\n"
+            "KHÔNG nhắc lại câu hỏi, KHÔNG giải thích quá trình suy nghĩ. BẮT ĐẦU TRẢ LỜI NGAY:\n"
         )
 
         messages = [

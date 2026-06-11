@@ -99,7 +99,7 @@ class VectorService:
         input_type: "search_document" khi nạp PDF, "search_query" khi tìm kiếm.
         """
         import time
-        max_retries = 3
+        max_retries = 15  # Tăng số lần thử lại lên 15 lần để đợi Rate Limit (Trial API rất gắt)
         for attempt in range(max_retries):
             try:
                 response = self.cohere_client.embed(
@@ -211,7 +211,7 @@ class VectorService:
             return 0
 
         parent_map = {p["parent_id"]: p for p in parents}
-        batch_size = 8  # Giảm batch size xuống 8 để tránh bú quá nhanh token của bản Trial Cohere
+        batch_size = 96  # Tăng batch size lên tối đa của Cohere (96) để giảm số lượng Request (tránh 429 RPM)
         total = 0
 
         for batch_start in range(0, len(children), batch_size):

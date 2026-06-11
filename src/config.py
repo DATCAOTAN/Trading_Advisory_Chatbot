@@ -87,6 +87,34 @@ class Config:
     CHUNK_SIZE    = CHILD_CHUNK_SIZE
     CHUNK_OVERLAP = CHILD_CHUNK_OVERLAP
 
+    # Tùy chỉnh Chunk theo ngữ cảnh thư mục (Adaptive Chunking)
+    ADAPTIVE_CHUNK_CONFIG = {
+        "indicators": {
+            "parent_size": 1500, "parent_overlap": 150,
+            "child_size": 300, "child_overlap": 50
+        },
+        "price_action": {
+            "parent_size": 1500, "parent_overlap": 150,
+            "child_size": 300, "child_overlap": 50
+        },
+        "smc": {
+            "parent_size": 2000, "parent_overlap": 200,
+            "child_size": 400, "child_overlap": 80
+        },
+        "macro_reports": {
+            "parent_size": 3000, "parent_overlap": 300,
+            "child_size": 600, "child_overlap": 100
+        },
+        "risk_management": {
+            "parent_size": 3000, "parent_overlap": 300,
+            "child_size": 800, "child_overlap": 150
+        },
+        "default": {
+            "parent_size": PARENT_CHUNK_SIZE, "parent_overlap": PARENT_CHUNK_OVERLAP,
+            "child_size": CHILD_CHUNK_SIZE, "child_overlap": CHILD_CHUNK_OVERLAP
+        }
+    }
+
     # =========================================================================
     # 4. PIPELINE RETRIEVAL
     # =========================================================================

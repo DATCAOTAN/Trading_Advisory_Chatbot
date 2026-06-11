@@ -6,7 +6,7 @@ from src.core.llm_client import LLMClient
 class QueryRewriterModule:
     """Mô-đun Tiền Xử Lý Truy Vấn: Chuẩn hóa, làm sạch và mở rộng ý định của User."""
     def __init__(self):
-        self.llm_client = LLMClient()
+        self.llm_client = LLMClient(provider_override="groq")
         
     def process(self, query: str, chat_history: List[Dict] = None) -> str:
         if not Config.ENABLE_QUERY_REWRITING:
@@ -33,7 +33,8 @@ class QueryRewriterModule:
                     "Lưu ý:\n"
                     "- Dịch mọi từ lóng sang thuật ngữ chuẩn.\n"
                     "- Giữ nguyên các mã tài sản (XAUUSD, DXY).\n"
-                    "- Nếu câu hỏi chứa đại từ (nó, điều đó), hãy dùng ngữ cảnh từ lịch sử để thay thế."
+                    "- Nếu câu hỏi chứa đại từ (nó, điều đó), hãy dùng ngữ cảnh từ lịch sử để thay thế.\n"
+                    "- QUAN TRỌNG: Nếu câu hỏi hỏi chung chung về các khái niệm như 'quản lý rủi ro', 'quản lý vốn', 'chỉ báo', 'tâm lý', hãy TỰ ĐỘNG THÊM cụm từ 'trong giao dịch tài chính (Trading/Forex)' vào cuối truy vấn."
                 )
             },
             {

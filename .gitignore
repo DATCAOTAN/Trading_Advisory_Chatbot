@@ -50,6 +50,7 @@ data/raw_pdfs/
 !.env.example
 *.key
 key_api_gemini.txt
+cohere_key_api.txt
 secrets.toml
 
 # =============================================================================

@@ -4,7 +4,7 @@ from src.core.llm_client import LLMClient
 class EvaluatorModule:
     """Đánh giá Hallucination và ép vòng lặp Self-Correction."""
     def __init__(self):
-        self.llm_client = LLMClient()
+        self.llm_client = LLMClient(provider_override="groq")
         
     def process(self, answer: str, context: str) -> Tuple[bool, str]:
         """

@@ -29,11 +29,20 @@ class RerankerModule:
             best_docs = []
             for r in response.results:
                 orig_doc = raw_documents[r.index]
-                if r.relevance_score < 0.3:
+                if r.relevance_score < 0.1:  # Hạ ngưỡng xuống 0.1 cho tìm kiếm đa ngôn ngữ (Việt -> Anh)
                     continue
                 best_docs.append({
                     "content": orig_doc["content"],
                     "metadata": orig_doc["metadata"],
+                    "score": r.relevance_score
+                })
+                
+            # Nếu bộ lọc quá tay xóa sạch mọi thứ, VỚT VÁT lại chunk có điểm cao nhất
+            if not best_docs and response.results:
+                r = response.results[0]
+                best_docs.append({
+                    "content": raw_documents[r.index]["content"],
+                    "metadata": raw_documents[r.index]["metadata"],
                     "score": r.relevance_score
                 })
                 

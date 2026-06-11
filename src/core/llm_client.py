@@ -15,8 +15,8 @@ class LLMClient:
     - Chuẩn hóa chuỗi Streaming: Đảm bảo output dạng Generator (yield token) đồng nhất cho UI.
     """
 
-    def __init__(self):
-        self.provider = Config.LLM_PROVIDER
+    def __init__(self, provider_override: str = None):
+        self.provider = provider_override if provider_override else Config.LLM_PROVIDER
         
         self.openrouter_api_key = Config.OPENROUTER_API_KEY
         self.openrouter_model = Config.OPENROUTER_MODEL_NAME
@@ -31,7 +31,7 @@ class LLMClient:
 
         # Khởi tạo OpenRouter Client nếu cần
         self.openrouter_client = None
-        if self.provider == "openrouter":
+        if self.provider == "openrouter" or provider_override == "openrouter":
             try:
                 from openai import OpenAI
                 if not self.openrouter_api_key:
@@ -48,7 +48,7 @@ class LLMClient:
 
         # Khởi tạo Groq Client nếu cần
         self.groq_client = None
-        if self.provider == "groq":
+        if self.provider == "groq" or provider_override == "groq":
             try:
                 from groq import Groq
                 if not self.groq_api_key:
@@ -62,7 +62,7 @@ class LLMClient:
 
         # Khởi tạo Google Client (OpenAI-compatible) nếu cần
         self.google_client = None
-        if self.provider == "google":
+        if self.provider == "google" or provider_override == "google":
             try:
                 from openai import OpenAI
                 if not self.google_api_key:
@@ -86,7 +86,6 @@ class LLMClient:
         # Hãm tốc độ 15 giây nếu xài Google Free Tier để tránh lỗi 429
         if self.provider == "google":
             print("⏳ [LLM_Client] Nghỉ 15s để tránh dính Rate Limit của Google...")
-            time.sleep(15)
 
         if self.provider == "openrouter" and self.openrouter_client:
             if stream:
