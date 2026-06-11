@@ -63,16 +63,17 @@ graph TD
     
     QR --> Orchestrator[Agent Orchestrator]
     
-    Orchestrator --> ToolSelector[Tool Selector (OpenRouter)]
+    Orchestrator -->|1. Request Tools| ToolSelector[Tool Selector (Groq)]
+    ToolSelector -.->|2. Return JSON| Orchestrator
     
     subgraph Execution Layer
-        ToolSelector -->|Theory/Docs| VS[Qdrant Vector DB]
-        VS -->|Top-K| Reranker[Cohere Cloud Reranker]
-        ToolSelector -->|Live Price/Candles| Live[Data Service (Oanda/YFinance)]
-        ToolSelector -->|Long-term Context| Mem[MongoDB & Redis Cache]
+        Orchestrator -->|3. Call| VS[Qdrant Vector DB]
+        VS -->|Retrieve| Reranker[Cohere Cloud Reranker]
+        Orchestrator -->|3. Call| Live[Data Service (Oanda/YFinance)]
+        Orchestrator -->|3. Call| Mem[MongoDB & Redis Cache]
     end
     
-    Execution Layer -->|Augmented Prompt| MainLLM[Reasoning Engine (Gemini)]
+    Execution Layer -->|4. Augmented Context| MainLLM[Reasoning Engine (Gemini)]
     
     MainLLM --> Evaluator[Hallucination Evaluator (Groq)]
     Evaluator -->|Approved| UI
