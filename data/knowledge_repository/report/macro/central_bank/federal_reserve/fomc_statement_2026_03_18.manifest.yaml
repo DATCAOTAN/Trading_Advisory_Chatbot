@@ -1,0 +1,24 @@
+title: FOMC Statement
+title_slug: fomc_statement_2026_03_18
+author: Federal Reserve
+author_slug: federal_reserve
+knowledge_type: report
+domain: macro
+subdomain: central_bank
+document_type: pdf
+version: v1
+lifecycle: ACTIVE
+language: en
+source_tier: tier1
+publish_year: 0
+tags:
+  strategies: []
+  assets: []
+  timeframe_focus: []
+organization_slug: federal_reserve
+organization: Federal Reserve
+country: US
+event_type: FOMC
+published_date: '2026-03-18'
+period: '2026-03-18'
+checksum: 6d0f8f1fdeab2b08dd5102c3ccc6b4f876a84a933e03d915ef5b21bae7b684d4

@@ -298,7 +298,11 @@ class VectorService:
         if top_k is None: top_k = Config.RETRIEVAL_TOP_K
 
         # ── Bước 1: Encode ─────────────────────────────────────────────────
-        dense_vecs = self._encode_dense([query], input_type="search_query")
+        try:
+            dense_vecs = self._encode_dense([query], input_type="search_query")
+        except Exception as e:
+            print(f"[VectorService] Dense encode error: {e}")
+            return []
         dense_vec = dense_vecs[0]
 
         # ── Bước 2: Dense Search ───────────────────────────────────────────
@@ -325,6 +329,8 @@ class VectorService:
             if parent_id not in seen_pids:
                 seen_pids.add(parent_id)
                 candidates.append({
+                    "chunk_id": str(hit.id),
+                    "parent_id": parent_id,
                     "content": payload.get("parent_text", payload.get("child_text", "")),
                     "metadata": {
                         "source": payload.get("source", "Không rõ nguồn"),
@@ -369,7 +375,8 @@ class VectorService:
             parts = []
             for hit in hits:
                 p = hit.payload
-                parts.append(f"[{p.get('timestamp', '')[:19]}] {p.get('role', '').upper()}: {p.get('content', '')}")
+                warning_prefix = "[WARNING: NON-AUTHORITATIVE DEGRADED MEMORY] " if p.get("quality_status") == "DEGRADED" else ""
+                parts.append(f"[{p.get('timestamp', '')[:19]}] {p.get('role', '').upper()}: {warning_prefix}{p.get('content', '')}")
             
             # Sắp xếp lại theo thời gian
             parts.sort()

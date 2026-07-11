@@ -1,0 +1,23 @@
+title: US Nonfarm Payrolls
+title_slug: us_nonfarm_payrolls_2026_05
+author: BLS
+author_slug: bls
+knowledge_type: report
+domain: macro
+subdomain: employment
+document_type: pdf
+version: v1
+lifecycle: ACTIVE
+language: en
+source_tier: tier1
+publish_year: 0
+tags:
+  strategies: []
+  assets: []
+  timeframe_focus: []
+organization_slug: bls
+organization: BLS
+country: US
+event_type: NFP
+period: 2026-05
+checksum: 46b730a9f9b0899eebfea85ea5e0aadca6e2cf9a5eaa944e895bafc68671b690

@@ -1,0 +1,76 @@
+federal_reserve:
+  display_name: "Federal Reserve"
+  source_tier: tier1
+  aliases: ["Fed", "FRB"]
+bls:
+  display_name: "BLS"
+  source_tier: tier1
+  aliases: ["Bureau of Labor Statistics", "US Bureau of Labor Statistics"]
+bea:
+  display_name: "BEA"
+  source_tier: tier1
+  aliases: ["Bureau of Economic Analysis", "US Bureau of Economic Analysis"]
+imf:
+  display_name: "IMF"
+  source_tier: tier1
+  aliases: ["International Monetary Fund"]
+world_bank:
+  display_name: "World Bank"
+  source_tier: tier1
+  aliases: ["The World Bank"]
+oecd:
+  display_name: "OECD"
+  source_tier: tier1
+  aliases: ["Organisation for Economic Co-operation and Development"]
+bis:
+  display_name: "BIS"
+  source_tier: tier1
+  aliases: ["Bank for International Settlements"]
+world_gold_council:
+  display_name: "World Gold Council"
+  source_tier: tier1
+  aliases: ["WGC"]
+ben_bernanke:
+  display_name: "Ben Bernanke"
+  source_tier: tier1
+  aliases: ["Bernanke", "Ben Bernanke"]
+ray_dalio:
+  display_name: "Ray Dalio"
+  source_tier: tier1
+  aliases: ["Dalio"]
+john_murphy:
+  display_name: "John Murphy"
+  source_tier: tier2
+  aliases: ["John Murphy", "J. Murphy"]
+ernest_chan:
+  display_name: "Ernest Chan"
+  source_tier: tier2
+  aliases: ["E. Chan"]
+alexander_elder:
+  display_name: "Alexander Elder"
+  source_tier: tier2
+  aliases: ["Elder"]
+mark_douglas:
+  display_name: "Mark Douglas"
+  source_tier: tier2
+  aliases: ["Douglas"]
+michael_covel:
+  display_name: "Michael Covel"
+  source_tier: tier2
+  aliases: ["Covel"]
+van_tharp:
+  display_name: "Van Tharp"
+  source_tier: tier2
+  aliases: ["Tharp"]
+al_brooks:
+  display_name: "Al Brooks"
+  source_tier: tier2
+  aliases: ["Brooks"]
+anna_coulling:
+  display_name: "Anna Coulling"
+  source_tier: tier2
+  aliases: ["Coulling"]
+unknown:
+  display_name: "Unknown"
+  source_tier: tier3
+  aliases: []

@@ -18,6 +18,27 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 class Config:
     # =========================================================================
     # 1. ĐƯỜNG DẪN HỆ THỐNG (Defensive Programming — Path.resolve())
@@ -59,7 +80,8 @@ class Config:
     
     # ── Google AI Studio API (OpenAI Compatible) ──
     GOOGLE_API_KEY         = os.getenv("GOOGLE_API_KEY", "")
-    GOOGLE_MODEL_NAME      = os.getenv("GOOGLE_MODEL_NAME", "gemini-2.5-flash")
+    GOOGLE_MODEL_NAME      = os.getenv("GOOGLE_MODEL_NAME", "gemini-3.1-flash-lite")
+    GOOGLE_FALLBACK_MODEL_NAME = os.getenv("GOOGLE_FALLBACK_MODEL_NAME", "gemini-flash-latest")
     
     
     # ── Cohere API (Reranker) ──
@@ -69,6 +91,50 @@ class Config:
     EMBEDDING_MODEL_NAME   = "BAAI/bge-m3"
     RERANKER_MODEL_NAME    = "BAAI/bge-reranker-v2-m3"
     VECTOR_COLLECTION_NAME = "xauusd_knowledge_v2"
+    PDF_PARSER_MODE        = os.getenv("PDF_PARSER_MODE", "pymupdf").strip().lower()
+    MINERU_COMMAND         = os.getenv("MINERU_COMMAND", "mineru").strip()
+    MINERU_BACKEND         = os.getenv("MINERU_BACKEND", "pipeline").strip()
+    MINERU_METHOD          = os.getenv("MINERU_METHOD", "auto").strip()
+    MINERU_TIMEOUT_SECONDS = _env_int("MINERU_TIMEOUT_SECONDS", 1800)
+    MINERU_PARSE_BOOKS     = _env_bool("MINERU_PARSE_BOOKS", False)
+    MINERU_SELECTIVE_BOOK_PAGES_ENABLED = _env_bool("MINERU_SELECTIVE_BOOK_PAGES_ENABLED", True)
+    MINERU_SELECTIVE_MAX_PAGES_PER_DOC = _env_int("MINERU_SELECTIVE_MAX_PAGES_PER_DOC", 5)
+    MINERU_SELECTIVE_MAX_RANGES_PER_DOC = _env_int("MINERU_SELECTIVE_MAX_RANGES_PER_DOC", 5)
+    MINERU_SELECTIVE_LOW_TEXT_CHARS = _env_int("MINERU_SELECTIVE_LOW_TEXT_CHARS", 300)
+    MINERU_SELECTIVE_TABLE_LIKE_THRESHOLD = _env_float("MINERU_SELECTIVE_TABLE_LIKE_THRESHOLD", 0.25)
+    MINERU_SELECTIVE_IMAGE_AREA_RATIO = _env_float("MINERU_SELECTIVE_IMAGE_AREA_RATIO", 0.20)
+    MINERU_FULL_MAX_PAGES_SOFT_LIMIT = _env_int("MINERU_FULL_MAX_PAGES_SOFT_LIMIT", 25)
+    MINERU_FULL_COMPLEX_PAGE_RATIO_THRESHOLD = _env_float("MINERU_FULL_COMPLEX_PAGE_RATIO_THRESHOLD", 0.35)
+    PARSER_OUTPUT_SCHEMA_VERSION = os.getenv("PARSER_OUTPUT_SCHEMA_VERSION", "adaptive_pdf_parse_v1").strip()
+    EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "cohere").strip().lower()
+    EMBEDDING_BATCH_SIZE = _env_int("EMBEDDING_BATCH_SIZE", 32)
+    EMBEDDING_REQUEST_TIMEOUT_SECONDS = _env_int("EMBEDDING_REQUEST_TIMEOUT_SECONDS", 90)
+    EMBEDDING_MAX_RETRIES = _env_int("EMBEDDING_MAX_RETRIES", 5)
+    EMBEDDING_BACKOFF_BASE_SECONDS = _env_int("EMBEDDING_BACKOFF_BASE_SECONDS", 10)
+    EMBEDDING_BACKOFF_MAX_SECONDS = _env_int("EMBEDDING_BACKOFF_MAX_SECONDS", 300)
+    EMBEDDING_RATE_LIMIT_COOLDOWN_SECONDS = _env_int("EMBEDDING_RATE_LIMIT_COOLDOWN_SECONDS", 600)
+    EMBEDDING_CIRCUIT_BREAKER_FAILURES = _env_int("EMBEDDING_CIRCUIT_BREAKER_FAILURES", 3)
+    EMBEDDING_FAIL_FAST_ON_AUTH = _env_bool("EMBEDDING_FAIL_FAST_ON_AUTH", True)
+    EMBEDDING_RETRY_JITTER = _env_bool("EMBEDDING_RETRY_JITTER", True)
+    EMBEDDING_CACHE_ENABLED = _env_bool("EMBEDDING_CACHE_ENABLED", True)
+    EMBEDDING_CACHE_BACKEND = os.getenv("EMBEDDING_CACHE_BACKEND", "sqlite").strip().lower()
+    EMBEDDING_CACHE_PATH = os.getenv("EMBEDDING_CACHE_PATH", str(DATA_DIR / "cache" / "embedding_cache.sqlite")).strip()
+    KNOWLEDGE_UPDATE_RETRY_FAILED_ONLY = _env_bool("KNOWLEDGE_UPDATE_RETRY_FAILED_ONLY", False)
+    KNOWLEDGE_UPDATE_MAX_DOCS_PER_RUN = _env_int("KNOWLEDGE_UPDATE_MAX_DOCS_PER_RUN", 0)
+    KNOWLEDGE_UPDATE_MAX_VECTORS_PER_RUN = _env_int("KNOWLEDGE_UPDATE_MAX_VECTORS_PER_RUN", 0)
+    KNOWLEDGE_UPDATE_STOP_ON_RATE_LIMIT = _env_bool("KNOWLEDGE_UPDATE_STOP_ON_RATE_LIMIT", True)
+    KNOWLEDGE_UPDATE_FAST_PRECHECK_ENABLED = _env_bool("KNOWLEDGE_UPDATE_FAST_PRECHECK_ENABLED", True)
+    KNOWLEDGE_UPDATE_FAST_PRECHECK_HASH_CACHE_ENABLED = _env_bool("KNOWLEDGE_UPDATE_FAST_PRECHECK_HASH_CACHE_ENABLED", True)
+    KNOWLEDGE_UPDATE_FORCE_REPARSE = _env_bool("KNOWLEDGE_UPDATE_FORCE_REPARSE", False)
+    KNOWLEDGE_UPDATE_FORCE_REINDEX = _env_bool("KNOWLEDGE_UPDATE_FORCE_REINDEX", False)
+    KNOWLEDGE_UPDATE_LOG_PRECHECK = _env_bool("KNOWLEDGE_UPDATE_LOG_PRECHECK", True)
+    SEMANTIC_CONTEXT_EXECUTOR_ENABLED = _env_bool("SEMANTIC_CONTEXT_EXECUTOR_ENABLED", True)
+    SEMANTIC_CONTEXT_EXECUTOR_AUTHORITATIVE = _env_bool("SEMANTIC_CONTEXT_EXECUTOR_AUTHORITATIVE", True)
+    SEMANTIC_CONTEXT_REUSE_LEGACY_PREFETCH = _env_bool("SEMANTIC_CONTEXT_REUSE_LEGACY_PREFETCH", True)
+    SEMANTIC_CONTEXT_BLOCK_DUPLICATE_FETCH = _env_bool("SEMANTIC_CONTEXT_BLOCK_DUPLICATE_FETCH", True)
+    SEMANTIC_CONTEXT_TASK_VIEWS_ENABLED = _env_bool("SEMANTIC_CONTEXT_TASK_VIEWS_ENABLED", True)
+    SEMANTIC_CONTEXT_KNOWLEDGE_USE_V3 = _env_bool("SEMANTIC_CONTEXT_KNOWLEDGE_USE_V3", True)
+    SEMANTIC_CONTEXT_KNOWLEDGE_FALLBACK_TO_LEGACY = _env_bool("SEMANTIC_CONTEXT_KNOWLEDGE_FALLBACK_TO_LEGACY", False)
 
     # ── Live Data APIs ──
     OANDA_API_KEY          = os.getenv("OANDA_API_KEY", "")
@@ -129,6 +195,9 @@ class Config:
     ENABLE_RERANKER         = True
     ENABLE_SELF_CORRECTION  = False
     ENABLE_QUERY_REWRITING  = True
+    USE_KNOWLEDGE_V3        = False
+    KNOWLEDGE_V3_FALLBACK_TO_LEGACY = True
+    KNOWLEDGE_V3_SCORE_THRESHOLD = 0.0
 
     # =========================================================================
     # 6. BỘ NHỚ HỘI THOẠI

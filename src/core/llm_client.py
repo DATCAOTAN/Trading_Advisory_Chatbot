@@ -6,6 +6,25 @@ import ollama
 
 from src.config import Config
 
+
+class LLMStream:
+    """Iterator wrapper that carries provider stream metadata."""
+
+    def __init__(self, iterator: Iterator[str], metadata: Dict[str, Any]):
+        self._iterator = iter(iterator)
+        self.metadata = metadata
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self._iterator)
+
+    @property
+    def finish_reason(self) -> str:
+        return self.metadata.get("finish_reason", "UNKNOWN")
+
+
 class LLMClient:
     """
     Dynamic LLM Router (Phân luồng thông minh).
@@ -26,8 +45,10 @@ class LLMClient:
         
         self.google_api_key = Config.GOOGLE_API_KEY
         self.google_model = Config.GOOGLE_MODEL_NAME
+        self.google_fallback_model = getattr(Config, "GOOGLE_FALLBACK_MODEL_NAME", "")
         
         self.ollama_model = Config.LLM_MODEL_NAME
+        self.last_finish_reason = "UNKNOWN"
 
         # Khởi tạo OpenRouter Client nếu cần
         self.openrouter_client = None
@@ -147,52 +168,113 @@ class LLMClient:
         Nhận diện và loại bỏ tất cả nội dung nằm giữa <think> và </think> 
         ngay trong lúc đang stream từng chunk nhỏ, tránh làm gãy luồng UI.
         """
-        in_think = False
-        buffer = ""
-        for chunk in stream:
-            buffer += chunk
-            while buffer:
-                if not in_think:
-                    think_idx = buffer.find("<think>")
-                    if think_idx != -1:
-                        if think_idx > 0:
-                            yield buffer[:think_idx]
-                        in_think = True
-                        buffer = buffer[think_idx + 7:]
-                    else:
-                        possible_partial = False
-                        for i in range(max(0, len(buffer) - 6), len(buffer)):
-                            if buffer[i] == "<" and "<think>".startswith(buffer[i:]):
-                                if i > 0:
-                                    yield buffer[:i]
-                                buffer = buffer[i:]
-                                possible_partial = True
-                                break
-                        if possible_partial:
-                            break
+        metadata = getattr(stream, "metadata", {"finish_reason": "UNKNOWN"})
+
+        def filtered():
+            in_think = False
+            buffer = ""
+            for chunk in stream:
+                buffer += chunk
+                while buffer:
+                    if not in_think:
+                        think_idx = buffer.find("<think>")
+                        if think_idx != -1:
+                            if think_idx > 0:
+                                yield buffer[:think_idx]
+                            in_think = True
+                            buffer = buffer[think_idx + 7:]
                         else:
-                            yield buffer
-                            buffer = ""
-                else:
-                    end_idx = buffer.find("</think>")
-                    if end_idx != -1:
-                        in_think = False
-                        buffer = buffer[end_idx + 8:]
-                    else:
-                        possible_partial = False
-                        for i in range(max(0, len(buffer) - 7), len(buffer)):
-                            if buffer[i] == "<" and "</think>".startswith(buffer[i:]):
-                                buffer = buffer[i:]
-                                possible_partial = True
+                            possible_partial = False
+                            for i in range(max(0, len(buffer) - 6), len(buffer)):
+                                if buffer[i] == "<" and "<think>".startswith(buffer[i:]):
+                                    if i > 0:
+                                        yield buffer[:i]
+                                    buffer = buffer[i:]
+                                    possible_partial = True
+                                    break
+                            if possible_partial:
                                 break
-                        if possible_partial:
-                            break
+                            else:
+                                yield buffer
+                                buffer = ""
+                    else:
+                        end_idx = buffer.find("</think>")
+                        if end_idx != -1:
+                            in_think = False
+                            buffer = buffer[end_idx + 8:]
                         else:
-                            buffer = ""
-                            break
-                            
-        if buffer and not in_think:
-            yield buffer
+                            possible_partial = False
+                            for i in range(max(0, len(buffer) - 7), len(buffer)):
+                                if buffer[i] == "<" and "</think>".startswith(buffer[i:]):
+                                    buffer = buffer[i:]
+                                    possible_partial = True
+                                    break
+                            if possible_partial:
+                                break
+                            else:
+                                buffer = ""
+                                break
+
+            if buffer and not in_think:
+                yield buffer
+
+        return LLMStream(filtered(), metadata)
+
+    def _stream_metadata(self, provider: str, model: str) -> Dict[str, Any]:
+        return {"provider": provider, "model": model, "finish_reason": "UNKNOWN"}
+
+    def _normalize_finish_reason(self, reason: Any) -> str:
+        if reason is None:
+            return "UNKNOWN"
+        normalized = str(reason).strip().upper()
+        mapping = {
+            "STOP": "STOP",
+            "FINISH_REASON_STOP": "STOP",
+            "LENGTH": "MAX_TOKENS",
+            "MAX_TOKEN": "MAX_TOKENS",
+            "MAX_TOKENS": "MAX_TOKENS",
+            "TOKEN_LIMIT": "MAX_TOKENS",
+            "SAFETY": "SAFETY",
+            "CONTENT_FILTER": "SAFETY",
+            "RECITATION": "RECITATION",
+            "LANGUAGE": "LANGUAGE",
+            "ERROR": "ERROR",
+        }
+        return mapping.get(normalized, normalized if normalized in mapping.values() else "OTHER")
+
+    def _extract_finish_reason(self, chunk: Any) -> str:
+        if isinstance(chunk, dict):
+            choices = chunk.get("choices") or []
+            if choices:
+                choice = choices[0]
+                if isinstance(choice, dict):
+                    reason = choice.get("finish_reason") or choice.get("finishReason")
+                    if reason is not None:
+                        return self._normalize_finish_reason(reason)
+            candidates = chunk.get("candidates") or []
+            if candidates:
+                candidate = candidates[0]
+                if isinstance(candidate, dict):
+                    reason = candidate.get("finishReason") or candidate.get("finish_reason")
+                    if reason is not None:
+                        return self._normalize_finish_reason(reason)
+            return "UNKNOWN"
+
+        choices = getattr(chunk, "choices", None) or []
+        if choices:
+            choice = choices[0]
+            reason = getattr(choice, "finish_reason", None) or getattr(choice, "finishReason", None)
+            if reason is not None:
+                return self._normalize_finish_reason(reason)
+
+        candidates = getattr(chunk, "candidates", None) or []
+        if candidates:
+            candidate = candidates[0]
+            reason = getattr(candidate, "finishReason", None) or getattr(candidate, "finish_reason", None)
+            if reason is not None:
+                return self._normalize_finish_reason(reason)
+
+        return "UNKNOWN"
 
     # =========================================================================
     # OPENROUTER IMPLEMENTATION
@@ -200,6 +282,7 @@ class LLMClient:
     def _chat_openrouter_stream(self, messages: List[Dict], temperature: float) -> Iterator[str]:
         print(f"🚀 [LLM_Client] Routing to OPENROUTER (model: {self.openrouter_model}) - Streaming")
         try:
+            self.last_finish_reason = "UNKNOWN"
             response = self.openrouter_client.chat.completions.create(
                 model=self.openrouter_model,
                 messages=messages,
@@ -221,12 +304,16 @@ class LLMClient:
                 }
             )
             for chunk in response:
+                reason = self._extract_finish_reason(chunk)
+                if reason != "UNKNOWN":
+                    self.last_finish_reason = reason
                 content = chunk.choices[0].delta.content if chunk.choices and chunk.choices[0].delta else None
                 if content:
                     yield content
         except Exception as e:
             print(f"❌ [LLM_Client] OPENROUTER API Lỗi khi Stream: {e}")
             print(f"🔄 [LLM_Client] TỰ ĐỘNG FALLBACK: Chuyển hướng sang Ollama ({self.ollama_model})...")
+            self.last_finish_reason = "ERROR"
             fallback_stream = self._chat_ollama_stream(messages, temperature)
             for fallback_chunk in fallback_stream:
                 yield fallback_chunk
@@ -252,6 +339,7 @@ class LLMClient:
     def _chat_google_stream(self, messages: List[Dict], temperature: float) -> Iterator[str]:
         print(f"🚀 [LLM_Client] Routing to GOOGLE AI STUDIO (model: {self.google_model}) - Streaming")
         try:
+            self.last_finish_reason = "UNKNOWN"
             response = self.google_client.chat.completions.create(
                 model=self.google_model,
                 messages=messages,
@@ -260,12 +348,16 @@ class LLMClient:
                 timeout=20.0
             )
             for chunk in response:
+                reason = self._extract_finish_reason(chunk)
+                if reason != "UNKNOWN":
+                    self.last_finish_reason = reason
                 content = chunk.choices[0].delta.content if chunk.choices and chunk.choices[0].delta else None
                 if content:
                     yield content
         except Exception as e:
             print(f"❌ [LLM_Client] GOOGLE API Lỗi khi Stream: {e}")
             print(f"🔄 [LLM_Client] TỰ ĐỘNG FALLBACK: Chuyển hướng sang Ollama ({self.ollama_model})...")
+            self.last_finish_reason = "ERROR"
             fallback_stream = self._chat_ollama_stream(messages, temperature)
             for fallback_chunk in fallback_stream:
                 yield fallback_chunk
@@ -285,12 +377,81 @@ class LLMClient:
             }
         }
 
+    def _chat_google_stream(self, messages: List[Dict], temperature: float) -> Iterator[str]:
+        """Google stream with one Google model fallback before local Ollama."""
+        attempts = self._google_model_attempts()
+        for index, model in enumerate(attempts):
+            print(f"[LLM_Client] Routing to GOOGLE AI STUDIO (model: {model}) - Streaming")
+            try:
+                self.last_finish_reason = "UNKNOWN"
+                response = self.google_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    stream=True,
+                    timeout=20.0,
+                )
+                for chunk in response:
+                    reason = self._extract_finish_reason(chunk)
+                    if reason != "UNKNOWN":
+                        self.last_finish_reason = reason
+                    content = chunk.choices[0].delta.content if chunk.choices and chunk.choices[0].delta else None
+                    if content:
+                        yield content
+                return
+            except Exception as exc:
+                print(f"[LLM_Client] GOOGLE API stream error: {exc}")
+                if index + 1 < len(attempts) and self._is_transient_google_error(exc):
+                    print(f"[LLM_Client] GOOGLE MODEL FALLBACK: trying {attempts[index + 1]}...")
+                    continue
+                print(f"[LLM_Client] FALLBACK: routing to Ollama ({self.ollama_model})...")
+                self.last_finish_reason = "ERROR"
+                fallback_stream = self._chat_ollama_stream(messages, temperature)
+                for fallback_chunk in fallback_stream:
+                    yield fallback_chunk
+                return
+
+    def _chat_google_sync(self, messages: List[Dict], temperature: float) -> Dict:
+        """Google sync with one Google model fallback before caller-level fallback."""
+        attempts = self._google_model_attempts()
+        for index, model in enumerate(attempts):
+            print(f"[LLM_Client] Routing to GOOGLE AI STUDIO (model: {model}) - Sync")
+            try:
+                response = self.google_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    stream=False,
+                    timeout=30.0,
+                )
+                return {"message": {"content": response.choices[0].message.content or ""}}
+            except Exception as exc:
+                if index + 1 < len(attempts) and self._is_transient_google_error(exc):
+                    print(f"[LLM_Client] GOOGLE API sync error: {exc}")
+                    print(f"[LLM_Client] GOOGLE MODEL FALLBACK: trying {attempts[index + 1]}...")
+                    continue
+                raise
+        return {"message": {"content": ""}}
+
+    def _google_model_attempts(self) -> List[str]:
+        models = []
+        for model in [self.google_model, self.google_fallback_model]:
+            model = str(model or "").strip()
+            if model and model not in models:
+                models.append(model)
+        return models or [self.google_model]
+
+    def _is_transient_google_error(self, exc: Exception) -> bool:
+        text = str(exc).lower()
+        return any(marker in text for marker in ["503", "unavailable", "high demand", "rate limit", "429", "timeout", "timed out"])
+
     # =========================================================================
     # GROQ IMPLEMENTATION
     # =========================================================================
     def _chat_groq_stream(self, messages: List[Dict], temperature: float) -> Iterator[str]:
         print(f"🚀 [LLM_Client] Routing to GROQ (model: {self.groq_model}) - Streaming")
         try:
+            self.last_finish_reason = "UNKNOWN"
             response = self.groq_client.chat.completions.create(
                 model=self.groq_model,
                 messages=messages,
@@ -298,11 +459,15 @@ class LLMClient:
                 stream=True
             )
             for chunk in response:
+                reason = self._extract_finish_reason(chunk)
+                if reason != "UNKNOWN":
+                    self.last_finish_reason = reason
                 if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
         except Exception as e:
             print(f"❌ [LLM_Client] GROQ API Lỗi khi Stream: {e}")
             print(f"🔄 [LLM_Client] TỰ ĐỘNG FALLBACK: Chuyển hướng sang Ollama ({self.ollama_model})...")
+            self.last_finish_reason = "ERROR"
             fallback_stream = self._chat_ollama_stream(messages, temperature)
             for fallback_chunk in fallback_stream:
                 yield fallback_chunk
@@ -324,6 +489,7 @@ class LLMClient:
     # =========================================================================
     def _chat_ollama_stream(self, messages: List[Dict], temperature: float) -> Iterator[str]:
         print(f"🐢 [LLM_Client] Routing to OLLAMA LOCAL (model: {self.ollama_model}) - Streaming")
+        self.last_finish_reason = "UNKNOWN"
         response = ollama.chat(
             model=self.ollama_model,
             messages=messages,
@@ -331,6 +497,8 @@ class LLMClient:
             options={"temperature": temperature},
         )
         for chunk in response:
+            if chunk.get("done"):
+                self.last_finish_reason = self._normalize_finish_reason(chunk.get("done_reason") or "STOP")
             if "message" in chunk and "content" in chunk["message"]:
                 yield chunk["message"]["content"]
 

@@ -1,10 +1,27 @@
-from typing import Tuple
+from typing import Any, Tuple
 from src.core.llm_client import LLMClient
 
 class EvaluatorModule:
     """Đánh giá Hallucination và ép vòng lặp Self-Correction."""
     def __init__(self):
         self.llm_client = LLMClient(provider_override="groq")
+
+    @staticmethod
+    def _extract_response_content(response: Any) -> str:
+        """Normalize supported LLM response shapes into plain text."""
+        if isinstance(response, str):
+            return response.strip()
+
+        if isinstance(response, dict):
+            message = response.get("message")
+            if isinstance(message, dict):
+                content = message.get("content", "")
+                return str(content).strip() if content is not None else ""
+
+            content = response.get("content", "")
+            return str(content).strip() if content is not None else ""
+
+        return ""
         
     def process(self, answer: str, context: str) -> Tuple[bool, str]:
         """
@@ -32,9 +49,14 @@ Chỉ xuất ra PASS hoặc FAIL."""
 
         try:
             response = self.llm_client.chat([{"role": "user", "content": prompt}], stream=False, temperature=0.0)
-            result = response.strip().upper()
+            content = self._extract_response_content(response)
+            if not content:
+                print(f"⚠️ [EvaluatorModule] Empty/malformed evaluator response: {response!r}. Safe fallback: PASS.")
+                return True, ""
+
+            result = content.upper()
             if result.startswith("FAIL"):
-                reason = response.split(":", 1)[-1].strip() if ":" in response else response
+                reason = content.split(":", 1)[-1].strip() if ":" in content else content
                 print(f"⚠️ [EvaluatorModule] Phát hiện ảo tưởng! Đánh rớt: {reason}")
                 return False, f"Tôi vừa phát hiện lỗi trong suy luận trước đó: {reason}. Vui lòng thử lại với hướng đi khác."
             print("✅ [EvaluatorModule] Câu trả lời tinh khiết, không ảo tưởng.")

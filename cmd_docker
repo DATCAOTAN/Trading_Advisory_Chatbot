@@ -3,3 +3,10 @@ docker-compose stop : dừng container
 docker-compose logs -f app
 docker-compose restart app
 docker-compose up --build -d: chạy docker
+docker-compose exec app bash
+
+docker-compose stop app
+docker-compose run --rm app python scripts/evaluate_v3_retrieval.py
+docker-compose up -d app
+
+docker-compose up -d --force-recreate app

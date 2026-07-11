@@ -1,0 +1,10 @@
+strategies:
+  - trend_following
+  - mean_reversion
+  - breakout
+  - scalping
+  - swing
+  - intraday
+  - pairs_trading
+  - statistical_arbitrage
+  - market_making

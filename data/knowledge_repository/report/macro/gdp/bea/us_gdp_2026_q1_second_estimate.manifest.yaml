@@ -1,0 +1,24 @@
+title: US GDP Report
+title_slug: us_gdp_report_2026_q1
+author: BEA
+author_slug: bea
+knowledge_type: report
+domain: macro
+subdomain: gdp
+document_type: pdf
+version: v1
+lifecycle: ACTIVE
+language: en
+source_tier: tier1
+publish_year: 0
+tags:
+  strategies: []
+  assets: []
+  timeframe_focus: []
+organization_slug: bea
+organization: BEA
+country: US
+event_type: GDP
+period: 2026-Q1
+revision: second_estimate
+checksum: 1ddc4ece3dd487408ee7fe21929ea67b9c4a4b98939a1c599dfc892edfd4d879

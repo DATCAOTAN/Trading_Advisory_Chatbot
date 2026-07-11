@@ -1,0 +1,24 @@
+title: FOMC Minutes
+title_slug: fomc_minutes_2026_03_18
+author: Federal Reserve
+author_slug: federal_reserve
+knowledge_type: report
+domain: macro
+subdomain: central_bank
+document_type: pdf
+version: v1
+lifecycle: ACTIVE
+language: en
+source_tier: tier1
+publish_year: 0
+tags:
+  strategies: []
+  assets: []
+  timeframe_focus: []
+organization_slug: federal_reserve
+organization: Federal Reserve
+country: US
+event_type: FOMC_MINUTES
+published_date: '2026-03-18'
+period: '2026-03-18'
+checksum: f8ec691071910a6f167ef95b8e2577f9f9a4ea465fc82184b435e62308b40f8f

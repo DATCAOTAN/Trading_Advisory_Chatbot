@@ -1,0 +1,23 @@
+title: US CPI Report
+title_slug: us_cpi_report_2026_05
+author: BLS
+author_slug: bls
+knowledge_type: report
+domain: macro
+subdomain: inflation
+document_type: pdf
+version: v1
+lifecycle: ACTIVE
+language: en
+source_tier: tier1
+publish_year: 0
+tags:
+  strategies: []
+  assets: []
+  timeframe_focus: []
+organization_slug: bls
+organization: BLS
+country: US
+event_type: CPI
+period: 2026-05
+checksum: ea409c7f8159ec58920687695417faf4bc65421454dd982db89369b7751df393

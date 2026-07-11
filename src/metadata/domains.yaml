@@ -1,0 +1,44 @@
+technical:
+  subdomains:
+    - indicators
+    - price_action
+    - patterns
+    - market_structure
+    - volume
+risk:
+  subdomains:
+    - position_sizing
+    - psychology
+    - portfolio_management
+psychology:
+  subdomains:
+    - trading_discipline
+    - mindset
+    - behavioral_finance
+strategy:
+  subdomains:
+    - trend_following
+    - mean_reversion
+    - breakout
+    - discretionary
+macro:
+  subdomains:
+    - monetary_policy
+    - central_bank
+    - inflation
+    - employment
+    - gdp
+    - global_outlook
+    - economic_indicators
+    - geopolitics
+market:
+  subdomains:
+    - commodities
+    - gold
+    - energy
+    - metals
+quantitative:
+  subdomains:
+    - backtesting
+    - statistical_arbitrage
+    - machine_learning

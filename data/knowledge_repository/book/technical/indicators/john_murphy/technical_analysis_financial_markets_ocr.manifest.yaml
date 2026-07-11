@@ -1,0 +1,26 @@
+title: Technical Analysis of the Financial Markets
+title_slug: technical_analysis_financial_markets
+author_slug: john_murphy
+author: John Murphy
+knowledge_type: book
+domain: technical
+version: v1
+language: en
+lifecycle: ACTIVE
+publisher: New York Institute of Finance
+publish_year: 1999
+tags:
+  strategies:
+  - trend_following
+  assets:
+  - forex
+  - commodities
+  - xauusd
+  timeframe_focus:
+  - h1
+  - h4
+  - daily
+subdomain: indicators
+document_type: pdf
+source_tier: tier3
+checksum: b5f4f3278787fb0b18d53bd43617144f35be7daa75ccee06a2f0a5de8341bffc

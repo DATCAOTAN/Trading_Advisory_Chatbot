@@ -160,6 +160,7 @@ class HistoryService:
                                 "session_id": session_id,
                                 "role": message["role"],
                                 "content": content,
+                                "quality_status": message.get("quality_status", "PASS"),
                                 "timestamp": datetime.datetime.utcnow().isoformat()
                             }
                         )
