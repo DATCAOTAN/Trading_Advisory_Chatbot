@@ -25,9 +25,24 @@ def select_agents_for_intent(intent_family: str) -> List[str]:
     if intent in {"book_concept_explanation", "macro_report_summary"}:
         return ["StaticKnowledgeAgent"]
     if intent == "macro_market_impact":
-        return ["StaticKnowledgeAgent", "MarketDataAgent", "CalendarAgent", "MarketContextAgent", "StrategyAgent", "RiskAgent"]
+        return [
+            "StaticKnowledgeAgent",
+            "MarketDataAgent",
+            "CalendarAgent",
+            "MarketContextAgent",
+            "StrategyAgent",
+            "RiskAgent",
+            "StrategyRiskConsistencyAgent",
+        ]
     if intent == "market_state_analysis":
-        return ["MarketDataAgent", "TechnicalAnalysisAgent", "MarketContextAgent", "StrategyAgent", "RiskAgent"]
+        return [
+            "MarketDataAgent",
+            "TechnicalAnalysisAgent",
+            "MarketContextAgent",
+            "StrategyAgent",
+            "RiskAgent",
+            "StrategyRiskConsistencyAgent",
+        ]
     if intent == "trade_opportunity_analysis":
         return ["MarketDataAgent", "TechnicalAnalysisAgent", "RiskAgent"]
     if intent == "position_sizing":

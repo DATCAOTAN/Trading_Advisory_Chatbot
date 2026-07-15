@@ -96,6 +96,8 @@ def render(orchestrator):
     # ── Hàng 3: Dữ liệu thời gian thực ─────────────────────────────────
     st.markdown("#### 📡 Dữ Liệu Thời Gian Thực")
 
+    _render_market_data_provider_status(orchestrator)
+
     col_live1, col_live2 = st.columns(2)
 
     with col_live1:
@@ -129,6 +131,30 @@ def render(orchestrator):
 # =============================================================================
 # HELPERS NỘI BỘ
 # =============================================================================
+def _render_market_data_provider_status(orchestrator):
+    try:
+        service = orchestrator.live_service
+        health = service.provider_health()
+        tick = service.get_latest_tick("XAUUSD")
+        snapshot = service.get_market_snapshot("XAUUSD", "M15", 2)
+        account = service.get_account()
+        cols = st.columns(4)
+        cols[0].metric("Provider", getattr(service.provider, "provider_name", "unknown"))
+        cols[1].metric("Health", health.status)
+        cols[2].metric("Tick time", tick.timestamp or "n/a")
+        latest_bar = snapshot.bars[-1].timestamp if snapshot.bars else "n/a"
+        cols[3].metric("OHLCV time", latest_bar)
+        st.caption(
+            "Bridge URL is configured outside the dashboard; account is redacted. "
+            f"account_id_hash={account.account_id_hash[:12] if account.account_id_hash else 'n/a'} "
+            f"server={account.server_redacted or 'n/a'}"
+        )
+        if health.status not in {"OK", "DEGRADED"}:
+            st.warning(f"Market data provider unavailable: {health.message}")
+    except Exception as exc:
+        st.warning(f"Market data provider status unavailable: {type(exc).__name__}")
+
+
 def _render_ingestion_state():
     """Hiển thị trạng thái file đã index từ ingestion_state.json."""
     try:

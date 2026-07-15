@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Protocol, Set
@@ -198,7 +199,8 @@ class MarketContextInputAssembler:
             f"available_context={list(result_map)} "
             f"missing_context={assembled.missing_context} "
             f"allowed_evidence_refs={assembled.allowed_evidence_refs} "
-            f"confidence_ceiling={assembled.confidence_ceiling}"
+            f"confidence_ceiling={assembled.confidence_ceiling} "
+            f"serialized_chars={len(json.dumps(assembled.as_dict(), ensure_ascii=False, default=str))}"
         )
         return assembled
 
@@ -661,7 +663,6 @@ class MarketContextAgentRuntime:
                 failure_reason=",".join(reasons),
             )
         payload = assessment.as_dict()
-        payload["market_context_input"] = market_input.as_dict()
         confidence = float((assessment.uncertainty or {}).get("confidence") or 0.0)
         status = AgentStatus.SUCCESS if confidence >= 0.45 else AgentStatus.PARTIAL
         print(

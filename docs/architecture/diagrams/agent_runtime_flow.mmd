@@ -1,0 +1,6 @@
+flowchart TD
+  A["AgentExecutionPlan"] --> B["MarketContextAgent"]
+  B --> C["StrategyAgent"]
+  C --> D["RiskAgent"]
+  D --> E["StrategyRiskConsistencyAgent"]
+  E --> F["AgentAnswerCompliance"]

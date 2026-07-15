@@ -9,7 +9,7 @@ SCRIPTS_ROOT = PROJECT_ROOT / "scripts"
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
-from evidence_test_fixtures import knowledge_result, query_plan, task_view  # noqa: E402
+from evidence_test_fixtures import cpi_report_result, knowledge_result, query_plan, task_view  # noqa: E402
 from src.services.evidence import AnswerContractBuilder, EvidencePromptAssembler, EvidenceSelector  # noqa: E402
 from src.services.semantic.context_execution import ContextAcquisitionResult  # noqa: E402
 
@@ -35,6 +35,42 @@ class PromptAssemblerEvidenceHandoffTests(unittest.TestCase):
         self.assertIn("trader behavior", prompt)
         self.assertIn("Source: Reading Price Charts Bar by Bar", prompt)
         self.assertIn("Author/Organization: Al Brooks", prompt)
+        self.assertIn("REQUIRED SOURCE REFERENCES: Reading Price Charts Bar by Bar - Al Brooks", prompt)
+        self.assertIn("Nguon da dung: Reading Price Charts Bar by Bar - Al Brooks", prompt)
+
+    def test_multi_intent_book_task_preserves_task_scoped_source_reference_instruction(self):
+        macro_plan = query_plan(
+            primary_intent="macro_report_summary",
+            task_id="task_1",
+            query="CPI noi gi?",
+            macro_events=["CPI"],
+            organizations=["BLS"],
+        )
+        book_plan = query_plan(
+            primary_intent="book_concept_explanation",
+            task_id="task_2",
+            query="Al Brooks noi gi ve price action?",
+            authors=["Al Brooks"],
+            books=["Reading Price Charts Bar by Bar"],
+            concepts=["price_action"],
+        )
+        macro_bundle = EvidenceSelector().select(macro_plan, task_view(macro_plan), [cpi_report_result(["task_1"])], "report_summary", "task_1")
+        book_bundle = EvidenceSelector().select(book_plan, task_view(book_plan), [knowledge_result(task_ids=["task_2"])], "static_explanation", "task_2")
+        macro_contract = AnswerContractBuilder().build(macro_bundle)
+        book_contract = AnswerContractBuilder().build(book_bundle)
+
+        prompt = EvidencePromptAssembler().assemble(
+            [macro_bundle, book_bundle],
+            [macro_contract, book_contract],
+            "CPI noi gi? Va Al Brooks noi gi ve price action?",
+            "COMPLETE",
+        )
+
+        self.assertIn("TASK_CONTEXT task_id=task_2", prompt)
+        self.assertIn("REQUIRED SOURCE REFERENCES: Reading Price Charts Bar by Bar - Al Brooks", prompt)
+        self.assertIn("Nguon da dung: Reading Price Charts Bar by Bar - Al Brooks", prompt)
+        self.assertNotIn("StrategyThesis", prompt)
+        self.assertNotIn("RiskAssessment", prompt)
 
 
 if __name__ == "__main__":

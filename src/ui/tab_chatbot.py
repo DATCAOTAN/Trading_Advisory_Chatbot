@@ -22,6 +22,8 @@ except ImportError:
     _HAS_PLOTLY = False
 
 from src.config import Config
+from src.services.agents.evaluation_registry import register_evaluation_record
+from src.services.agents.journal_review import record_journal_review
 from src.ui.runtime_flags import get_knowledge_v3_flags
 
 
@@ -327,14 +329,61 @@ def render(orchestrator, feature_flags: dict):
                 print(f"[MemoryCandidate] chars={len(full_answer or '')} sha256={memory_hash[:12]}")
             if not memory_matches_selected:
                 print("[MemoryPolicy] answer_quality=FAIL action=skip reason=final_artifact_inconsistency")
+                record_journal_review(
+                    full_answer,
+                    runtime_artifacts,
+                    completion_result,
+                    memory_policy_action="skip:final_artifact_inconsistency",
+                    user_query=user_query,
+                )
+                _store_evaluation_runtime_artifacts(runtime_artifacts)
                 return
             HistoryService().append_message(st.session_state.current_session_id, assistant_msg)
             quality = "DEGRADED" if completion_result and completion_result["level"] == "warn" else "PASS"
             print(f"[MemoryPolicy] answer_quality={quality} action=stored_with_quality_flag")
+            record_journal_review(
+                full_answer,
+                runtime_artifacts,
+                completion_result,
+                memory_policy_action="stored_with_quality_flag",
+                user_query=user_query,
+            )
+            _store_evaluation_runtime_artifacts(runtime_artifacts)
         else:
             request_id = stream_logger.request_id if stream_logger is not None else "unknown"
             reason = completion_result["reason"] if completion_result else "stream_error"
             print(f"[MemoryPolicy] answer_quality=FAIL action=skip reason={reason}")
+            artifacts_for_review = runtime_artifacts if "runtime_artifacts" in locals() else None
+            record_journal_review(
+                full_answer,
+                artifacts_for_review,
+                completion_result,
+                memory_policy_action=f"skip:{reason}",
+                user_query=user_query,
+            )
+            _store_evaluation_runtime_artifacts(artifacts_for_review)
+
+
+def _store_evaluation_runtime_artifacts(runtime_artifacts: dict | None) -> None:
+    """Expose review-safe evaluation artifacts to the dashboard tab."""
+    if runtime_artifacts is None:
+        return
+
+    st.session_state.latest_runtime_artifacts = runtime_artifacts
+    try:
+        for record_type, artifact_key in (
+            ("journal_review", "journal_review"),
+            ("backtest_evaluation", "backtest_evaluation"),
+            ("paper_trading_evaluation", "paper_trading_evaluation"),
+        ):
+            record = runtime_artifacts.get(artifact_key)
+            if record:
+                register_evaluation_record(record, record_type, runtime_artifacts, replace=True)
+        registry = runtime_artifacts.get("evaluation_registry")
+        if registry:
+            st.session_state.evaluation_registry = registry
+    except Exception as exc:  # pragma: no cover - dashboard bridge must not affect chat delivery
+        print(f"[EvaluationDashboard] action=session_registry status=WARN error={_sanitize_log_value(exc, 160)}")
 
 
 def _configured_llm_provider_model():
@@ -485,6 +534,7 @@ def check_answer_completeness(
         "coverage_status": "UNKNOWN",
         "claim_status": "UNKNOWN",
         "contract_status": contract_status,
+        "agent_answer_compliance_status": "UNKNOWN",
         "overall_status": "UNKNOWN",
         "repair_status": repair_status if 'repair_status' in locals() else "NOT_ATTEMPTED",
         "reason_codes": result_reason_codes if 'result_reason_codes' in locals() else [],
@@ -542,6 +592,13 @@ def check_answer_completeness(
         cv = runtime_artifacts.get("claim_validation")
         if cv:
             result["claim_status"] = cv.get("status", "UNKNOWN").upper() if isinstance(cv, dict) else getattr(cv, "status", "UNKNOWN").upper()
+        compliance = runtime_artifacts.get("agent_answer_compliance")
+        if compliance:
+            result["agent_answer_compliance_status"] = (
+                compliance.get("status", "UNKNOWN").upper()
+                if isinstance(compliance, dict)
+                else getattr(compliance, "status", "UNKNOWN").upper()
+            )
 
 
     if reason == "BOUNDED_RESPONSE":
@@ -628,6 +685,10 @@ def check_answer_completeness(
             result["reason"] = "claim_validation_failed"
             result["overall_status"] = "FAIL"
             return result
+        if result["agent_answer_compliance_status"] == "FAIL":
+            result["reason"] = "agent_answer_compliance_failed"
+            result["overall_status"] = "FAIL"
+            return result
 
         warnings = []
         if evidence_status in {"WARN", "DEGRADED"}:
@@ -639,6 +700,8 @@ def check_answer_completeness(
                 warnings.extend(result["reason_codes"])
             else:
                 warnings.append("contract_degraded")
+        if result["agent_answer_compliance_status"] == "WARN":
+            warnings.append("agent_answer_compliance_warn")
         if chars < 600:
             warnings.append("short_rag_answer")
             result["format_status"] = "WARN"
@@ -682,6 +745,7 @@ def _log_answer_completeness(request_id: str, result: dict | None):
         f"coverage_status={result.get('coverage_status', 'UNKNOWN')} "
         f"claim_status={result.get('claim_status', 'UNKNOWN')} "
         f"contract_status={result.get('contract_status', 'UNKNOWN')} "
+        f"agent_answer_compliance_status={result.get('agent_answer_compliance_status', 'UNKNOWN')} "
         f"overall_status={result.get('overall_status', 'UNKNOWN')}"
     )
 

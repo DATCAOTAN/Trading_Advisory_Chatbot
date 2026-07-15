@@ -1287,6 +1287,7 @@ class EvidencePromptAssembler:
             f"PROHIBITED CLAIM TYPES: {', '.join(contract.prohibited_claim_types)}",
             "",
         ]
+        lines.extend(self._required_source_lines(contract))
         # New Topic-Bound Assembly logic
         if getattr(contract, "topic_bindings", None) and getattr(contract, "synthesis_coverage_plan", None):
             lines.append("PRIMARY EVIDENCE")
@@ -1341,6 +1342,21 @@ class EvidencePromptAssembler:
             
         lines.append("")
         return lines
+
+    @staticmethod
+    def _required_source_lines(contract: AnswerContract) -> List[str]:
+        refs = [str(ref).strip() for ref in (contract.required_source_refs or []) if str(ref or "").strip()]
+        if not refs:
+            return []
+        return [
+            f"REQUIRED SOURCE REFERENCES: {', '.join(refs)}",
+            (
+                "SOURCE_USED INSTRUCTION: In this task section, include a concise line "
+                f"'Nguon da dung: {refs[0]}' using the exact listed source label. "
+                "Use only the listed source labels; do not fabricate citations."
+            ),
+            "",
+        ]
 
     def _budget_items_by_topic(
         self,

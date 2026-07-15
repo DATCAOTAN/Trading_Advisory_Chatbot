@@ -220,9 +220,9 @@ st.markdown("""
 # =============================================================================
 # 6. TAB NAVIGATION — Facade điều phối đến Isolated Components
 # =============================================================================
-from src.ui import tab_chatbot, tab_dashboard, tab_settings
+from src.ui import tab_chatbot, tab_dashboard, tab_evaluation_dashboard, tab_settings
 
-tab1, tab2, tab3 = st.tabs(["💬 Chatbot Tư Vấn", "📊 Dashboard", "⚙️ Cấu Hình"])
+tab1, tab2, tab3, tab4 = st.tabs(["💬 Chatbot Tư Vấn", "📊 Dashboard", "Dashboard Đánh Giá", "⚙️ Cấu Hình"])
 
 with tab1:
     tab_chatbot.render(orchestrator, feature_flags)
@@ -231,4 +231,7 @@ with tab2:
     tab_dashboard.render(orchestrator)
 
 with tab3:
+    tab_evaluation_dashboard.render(orchestrator)
+
+with tab4:
     tab_settings.render(orchestrator, feature_flags)

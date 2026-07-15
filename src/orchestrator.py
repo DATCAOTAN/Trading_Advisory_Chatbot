@@ -46,6 +46,10 @@ from src.services.agents import (
     MarketContextAgentRuntime,
     StrategyAgentRuntime,
     RiskAgentRuntime,
+    StrategyRiskConsistencyAgentRuntime,
+    AgentAnswerComplianceGate,
+    AgentAnswerComplianceInputBuilder,
+    compact_agent_payload,
 )
 from src.services.agents.runtime import build_agent_handoff
 from src.services.evidence import (
@@ -106,6 +110,7 @@ class RAGOrchestrator:
         self.agent_runtime_registry.register("MarketContextAgent", MarketContextAgentRuntime())
         self.agent_runtime_registry.register("StrategyAgent", StrategyAgentRuntime())
         self.agent_runtime_registry.register("RiskAgent", RiskAgentRuntime())
+        self.agent_runtime_registry.register("StrategyRiskConsistencyAgent", StrategyRiskConsistencyAgentRuntime())
         self.agent_dispatcher = AgentDispatcher(self.agent_runtime_registry)
         self.evidence_selector = EvidenceSelector()
         self.answer_contract_builder = AnswerContractBuilder()
@@ -236,6 +241,7 @@ class RAGOrchestrator:
                             "MarketContextAgent",
                             "StrategyAgent",
                             "RiskAgent",
+                            "StrategyRiskConsistencyAgent",
                             "ExecutionGateAgent",
                         ],
                     )
@@ -515,7 +521,9 @@ class RAGOrchestrator:
                         "CalendarAgent",
                         "TechnicalAnalysisAgent",
                         "MarketContextAgent",
+                        "StrategyAgent",
                         "RiskAgent",
+                        "StrategyRiskConsistencyAgent",
                         "ExecutionGateAgent",
                     ],
                 )
@@ -1101,6 +1109,7 @@ class RAGOrchestrator:
                     f"task_statuses={{{task_status_text}}} "
                     f"aggregate_status={aggregate_status}"
                 )
+            self._evaluate_agent_answer_compliance(final_answer, runtime_artifacts, answer_contracts)
             self._record_final_answer_artifact(
                 runtime_artifacts,
                 final_answer,
@@ -1170,6 +1179,18 @@ class RAGOrchestrator:
             f"{reason_block}\n"
         )
 
+    @staticmethod
+    def _evaluate_agent_answer_compliance(final_answer: str, runtime_artifacts: dict | None, answer_contracts) -> None:
+        if runtime_artifacts is None:
+            return
+        compliance_input = AgentAnswerComplianceInputBuilder.build(
+            final_answer_text=final_answer,
+            runtime_artifacts=runtime_artifacts,
+            answer_contracts=answer_contracts,
+        )
+        result = AgentAnswerComplianceGate.evaluate(compliance_input)
+        runtime_artifacts["agent_answer_compliance"] = result.as_dict()
+
     def _claim_validated_stream(self, stream, evidence_bundles, answer_contracts, runtime_artifacts=None):
         answer = ""
         for chunk in stream:
@@ -1224,6 +1245,7 @@ class RAGOrchestrator:
                     f"task_statuses={{{task_status_text}}} "
                     f"aggregate_status={aggregate_status}"
                 )
+            self._evaluate_agent_answer_compliance(answer, runtime_artifacts, answer_contracts)
             self._record_final_answer_artifact(
                 runtime_artifacts,
                 answer,
@@ -1359,7 +1381,8 @@ class RAGOrchestrator:
         for result in results:
             if result.get("agent_type") != "MarketContextAgent" or result.get("status") not in {"SUCCESS", "PARTIAL"}:
                 continue
-            payload = result.get("structured_payload") or {}
+            raw_payload = result.get("structured_payload") or {}
+            payload = compact_agent_payload("MarketContextAgent", raw_payload)
             assessment_ref = payload.get("assessment_ref", "")
             market_state = payload.get("market_state") or {}
             uncertainty = payload.get("uncertainty") or {}
@@ -1373,18 +1396,26 @@ class RAGOrchestrator:
                 f"symbol: {payload.get('symbol', '')}\n"
                 f"as_of: {payload.get('as_of', '')}\n"
                 f"market_state: {market_state}\n"
-                f"dominant_factors: {dominant[:4]}\n"
+                f"dominant_factors: {dominant[:3]}\n"
                 f"conflicting_signals: {conflicts[:3]}\n"
+                f"confirmation_conditions: {payload.get('confirmation_conditions', {})}\n"
                 f"uncertainty: confidence={uncertainty.get('confidence')} "
                 f"missing_context={uncertainty.get('missing_context', [])} "
                 f"limitations={uncertainty.get('limitations', [])}\n"
                 f"source_refs: {result.get('source_refs', [])}\n"
                 f"evidence_refs: {result.get('evidence_refs', [])}\n"
-                "Use this only to organize interpretation. Factual claims still require the structured evidence above.\n"
+                "Boundary: analysis only. Factual claims still require evidence; no execution.\n"
                 f"END AGENT HANDOFF CONTEXT — task_id={parent_task_id}\n"
             )
             total_chars += len(block)
             lines.append(block)
+            print(
+                "[PromptCompression] "
+                f"task_id={parent_task_id} agent_type=MarketContextAgent "
+                f"before_chars={len(json.dumps(raw_payload, ensure_ascii=False, default=str))} "
+                f"after_chars={len(block)} "
+                "included_sections=[market_state,dominant_factors,conflicting_signals,confirmation_conditions,uncertainty,refs]"
+            )
             print(
                 "[AgentPromptEnrichment] "
                 f"task_id={parent_task_id} agent_type=MarketContextAgent "
@@ -1404,7 +1435,8 @@ class RAGOrchestrator:
         for result in results:
             if result.get("agent_type") != "StrategyAgent" or result.get("status") not in {"SUCCESS", "PARTIAL"}:
                 continue
-            payload = result.get("structured_payload") or {}
+            raw_payload = result.get("structured_payload") or {}
+            payload = compact_agent_payload("StrategyAgent", raw_payload)
             parent_task_id = result.get("parent_task_id") or result.get("task_id")
             confidence = payload.get("confidence") if isinstance(payload.get("confidence"), dict) else {}
             block = (
@@ -1414,7 +1446,7 @@ class RAGOrchestrator:
                 f"thesis_type: {payload.get('thesis_type', '')}\n"
                 f"thesis_direction: {payload.get('thesis_direction', '')}\n"
                 f"summary: {payload.get('thesis_summary', '')}\n"
-                f"supporting_factors: {(payload.get('supporting_factors') or [])[:4]}\n"
+                f"supporting_factors: {(payload.get('supporting_factors') or [])[:3]}\n"
                 f"conflicting_factors: {(payload.get('conflicting_factors') or [])[:3]}\n"
                 f"activation_conditions: {(payload.get('activation_conditions') or [])[:3]}\n"
                 f"invalidation_conditions: {(payload.get('invalidation_conditions') or [])[:3]}\n"
@@ -1422,11 +1454,18 @@ class RAGOrchestrator:
                 f"confidence: value={confidence.get('value')} ceiling={confidence.get('ceiling')}\n"
                 f"evidence_refs: {result.get('evidence_refs', [])}\n"
                 f"market_context_refs: {payload.get('market_context_refs', [])}\n"
-                "Use this only to organize conditional thesis language. It is not evidence and is not an execution instruction.\n"
+                "Boundary: analysis only; evidence remains authoritative; no execution.\n"
                 f"END AGENT HANDOFF CONTEXT — task_id={parent_task_id} — StrategyThesis\n"
             )
             strategy_chars += len(block)
             lines.append(block)
+            print(
+                "[PromptCompression] "
+                f"task_id={parent_task_id} agent_type=StrategyAgent "
+                f"before_chars={len(json.dumps(raw_payload, ensure_ascii=False, default=str))} "
+                f"after_chars={len(block)} "
+                "included_sections=[thesis_type,thesis_direction,supporting_factors,conflicting_factors,activation_conditions,invalidation_conditions,confidence,refs]"
+            )
             print(
                 "[StrategyPromptEnrichment] "
                 f"task_id={parent_task_id} strategy_thesis=true "
@@ -1439,7 +1478,8 @@ class RAGOrchestrator:
         for result in results:
             if result.get("agent_type") != "RiskAgent" or result.get("status") not in {"SUCCESS", "PARTIAL"}:
                 continue
-            payload = result.get("structured_payload") or {}
+            raw_payload = result.get("structured_payload") or {}
+            payload = compact_agent_payload("RiskAgent", raw_payload)
             parent_task_id = result.get("parent_task_id") or result.get("task_id")
             adjustment = payload.get("confidence_adjustment") if isinstance(payload.get("confidence_adjustment"), dict) else {}
             block = (
@@ -1449,7 +1489,7 @@ class RAGOrchestrator:
                 f"overall_risk_level: {payload.get('overall_risk_level', '')}\n"
                 f"risk_posture: {payload.get('risk_posture', '')}\n"
                 f"confidence_adjustment: {adjustment}\n"
-                f"key_risks: {(payload.get('key_risks') or [])[:4]}\n"
+                f"key_risks: {(payload.get('key_risks') or [])[:3]}\n"
                 f"thesis_fragility: {payload.get('thesis_fragility', {})}\n"
                 f"conflicting_factors: {(payload.get('conflicting_factors') or [])[:3]}\n"
                 f"missing_or_weak_context: {payload.get('missing_or_weak_context', [])}\n"
@@ -1459,11 +1499,18 @@ class RAGOrchestrator:
                 f"evidence_refs: {result.get('evidence_refs', [])}\n"
                 f"market_context_refs: {payload.get('market_context_refs', [])}\n"
                 f"strategy_thesis_refs: {payload.get('strategy_thesis_refs', [])}\n"
-                "Use this only to organize risk critique. It is not evidence, position sizing, or an execution instruction.\n"
+                "Boundary: analysis only; not evidence, sizing, or execution.\n"
                 f"END AGENT HANDOFF CONTEXT — task_id={parent_task_id} — RiskAssessment\n"
             )
             risk_chars += len(block)
             lines.append(block)
+            print(
+                "[PromptCompression] "
+                f"task_id={parent_task_id} agent_type=RiskAgent "
+                f"before_chars={len(json.dumps(raw_payload, ensure_ascii=False, default=str))} "
+                f"after_chars={len(block)} "
+                "included_sections=[overall_risk_level,risk_posture,confidence_adjustment,key_risks,thesis_fragility,confirmation_requirements,invalidation_risks,refs]"
+            )
             print(
                 "[RiskPromptEnrichment] "
                 f"task_id={parent_task_id} risk_assessment=true "
@@ -1472,6 +1519,52 @@ class RAGOrchestrator:
             )
         if risk_chars:
             total_chars += risk_chars
+        consistency_chars = 0
+        for result in results:
+            if result.get("agent_type") != "StrategyRiskConsistencyAgent" or result.get("status") not in {"SUCCESS", "PARTIAL"}:
+                continue
+            raw_payload = result.get("structured_payload") or {}
+            payload = compact_agent_payload("StrategyRiskConsistencyAgent", raw_payload)
+            parent_task_id = result.get("parent_task_id") or result.get("task_id")
+            confidence = payload.get("confidence_reconciliation") if isinstance(payload.get("confidence_reconciliation"), dict) else {}
+            block = (
+                f"AGENT HANDOFF CONTEXT — task_id={parent_task_id} — StrategyRiskConsistency (analysis only; not evidence)\n"
+                f"task_id: {parent_task_id}\n"
+                f"consistency_ref: {payload.get('consistency_ref', '')}\n"
+                f"consistency_status: {payload.get('consistency_status', '')}\n"
+                f"final_presentation_mode: {payload.get('final_presentation_mode', '')}\n"
+                f"thesis_strength_after_risk: {payload.get('thesis_strength_after_risk', '')}\n"
+                f"confidence_reconciliation: {confidence}\n"
+                f"agreement_points: {(payload.get('agreement_points') or [])[:3]}\n"
+                f"contradiction_points: {(payload.get('contradiction_points') or [])[:3]}\n"
+                f"required_final_answer_emphasis: {payload.get('required_final_answer_emphasis', [])}\n"
+                f"prohibited_final_answer_patterns: {payload.get('prohibited_final_answer_patterns', [])}\n"
+                f"final_synthesis_guidance: {payload.get('final_synthesis_guidance', '')}\n"
+                f"limitations: {payload.get('limitations', [])}\n"
+                f"evidence_refs: {result.get('evidence_refs', [])}\n"
+                f"market_context_refs: {payload.get('market_context_refs', [])}\n"
+                f"strategy_thesis_refs: {payload.get('strategy_thesis_refs', [])}\n"
+                f"risk_assessment_refs: {payload.get('risk_assessment_refs', [])}\n"
+                "Boundary: analysis only; not evidence, sizing, or execution.\n"
+                f"END AGENT HANDOFF CONTEXT — task_id={parent_task_id} — StrategyRiskConsistency\n"
+            )
+            consistency_chars += len(block)
+            lines.append(block)
+            print(
+                "[PromptCompression] "
+                f"task_id={parent_task_id} agent_type=StrategyRiskConsistencyAgent "
+                f"before_chars={len(json.dumps(raw_payload, ensure_ascii=False, default=str))} "
+                f"after_chars={len(block)} "
+                "included_sections=[consistency_status,final_presentation_mode,thesis_strength_after_risk,confidence_reconciliation,agreement_points,contradiction_points,required_final_answer_emphasis,refs]"
+            )
+            print(
+                "[ConsistencyPromptEnrichment] "
+                f"task_id={parent_task_id} consistency_assessment=true "
+                f"consistency_ref={payload.get('consistency_ref', '')} chars={len(block)} "
+                "included_sections=[consistency_status,final_presentation_mode,thesis_strength_after_risk,confidence_reconciliation,agreement_points,contradiction_points,required_final_answer_emphasis]"
+            )
+        if consistency_chars:
+            total_chars += consistency_chars
         return f"{structured_prompt}\n\n" + "\n".join(lines)
 
     def _align_tools_to_query_plan(self, tools_to_run: List[Dict], query_plan) -> List[Dict]:

@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Protocol, Set
 
+from src.services.agents.projection import compact_agent_payload, log_projection
 from src.services.agents.runtime import AgentResultEnvelope, AgentRuntimeContext, AgentStatus, AgentTaskEnvelope
 
 
@@ -165,7 +166,10 @@ class StrategyInputAssembler:
         parent_task_id = task.parent_task_id or str(query_plan.get("task_id") or "task_1")
         task_view = cls._task_view(context, parent_task_id)
         market_result = cls._market_context_result(context, parent_task_id)
-        market_payload = dict(market_result.structured_payload) if market_result else {}
+        raw_market_payload = dict(market_result.structured_payload) if market_result else {}
+        market_payload = compact_agent_payload("MarketContextAgent", raw_market_payload)
+        if raw_market_payload:
+            log_projection(parent_task_id, "market_context_for_strategy", raw_market_payload, market_payload)
         assessment_ref = str(market_payload.get("assessment_ref") or "")
         missing_context = list(task_view.get("missing_required") or task_view.get("missing_context") or [])
         if not assessment_ref:

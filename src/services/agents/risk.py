@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Protocol, Set
 
+from src.services.agents.projection import compact_agent_payload, log_projection
 from src.services.agents.runtime import AgentResultEnvelope, AgentRuntimeContext, AgentStatus, AgentTaskEnvelope
 
 
@@ -195,8 +196,14 @@ class RiskInputAssembler:
         task_view = cls._task_view(context, parent_task_id)
         strategy_result = cls._agent_result(context, parent_task_id, "StrategyAgent")
         market_result = cls._agent_result(context, parent_task_id, "MarketContextAgent")
-        strategy_payload = dict(strategy_result.structured_payload) if strategy_result else {}
-        market_payload = dict(market_result.structured_payload) if market_result else {}
+        raw_strategy_payload = dict(strategy_result.structured_payload) if strategy_result else {}
+        raw_market_payload = dict(market_result.structured_payload) if market_result else {}
+        strategy_payload = compact_agent_payload("StrategyAgent", raw_strategy_payload)
+        market_payload = compact_agent_payload("MarketContextAgent", raw_market_payload)
+        if raw_market_payload:
+            log_projection(parent_task_id, "market_context_for_risk", raw_market_payload, market_payload)
+        if raw_strategy_payload:
+            log_projection(parent_task_id, "strategy_thesis_for_risk", raw_strategy_payload, strategy_payload)
         thesis_ref = str(strategy_payload.get("thesis_ref") or "")
         market_ref = str(market_payload.get("assessment_ref") or "")
         missing_context = list(task_view.get("missing_required") or task_view.get("missing_context") or [])

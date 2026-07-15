@@ -1,0 +1,8 @@
+flowchart TD
+  A["QueryPlan"] --> B["ContextRequirements"]
+  B --> C["ContextAcquisitionExecutor"]
+  C --> D["EvidenceBundle"]
+  D --> E["EvidenceCoverage"]
+  E --> F["AnswerContract"]
+  F --> G["ResponseGate"]
+  G --> H["FinalAnswerArtifact"]

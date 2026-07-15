@@ -137,8 +137,16 @@ class Config:
     SEMANTIC_CONTEXT_KNOWLEDGE_FALLBACK_TO_LEGACY = _env_bool("SEMANTIC_CONTEXT_KNOWLEDGE_FALLBACK_TO_LEGACY", False)
 
     # ── Live Data APIs ──
+    MARKET_DATA_PROVIDER = os.getenv("MARKET_DATA_PROVIDER", "mt5_bridge").strip().lower()
+    MT5_BRIDGE_URL = os.getenv("MT5_BRIDGE_URL", "http://host.docker.internal:8765").strip()
+    MT5_BRIDGE_TIMEOUT_SECONDS = _env_float("MT5_BRIDGE_TIMEOUT_SECONDS", 3.0)
+    MT5_DEFAULT_CANDLE_COUNT = _env_int("MT5_DEFAULT_CANDLE_COUNT", 300)
+    MT5_DEFAULT_TIMEFRAMES = [item.strip() for item in os.getenv("MT5_DEFAULT_TIMEFRAMES", "M15,H1,H4").split(",") if item.strip()]
+    MT5_SYMBOL_MAP_XAUUSD = os.getenv("MT5_SYMBOL_MAP_XAUUSD", "XAUUSD").strip()
+    OANDA_LEGACY_ENABLED = _env_bool("OANDA_LEGACY_ENABLED", False)
     OANDA_API_KEY          = os.getenv("OANDA_API_KEY", "")
     OANDA_ACCOUNT_ID       = os.getenv("OANDA_ACCOUNT_ID", "")
+    OANDA_ENVIRONMENT      = os.getenv("OANDA_ENVIRONMENT", "practice")
     TWELVE_DATA_API_KEY    = os.getenv("TWELVE_DATA_API_KEY", "")
     BINANCE_API_KEY        = os.getenv("BINANCE_API_KEY", "")
 

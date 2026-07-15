@@ -1,0 +1,11 @@
+{
+  "created_at": "2026-07-13T16:01:41.789220+00:00",
+  "execution_allowed": false,
+  "line_number": 1,
+  "original_hash": "adc6108125c1695bcc60737d467fdb09cc68b8f11e008ee56803a6162d0b7240",
+  "quarantine_id": "quarantine:dcb3132536515fdc",
+  "reason": "corrupt_or_unsafe_record",
+  "safe_excerpt": "{bad json",
+  "severity": "ERROR",
+  "source_path": "C:\\Users\\nguye\\AppData\\Local\\Temp\\tmp4u24pmq8\\bad.jsonl"
+}

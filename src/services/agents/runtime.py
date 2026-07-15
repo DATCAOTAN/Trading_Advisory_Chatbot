@@ -204,6 +204,8 @@ class AgentHandoffContext:
     strategy_theses_by_task: Dict[str, str] = field(default_factory=dict)
     risk_assessment_refs: List[str] = field(default_factory=list)
     risk_assessments_by_task: Dict[str, str] = field(default_factory=dict)
+    consistency_assessment_refs: List[str] = field(default_factory=list)
+    consistency_assessments_by_task: Dict[str, str] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
     confidence_ceiling: str = "high"
 
@@ -221,6 +223,8 @@ class AgentHandoffContext:
             "strategy_theses_by_task": dict(self.strategy_theses_by_task),
             "risk_assessment_refs": list(self.risk_assessment_refs),
             "risk_assessments_by_task": dict(self.risk_assessments_by_task),
+            "consistency_assessment_refs": list(self.consistency_assessment_refs),
+            "consistency_assessments_by_task": dict(self.consistency_assessments_by_task),
             "warnings": list(self.warnings),
             "confidence_ceiling": self.confidence_ceiling,
         }
@@ -330,12 +334,16 @@ class AgentExecutionPlanBuilder:
             required = False
         if agent_type == "RiskAgent":
             required = False
+        if agent_type == "StrategyRiskConsistencyAgent":
+            required = False
         source_refs = self._source_refs_for_task(decision_context, parent_task_id)
         dependency_ids = []
         if agent_type == "StrategyAgent":
             dependency_ids = [f"{parent_task_id}:MarketContextAgent"]
         elif agent_type == "RiskAgent":
             dependency_ids = [f"{parent_task_id}:StrategyAgent"]
+        elif agent_type == "StrategyRiskConsistencyAgent":
+            dependency_ids = [f"{parent_task_id}:StrategyAgent", f"{parent_task_id}:RiskAgent"]
         return AgentTaskEnvelope(
             task_id=task_id,
             parent_task_id=parent_task_id,
@@ -789,6 +797,22 @@ def build_agent_handoff(plan: AgentExecutionPlan, aggregate: AggregatedAgentResu
         and isinstance(result.structured_payload, dict)
         and result.structured_payload.get("risk_ref")
     }
+    consistency_refs = _ordered_unique(
+        str(result.structured_payload.get("consistency_ref") or "")
+        for result in aggregate.task_results
+        if result.agent_type == "StrategyRiskConsistencyAgent"
+        and result.status == AgentStatus.SUCCESS
+        and isinstance(result.structured_payload, dict)
+        and result.structured_payload.get("consistency_ref")
+    )
+    consistency_refs_by_task = {
+        str(result.parent_task_id or result.task_id): str(result.structured_payload.get("consistency_ref") or "")
+        for result in aggregate.task_results
+        if result.agent_type == "StrategyRiskConsistencyAgent"
+        and result.status == AgentStatus.SUCCESS
+        and isinstance(result.structured_payload, dict)
+        and result.structured_payload.get("consistency_ref")
+    }
     handoff = AgentHandoffContext(
         request_id=plan.request_id,
         parent_plan_id=plan.parent_plan_id,
@@ -802,6 +826,8 @@ def build_agent_handoff(plan: AgentExecutionPlan, aggregate: AggregatedAgentResu
         strategy_theses_by_task=strategy_refs_by_task,
         risk_assessment_refs=risk_refs,
         risk_assessments_by_task=risk_refs_by_task,
+        consistency_assessment_refs=consistency_refs,
+        consistency_assessments_by_task=consistency_refs_by_task,
         warnings=list(aggregate.warnings),
         confidence_ceiling=aggregate.confidence_ceiling,
     )
@@ -818,6 +844,9 @@ def build_agent_handoff(plan: AgentExecutionPlan, aggregate: AggregatedAgentResu
         f"risk_assessment={str(bool(risk_refs)).lower()} "
         f"risk_task_id={','.join(result.parent_task_id or result.task_id for result in aggregate.task_results if result.agent_type == 'RiskAgent')} "
         f"risk_ref={','.join(risk_refs)} "
+        f"consistency_assessment={str(bool(consistency_refs)).lower()} "
+        f"consistency_task_id={','.join(result.parent_task_id or result.task_id for result in aggregate.task_results if result.agent_type == 'StrategyRiskConsistencyAgent')} "
+        f"consistency_ref={','.join(consistency_refs)} "
         f"warnings={handoff.warnings}"
     )
     return handoff
