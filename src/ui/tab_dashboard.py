@@ -14,6 +14,58 @@ from src.config import Config
 import json
 import streamlit as st
 from src.config import Config
+from src.services.trading.calendar import CalendarContextBuilder
+from src.services.trading.execution import (
+    DryRunConfirmationService,
+    ExecutionAdapterRegistry,
+    ExecutionJournalStore,
+    LiveExecutionBlockJournalStore,
+    LiveExecutionPreflightReportStore,
+    LiveExecutionPreflightService,
+    LiveOrderContractSkeletonJournalStore,
+    LiveOrderContractSkeletonService,
+    LiveOrderIntentJournalStore,
+    LiveOrderIntentService,
+    LiveOrderParameterPolicyJournalStore,
+    LiveOrderParameterPolicyService,
+    LiveOrderParameterSourceBoundaryService,
+    LiveOrderParameterSourceJournalStore,
+    HumanReviewedLiveParameterDraftJournalStore,
+    HumanReviewedLiveParameterDraftService,
+    ControlledLiveParameterValueProposalJournalStore,
+    ControlledLiveParameterValueProposalService,
+    EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE,
+    HumanValueApprovalLockJournalStore,
+    HumanValueApprovalLockService,
+    EXPECTED_CONTRACT_FINAL_REVIEW_PHRASE,
+    LiveOrderContractFinalReviewJournalStore,
+    LiveOrderContractFinalReviewService,
+    LiveOrderContractParameterizationJournalStore,
+    LiveOrderContractParameterizationService,
+    LivePermissionGateService,
+    LivePermissionJournalStore,
+    LivePermissionPolicy,
+    MT5ExecutionSkeletonService,
+    PreMT5OrderRequestMappingJournalStore,
+    PreMT5OrderRequestMappingService,
+    SimulatedExecutionJournalStore,
+    SimulatedExecutionService,
+)
+from src.services.trading.execution.live_design import (
+    LiveExecutionDesignReportStore,
+    LiveExecutionDesignSpecService,
+)
+from src.services.trading.market.live_feature_service import LiveFeatureService
+from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBundleBuilder
+from src.services.trading.market.regime_detector import MarketRegimeDetector
+from src.services.trading.proposal import (
+    HumanProposalConfirmationService,
+    ProposalBoundaryFormatter,
+    ProposalBoundaryPolicy,
+    ProposalDraftJournalStore,
+    ProposalDraftService,
+    ProposalIntentJournalStore,
+)
 
 
 @st.cache_data(ttl=5)
@@ -114,6 +166,25 @@ def render(orchestrator):
                 calendar_info = orchestrator.live_service.get_economic_calendar()
                 st.info(calendar_info)
 
+    _render_dry_run_execution_gate_status()
+    _render_proposal_boundary_confirmation_status()
+    _render_non_executable_proposal_draft_status()
+    _render_simulated_execution_adapter_status()
+    _render_mt5_live_execution_hard_block_status()
+    _render_live_execution_design_spec_status()
+    _render_live_execution_preflight_status()
+    _render_live_permission_gate_status()
+    _render_live_order_intent_builder_status()
+    _render_live_order_contract_skeleton_status()
+    _render_live_order_parameter_policy_status()
+    _render_live_order_parameter_source_boundary_status()
+    _render_human_reviewed_live_parameter_draft_status()
+    _render_controlled_live_parameter_value_proposal_status()
+    _render_human_value_approval_lock_status()
+    _render_live_order_contract_parameterization_status()
+    _render_live_order_contract_final_review_status()
+    _render_pre_mt5_order_request_mapping_status()
+
     st.markdown("---")
 
     # ── Hàng 4: Cấu hình đường dẫn ─────────────────────────────────────
@@ -151,8 +222,1932 @@ def _render_market_data_provider_status(orchestrator):
         )
         if health.status not in {"OK", "DEGRADED"}:
             st.warning(f"Market data provider unavailable: {health.message}")
+        else:
+            try:
+                feature_service = LiveFeatureService(bundle_builder=MarketSnapshotBundleBuilder(service.provider))
+                result = feature_service.build_features("XAUUSD", Config.MARKET_DEFAULT_TIMEFRAMES, min(Config.MARKET_DEFAULT_CANDLE_COUNT, 120))
+                features = result.feature_snapshot
+                feature_cols = st.columns(5)
+                feature_cols[0].metric("Data quality", features.data_quality_status)
+                feature_cols[1].metric("Trend", features.trend_direction)
+                feature_cols[2].metric("Strength", f"{features.trend_strength:.2f}")
+                feature_cols[3].metric("Volatility", features.volatility_state)
+                feature_cols[4].metric("Spread", features.spread_state)
+                st.caption(
+                    f"Momentum={features.momentum_state} | Pullback={features.pullback_detected} | "
+                    f"Range/chop={features.range_chop_score:.2f}"
+                )
+                try:
+                    calendar_context = CalendarContextBuilder(service.calendar_provider).build("XAUUSD")
+                    regime = MarketRegimeDetector().detect(features, calendar_context)
+                    regime_cols = st.columns(4)
+                    regime_cols[0].metric("Calendar risk", calendar_context.calendar_risk_state)
+                    next_event = calendar_context.next_high_impact_event
+                    next_label = next_event.title[:28] if next_event else "n/a"
+                    regime_cols[1].metric("Next event", next_label)
+                    minutes = calendar_context.minutes_to_next_high_impact_event
+                    regime_cols[2].metric("Minutes", f"{minutes:.0f}" if minutes is not None else "n/a")
+                    regime_cols[3].metric("Regime", regime.primary_regime)
+                    st.caption(
+                        f"Regime confidence={regime.confidence:.2f} | "
+                        f"Secondary={', '.join(regime.secondary_regimes) or 'n/a'}"
+                    )
+                    if regime.blockers:
+                        st.warning("Regime blockers: " + ", ".join(regime.blockers[:5]))
+                except Exception as exc:
+                    st.caption(f"Calendar/regime snapshot unavailable: {type(exc).__name__}")
+            except Exception as exc:
+                st.caption(f"Market feature snapshot unavailable: {type(exc).__name__}")
     except Exception as exc:
         st.warning(f"Market data provider status unavailable: {type(exc).__name__}")
+
+
+def _render_dry_run_execution_gate_status():
+    st.markdown("#### Dry-Run Execution Gate")
+    st.caption("Dry-run only. No live order is sent. executed=false.")
+    try:
+        store = ExecutionJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Dry-runs", summary.total_dry_runs)
+        cols[1].metric("Allowed", summary.total_allowed)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Duplicates", summary.total_duplicates)
+        if summary.latest_receipt_id:
+            st.caption(
+                f"Latest gate={summary.latest_gate_action} | "
+                f"artifact_hash={summary.latest_artifact_hash[:12]} | "
+                f"receipt={summary.latest_receipt_id}"
+            )
+        if summary.warnings:
+            st.caption("Journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Dry-run journal unavailable: {type(exc).__name__}")
+
+    artifact = st.session_state.get("human_review_artifact")
+    card = st.session_state.get("human_review_card")
+    if artifact is None:
+        st.info("No HumanReviewArtifact in session. Generate a review card before running the dry-run gate.")
+        st.button("Run Dry-Run Gate", disabled=True, use_container_width=True, key="dash_dry_run_gate_disabled")
+        return
+
+    if st.button("Run Dry-Run Gate", use_container_width=True, key="dash_dry_run_gate"):
+        try:
+            result = DryRunConfirmationService().run(artifact, card=card)
+            receipt = result.receipt
+            st.session_state["execution_gate_decision"] = result.gate_decision
+            st.session_state["dry_run_execution_receipt"] = receipt
+            st.session_state["execution_journal_record"] = result.journal_record
+            st.success(
+                "Dry-run gate evaluated. "
+                f"gate_action={result.gate_decision.action}, "
+                f"dry_run_only={receipt.dry_run_only}, executed={receipt.executed}"
+            )
+            if result.journal_record:
+                st.caption(f"Journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Dry-run gate unavailable: {type(exc).__name__}")
+
+
+def _render_proposal_boundary_confirmation_status():
+    st.markdown("#### Proposal Boundary Confirmation")
+    st.caption(
+        "Proposal workflow confirmation only. No live order is sent. "
+        "dry_run_only=true. executable=false. Future execution requires a separate adapter and gate."
+    )
+    try:
+        store = ProposalIntentJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Intents", summary.total_intents)
+        cols[1].metric("Confirmed", summary.total_confirmed)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Duplicates", summary.total_duplicates)
+        if summary.latest_intent_id:
+            st.caption(f"Latest proposal intent={summary.latest_intent_id} | status={summary.latest_status}")
+        if summary.warnings:
+            st.caption("Proposal journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Proposal intent journal unavailable: {type(exc).__name__}")
+
+    artifact = st.session_state.get("human_review_artifact")
+    receipt = st.session_state.get("dry_run_execution_receipt")
+    execution_record = st.session_state.get("execution_journal_record")
+    if artifact is not None:
+        st.caption(f"Latest review status={artifact.review_status} | readiness_action={artifact.readiness_action}")
+    if receipt is not None:
+        st.caption(
+            f"Latest dry-run receipt={receipt.receipt_id} | gate_action={receipt.gate_action} | "
+            f"dry_run_only={receipt.dry_run_only} | executed={receipt.executed}"
+        )
+
+    phrase = ProposalBoundaryPolicy.from_config().confirmation_phrase
+    st.caption(f"Required phrase: `{phrase}`")
+    acknowledgement = st.text_input(
+        "Type the required phrase to confirm proposal workflow",
+        key="dash_proposal_boundary_phrase",
+    )
+    disabled = artifact is None or receipt is None or execution_record is None
+    if disabled:
+        st.info("Run the dry-run gate first so the proposal boundary can verify the receipt and journal record.")
+    if st.button(
+        "Confirm Proposal Workflow",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_confirm_proposal_workflow",
+    ):
+        try:
+            result = HumanProposalConfirmationService().confirm_with_journal(
+                artifact,
+                receipt,
+                execution_journal_record=execution_record,
+                user_acknowledgement_text=acknowledgement,
+            )
+            intent = result.intent
+            st.session_state["human_confirmed_proposal_intent"] = intent
+            st.session_state["proposal_intent_journal_record"] = result.journal_record
+            st.info(
+                "Proposal boundary evaluated. "
+                f"status={intent.proposal_boundary_status}, "
+                f"proposal_workflow_allowed={intent.proposal_workflow_allowed}, "
+                f"dry_run_only={intent.dry_run_only}, executable={intent.executable}"
+            )
+            if result.journal_record:
+                st.caption(f"Proposal intent journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+            card = ProposalBoundaryFormatter().to_card(intent)
+            st.caption(f"Source refs={card.source_section.get('source_refs_count', 0)}")
+        except Exception as exc:
+            st.warning(f"Proposal boundary unavailable: {type(exc).__name__}")
+
+
+def _render_non_executable_proposal_draft_status():
+    st.markdown("#### Non-Executable Proposal Draft")
+    st.caption(
+        "This is a non-executable proposal draft. It is not a trade signal, "
+        "does not contain order parameters, sends no live order, and executable=false."
+    )
+    try:
+        store = ProposalDraftJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Drafts", summary.total_records)
+        cols[1].metric("Created", summary.total_created)
+        cols[2].metric("Waiting", summary.total_waiting)
+        cols[3].metric("Blocked", summary.total_blocked)
+        if summary.latest_draft_id:
+            st.caption(f"Latest draft={summary.latest_draft_id} | status={summary.latest_status}")
+        if summary.warnings:
+            st.caption("Draft journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Proposal draft journal unavailable: {type(exc).__name__}")
+
+    intent = st.session_state.get("human_confirmed_proposal_intent")
+    artifact = st.session_state.get("human_review_artifact")
+    score_report = st.session_state.get("signal_score_report")
+    method_selection = st.session_state.get("method_selection_result")
+    context_pack = st.session_state.get("runtime_context_pack")
+    calendar_context = st.session_state.get("calendar_context")
+    regime = st.session_state.get("market_regime_snapshot")
+    features = st.session_state.get("feature_snapshot")
+    disabled = not all([intent, artifact, score_report, method_selection, context_pack])
+    if disabled:
+        st.info("Structured proposal inputs are not in session yet. Build the upstream review/proposal boundary first.")
+
+    if st.button(
+        "Build Non-Executable Proposal Draft",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_build_non_executable_proposal_draft",
+    ):
+        try:
+            result = ProposalDraftService().build(
+                intent,
+                artifact,
+                score_report,
+                method_selection,
+                context_pack,
+                calendar_context=calendar_context,
+                regime_snapshot=regime,
+                feature_snapshot=features,
+            )
+            draft = result.draft
+            st.session_state["non_executable_trade_proposal_draft"] = draft
+            st.session_state["proposal_draft_card"] = result.card
+            st.session_state["proposal_draft_journal_record"] = result.journal_record
+            st.info(
+                "Non-executable proposal draft built. "
+                f"status={draft.status}, non_executable={draft.non_executable}, executable={draft.executable}"
+            )
+            st.caption(
+                f"Method={draft.primary_method_id} | Regime={draft.primary_regime} | "
+                f"Calendar={draft.calendar_risk_state} | Source refs={len(draft.source_refs)}"
+            )
+            if result.journal_record:
+                st.caption(f"Proposal draft journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Proposal draft unavailable: {type(exc).__name__}")
+
+
+def _render_simulated_execution_adapter_status():
+    st.markdown("#### Simulated Execution Adapter Contract")
+    st.caption(
+        "Simulated adapter contract only. No live order is sent, no order parameters exist, "
+        "executable=false, executed=false."
+    )
+    try:
+        health = ExecutionAdapterRegistry().health_check()
+        store = SimulatedExecutionJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Adapter", health.adapter_type)
+        cols[1].metric("Health", health.status)
+        cols[2].metric("Accepted", summary.total_accepted)
+        cols[3].metric("Rejected", summary.total_rejected)
+        if summary.latest_receipt_id:
+            st.caption(
+                f"Latest contract={summary.latest_contract_id} | receipt={summary.latest_receipt_id} | "
+                f"status={summary.latest_contract_status}"
+            )
+        if summary.warnings:
+            st.caption("Simulated journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Simulated adapter status unavailable: {type(exc).__name__}")
+
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    intent = st.session_state.get("human_confirmed_proposal_intent")
+    dry_run_receipt = st.session_state.get("dry_run_execution_receipt")
+    execution_record = st.session_state.get("execution_journal_record")
+    draft_record = st.session_state.get("proposal_draft_journal_record")
+    if draft is not None:
+        st.caption(
+            f"Latest draft={draft.draft_id} | status={draft.status} | "
+            f"non_executable={draft.non_executable} | executable={draft.executable}"
+        )
+    disabled = draft is None
+    if disabled:
+        st.info("Build a non-executable proposal draft before running the simulated adapter contract.")
+
+    if st.button(
+        "Run Simulated Adapter Contract",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_run_simulated_adapter_contract",
+    ):
+        try:
+            result = SimulatedExecutionService().run(
+                draft,
+                intent=intent,
+                dry_run_receipt=dry_run_receipt,
+                execution_journal_record=execution_record,
+                proposal_draft_journal_record=draft_record,
+            )
+            receipt = result.receipt
+            st.session_state["simulated_order_contract"] = result.contract
+            st.session_state["simulated_execution_receipt"] = receipt
+            st.session_state["simulated_execution_journal_record"] = result.journal_record
+            st.info(
+                "Simulated adapter contract evaluated. "
+                f"contract_status={result.contract.contract_status}, "
+                f"accepted_by_adapter={receipt.accepted_by_adapter}, "
+                f"simulated_only={receipt.simulated_only}, executable={receipt.executable}, executed={receipt.executed}"
+            )
+            if result.journal_record:
+                st.caption(f"Simulated execution journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Simulated adapter unavailable: {type(exc).__name__}")
+
+
+def _render_mt5_live_execution_hard_block_status():
+    st.markdown("#### MT5 Live Execution Capability - Hard Blocked")
+    st.caption(
+        "Live execution is hard-blocked. This section only checks capability and records a blocked receipt. "
+        "No live order is sent. order_sent=false, executed=false, order submission is disabled."
+    )
+    try:
+        store = LiveExecutionBlockJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Skeleton", "HARD_BLOCKED")
+        cols[1].metric("Live supported", "false")
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Records", summary.total_records)
+        if summary.latest_receipt_id:
+            st.caption(f"Latest blocked receipt={summary.latest_receipt_id} | reason={summary.latest_block_reason}")
+        if summary.warnings:
+            st.caption("Live-block journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Live-block journal unavailable: {type(exc).__name__}")
+
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+    simulated_record = st.session_state.get("simulated_execution_journal_record")
+    if contract is not None:
+        st.caption(
+            f"Latest simulated contract={contract.contract_id} | status={contract.contract_status} | "
+            f"artifact_hash={contract.artifact_hash[:12]}"
+        )
+    disabled = contract is None or simulated_receipt is None
+    if disabled:
+        st.info("Run the simulated adapter contract before checking the MT5 live execution skeleton.")
+
+    if st.button(
+        "Check MT5 Live Execution Capability",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_check_mt5_live_execution_capability",
+    ):
+        try:
+            result = MT5ExecutionSkeletonService().run(contract, simulated_receipt, simulated_record)
+            report = result.capability_report
+            receipt = result.blocked_receipt
+            st.session_state["live_execution_capability_report"] = report
+            st.session_state["live_execution_blocked_receipt"] = receipt
+            st.session_state["live_execution_block_journal_record"] = result.journal_record
+            st.info(
+                "MT5 live execution capability checked and hard-blocked. "
+                f"skeleton_status={report.skeleton_status}, "
+                f"live_execution_supported={report.live_execution_supported}, "
+                f"live_execution_enabled={report.live_execution_enabled}, "
+                f"order_sent={receipt.order_sent}, executed={receipt.executed}"
+            )
+            if result.journal_record:
+                st.caption(f"Live-block journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"MT5 live execution skeleton unavailable: {type(exc).__name__}")
+
+
+def _render_live_execution_design_spec_status():
+    st.markdown("#### Live Execution Design Spec & Threat Model")
+    st.caption(
+        "Design spec only. Threat model only. Live execution remains disabled. "
+        "No live order is sent. order_sent=false, executed=false."
+    )
+    try:
+        store = LiveExecutionDesignReportStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Design reports", summary.total_records)
+        cols[1].metric("Design-only", summary.total_design_only)
+        cols[2].metric("Invalid", summary.total_invalid)
+        cols[3].metric("Live allowed", "false")
+        if summary.latest_report_id:
+            st.caption(f"Latest design report={summary.latest_report_id} | status={summary.latest_design_status}")
+        if summary.warnings:
+            st.caption("Design journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Live design report journal unavailable: {type(exc).__name__}")
+
+    capability = st.session_state.get("live_execution_capability_report")
+    blocked_receipt = st.session_state.get("live_execution_blocked_receipt")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    disabled = capability is None or blocked_receipt is None
+    if disabled:
+        st.info("Check MT5 live execution capability first so the design spec can use hard-block artifacts.")
+
+    if st.button(
+        "Build Live Execution Design Spec",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_build_live_execution_design_spec",
+    ):
+        try:
+            result = LiveExecutionDesignSpecService().build_and_record(
+                capability,
+                blocked_receipt,
+                contract=contract,
+                simulated_receipt=simulated_receipt,
+                draft=draft,
+            )
+            report = result.report
+            st.session_state["live_execution_readiness_spec_report"] = report
+            st.session_state["live_execution_design_journal_record"] = result.journal_record
+            critical_or_high = sum(1 for item in report.threats if item.severity in {"CRITICAL", "HIGH"})
+            st.info(
+                "Live execution design spec built. "
+                f"status={report.design_status}, live_execution_allowed={report.live_execution_allowed}, "
+                f"hard_live_block_required={report.hard_live_block_required}, "
+                f"threats={len(report.threats)}, critical_or_high={critical_or_high}"
+            )
+            if result.journal_record:
+                st.caption(f"Live design journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Live execution design spec unavailable: {type(exc).__name__}")
+
+
+def _render_live_execution_preflight_status():
+    st.markdown("#### Live Execution Preflight Readiness Harness")
+    st.caption(
+        "Preflight only. Live execution remains disabled. No live order is sent. "
+        "order_sent=false, executed=false. This does not permit live trading yet."
+    )
+    try:
+        store = LiveExecutionPreflightReportStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Preflight reports", summary.total_records)
+        cols[1].metric("Passed", summary.total_pass)
+        cols[2].metric("Failed", summary.total_fail)
+        cols[3].metric("Live allowed", "false")
+        if summary.latest_report_id:
+            st.caption(
+                f"Latest preflight report={summary.latest_report_id} | "
+                f"status={summary.latest_preflight_status} | "
+                f"blocking_failures={summary.latest_blocking_failures}"
+            )
+        if summary.warnings:
+            st.caption("Preflight journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Live preflight journal unavailable: {type(exc).__name__}")
+
+    design_report = st.session_state.get("live_execution_readiness_spec_report")
+    capability = st.session_state.get("live_execution_capability_report")
+    blocked_receipt = st.session_state.get("live_execution_blocked_receipt")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+    live_block_record = st.session_state.get("live_execution_block_journal_record")
+    disabled = design_report is None or capability is None or blocked_receipt is None
+    if disabled:
+        st.info("Build the live execution design spec first so preflight can scan hard-block artifacts.")
+
+    if st.button(
+        "Run Live Execution Preflight",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_run_live_execution_preflight",
+    ):
+        try:
+            result = LiveExecutionPreflightService().run(
+                design_report,
+                capability,
+                blocked_receipt,
+                simulated_contract=contract,
+                simulated_receipt=simulated_receipt,
+                live_block_journal_record=live_block_record,
+            )
+            report = result.report
+            st.session_state["live_execution_preflight_readiness_report"] = report
+            st.session_state["live_execution_preflight_journal_record"] = result.journal_record
+            st.info(
+                "Live execution preflight completed. "
+                f"status={report.preflight_status}, live_execution_allowed={report.live_execution_allowed}, "
+                f"hard_live_block_required={report.hard_live_block_required}, total_checks={report.total_checks}, "
+                f"blocking_failures={report.blocking_failures}"
+            )
+            if result.journal_record:
+                st.caption(f"Preflight journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Live execution preflight unavailable: {type(exc).__name__}")
+
+
+def _render_live_permission_gate_status():
+    st.markdown("#### Human-Confirmed Live Permission Gate")
+    st.caption(
+        "This only permits live order intent preparation. It does not send a trade. "
+        "Live execution remains disabled, order submission remains disabled, executed=false, order_sent=false."
+    )
+    try:
+        store = LivePermissionJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Permission records", summary.total_records)
+        cols[1].metric("Granted", summary.total_granted)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Live allowed", "false")
+        if summary.latest_intent_id:
+            st.caption(
+                f"Latest permission intent={summary.latest_intent_id} | "
+                f"status={summary.latest_permission_status} | decision={summary.latest_decision_id}"
+            )
+        if summary.warnings:
+            st.caption("Permission journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Live permission journal unavailable: {type(exc).__name__}")
+
+    policy = LivePermissionPolicy.from_config()
+    st.caption(f"Required phrase: `{policy.confirmation_phrase}`")
+    acknowledgement = st.text_input(
+        "Type the required phrase to confirm live order intent preparation",
+        key="dash_live_permission_phrase",
+    )
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    design_report = st.session_state.get("live_execution_readiness_spec_report")
+    capability = st.session_state.get("live_execution_capability_report")
+    blocked_receipt = st.session_state.get("live_execution_blocked_receipt")
+    contract = st.session_state.get("simulated_order_contract")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    if preflight_report is not None:
+        st.caption(
+            f"Latest preflight status={preflight_report.preflight_status} | "
+            f"live_execution_allowed={preflight_report.live_execution_allowed} | "
+            f"hard_live_block_required={preflight_report.hard_live_block_required}"
+        )
+    disabled = preflight_report is None or design_report is None or capability is None or blocked_receipt is None
+    if disabled:
+        st.info("Run live preflight first so the permission gate can verify the latest hard-block artifacts.")
+
+    if st.button(
+        "Confirm Live Order Intent Preparation",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_confirm_live_order_intent_preparation",
+    ):
+        try:
+            result = LivePermissionGateService(policy=policy).run(
+                preflight_report,
+                design_report,
+                capability,
+                blocked_receipt,
+                simulated_contract=contract,
+                proposal_draft=draft,
+                user_acknowledgement_text=acknowledgement,
+            )
+            intent = result.intent
+            decision = result.decision
+            st.session_state["live_permission_intent"] = intent
+            st.session_state["live_permission_gate_decision"] = decision
+            st.session_state["live_permission_journal_record"] = result.journal_record
+            st.info(
+                "Live permission gate evaluated. "
+                f"permission_status={intent.permission_status}, confirmation_state={intent.confirmation_state}, "
+                f"gate_allowed={decision.gate_allowed}, "
+                f"order_intent_workflow_allowed={decision.order_intent_workflow_allowed}, "
+                f"live_execution_allowed={decision.live_execution_allowed}, "
+                f"order_send_allowed={decision.order_send_allowed}, execution_allowed={decision.execution_allowed}"
+            )
+            if result.journal_record:
+                st.caption(f"Live permission journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Live permission gate unavailable: {type(exc).__name__}")
+
+
+def _render_live_order_intent_builder_status():
+    st.markdown("#### Live Order Intent Builder")
+    st.caption(
+        "This only builds a live order intent for the next contract workflow. It does not send a trade, "
+        "does not contain side, price, or size, and live execution remains disabled. "
+        "order submission remains disabled, executed=false, order_sent=false."
+    )
+    try:
+        store = LiveOrderIntentJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Intent records", summary.total_records)
+        cols[1].metric("Created", summary.total_created)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Live allowed", "false")
+        if summary.latest_intent_id:
+            st.caption(
+                f"Latest live order intent={summary.latest_intent_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("Live order intent journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Live order intent journal unavailable: {type(exc).__name__}")
+
+    permission_intent = st.session_state.get("live_permission_intent")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+    if permission_decision is not None:
+        st.caption(
+            f"Permission gate allowed={permission_decision.gate_allowed} | "
+            f"order_intent_workflow_allowed={permission_decision.order_intent_workflow_allowed}"
+        )
+    if preflight_report is not None:
+        st.caption(f"Preflight status={preflight_report.preflight_status}")
+    if draft is not None:
+        st.caption(
+            f"Proposal draft={draft.draft_id} | status={draft.status} | "
+            f"non_executable={draft.non_executable} | executable={draft.executable}"
+        )
+    if contract is not None:
+        st.caption(
+            f"Simulated contract={contract.contract_id} | status={contract.contract_status} | "
+            f"simulated_only={contract.simulated_only} | executable={contract.executable}"
+        )
+    disabled = (
+        permission_intent is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Complete the permission gate, preflight, proposal draft, and simulated contract before building a live order intent.")
+
+    if st.button(
+        "Build Live Order Intent",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_build_live_order_intent",
+    ):
+        try:
+            result = LiveOrderIntentService().run(
+                permission_intent,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+            )
+            intent = result.intent
+            validation_report = result.validation_report
+            st.session_state["live_order_intent"] = intent
+            st.session_state["live_order_intent_validation_report"] = validation_report
+            st.session_state["live_order_intent_journal_record"] = result.journal_record
+            st.info(
+                "Live order intent evaluated for contract workflow preparation only. "
+                f"status={intent.status}, validation_valid={validation_report.valid}, "
+                f"order_contract_workflow_allowed={validation_report.order_contract_workflow_allowed}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, execution_allowed={validation_report.execution_allowed}, "
+                f"hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            if result.journal_record:
+                st.caption(f"Live order intent journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Live order intent builder unavailable: {type(exc).__name__}")
+
+
+def _render_live_order_contract_skeleton_status():
+    st.markdown("#### Live Order Contract Skeleton")
+    st.caption(
+        "This only builds a live order contract skeleton for future parameter validation. It does not send a trade, "
+        "does not contain side, price, or size, and does not create an MT5 payload. "
+        "Live execution remains disabled, order submission remains disabled, executed=false, order_sent=false."
+    )
+    try:
+        store = LiveOrderContractSkeletonJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Skeleton records", summary.total_records)
+        cols[1].metric("Created", summary.total_created)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Live allowed", "false")
+        if summary.latest_contract_skeleton_id:
+            st.caption(
+                f"Latest contract skeleton={summary.latest_contract_skeleton_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("Contract skeleton journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Live order contract skeleton journal unavailable: {type(exc).__name__}")
+
+    live_order_intent = st.session_state.get("live_order_intent")
+    live_order_intent_validation = st.session_state.get("live_order_intent_validation_report")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+    if live_order_intent is not None:
+        st.caption(
+            f"Live order intent={live_order_intent.intent_id} | status={live_order_intent.status} | "
+            f"contract_workflow_allowed={live_order_intent.order_contract_workflow_allowed}"
+        )
+    if live_order_intent_validation is not None:
+        st.caption(f"Intent validation valid={live_order_intent_validation.valid}")
+    if permission_decision is not None:
+        st.caption(f"Permission gate allowed={permission_decision.gate_allowed}")
+    if preflight_report is not None:
+        st.caption(f"Preflight status={preflight_report.preflight_status}")
+    if draft is not None:
+        st.caption(f"Proposal draft status={draft.status} | non_executable={draft.non_executable} | executable={draft.executable}")
+    if contract is not None:
+        st.caption(
+            f"Simulated contract status={contract.contract_status} | simulated_only={contract.simulated_only} | "
+            f"executable={contract.executable}"
+        )
+    disabled = (
+        live_order_intent is None
+        or live_order_intent_validation is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Build a valid live order intent before creating the contract skeleton.")
+
+    if st.button(
+        "Build Live Order Contract Skeleton",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_build_live_order_contract_skeleton",
+    ):
+        try:
+            result = LiveOrderContractSkeletonService().run(
+                live_order_intent,
+                live_order_intent_validation,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+            )
+            skeleton = result.skeleton
+            validation_report = result.validation_report
+            st.session_state["live_order_contract_skeleton"] = skeleton
+            st.session_state["live_order_contract_skeleton_validation_report"] = validation_report
+            st.session_state["live_order_contract_skeleton_journal_record"] = result.journal_record
+            st.info(
+                "Live order contract skeleton evaluated for future parameter validation only. "
+                f"status={skeleton.status}, validation_valid={validation_report.valid}, "
+                f"contract_parameter_validation_allowed={validation_report.contract_parameter_validation_allowed}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, execution_allowed={validation_report.execution_allowed}, "
+                f"executable={validation_report.executable}, mt5_payload_created={validation_report.mt5_payload_created}, "
+                f"order_sent={validation_report.order_sent}, hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            st.caption(
+                f"Required parameter groups={', '.join(skeleton.required_parameter_groups)} | "
+                f"Missing parameter groups={', '.join(skeleton.missing_parameter_groups)}"
+            )
+            if result.journal_record:
+                st.caption(f"Live order contract skeleton journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Live order contract skeleton unavailable: {type(exc).__name__}")
+
+
+def _render_live_order_parameter_policy_status():
+    st.markdown("#### Live Order Parameter Policy Validator")
+    st.caption(
+        "This only validates parameter policies. It does not create actual order parameters, does not contain side, "
+        "price, protection, volume, or risk values, and does not create an MT5 payload. "
+        "Live execution remains disabled, order submission remains disabled, executed=false, order_sent=false."
+    )
+    try:
+        store = LiveOrderParameterPolicyJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Policy records", summary.total_records)
+        cols[1].metric("Validated", summary.total_validated)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Actual values", "false")
+        if summary.latest_policy_spec_id:
+            st.caption(
+                f"Latest parameter policy={summary.latest_policy_spec_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("Parameter policy journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Live order parameter policy journal unavailable: {type(exc).__name__}")
+
+    contract_skeleton = st.session_state.get("live_order_contract_skeleton")
+    contract_skeleton_validation = st.session_state.get("live_order_contract_skeleton_validation_report")
+    live_order_intent = st.session_state.get("live_order_intent")
+    live_order_intent_validation = st.session_state.get("live_order_intent_validation_report")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+
+    if contract_skeleton is not None:
+        st.caption(
+            f"Contract skeleton={contract_skeleton.contract_skeleton_id} | status={contract_skeleton.status} | "
+            f"parameter_validation_allowed={contract_skeleton.contract_parameter_validation_allowed}"
+        )
+    if contract_skeleton_validation is not None:
+        st.caption(f"Skeleton validation valid={contract_skeleton_validation.valid}")
+    if live_order_intent is not None:
+        st.caption(f"Live order intent status={live_order_intent.status}")
+    if permission_decision is not None:
+        st.caption(f"Permission gate allowed={permission_decision.gate_allowed}")
+    if preflight_report is not None:
+        st.caption(f"Preflight status={preflight_report.preflight_status}")
+    if draft is not None:
+        st.caption(f"Proposal draft status={draft.status} | non_executable={draft.non_executable} | executable={draft.executable}")
+    if contract is not None:
+        st.caption(
+            f"Simulated contract status={contract.contract_status} | simulated_only={contract.simulated_only} | "
+            f"executable={contract.executable}"
+        )
+    disabled = (
+        contract_skeleton is None
+        or contract_skeleton_validation is None
+        or live_order_intent is None
+        or live_order_intent_validation is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Build a valid live order contract skeleton before validating parameter policies.")
+
+    if st.button(
+        "Validate Live Order Parameter Policies",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_validate_live_order_parameter_policies",
+    ):
+        try:
+            result = LiveOrderParameterPolicyService().run(
+                contract_skeleton,
+                contract_skeleton_validation,
+                live_order_intent,
+                live_order_intent_validation,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+            )
+            policy_spec = result.policy_spec
+            validation_report = result.validation_report
+            st.session_state["live_order_parameter_policy_spec"] = policy_spec
+            st.session_state["live_order_parameter_policy_validation_report"] = validation_report
+            st.session_state["live_order_parameter_policy_journal_record"] = result.journal_record
+            st.info(
+                "Live order parameter policies evaluated for future source-boundary preparation only. "
+                f"status={policy_spec.status}, validation_valid={validation_report.valid}, "
+                f"parameter_source_boundary_allowed={validation_report.parameter_source_boundary_allowed}, "
+                f"resolved_parameter_values_present={validation_report.resolved_parameter_values_present}, "
+                f"actual_order_values_present={validation_report.actual_order_values_present}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, execution_allowed={validation_report.execution_allowed}, "
+                f"executable={validation_report.executable}, mt5_payload_created={validation_report.mt5_payload_created}, "
+                f"order_sent={validation_report.order_sent}, hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            st.caption(
+                f"Policy groups={', '.join(policy_spec.required_parameter_groups)} | "
+                f"Policy rules={len(policy_spec.policy_rules)} | Unresolved groups={len(policy_spec.unresolved_parameter_groups)}"
+            )
+            if result.journal_record:
+                st.caption(f"Live order parameter policy journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Live order parameter policy validator unavailable: {type(exc).__name__}")
+
+
+def _render_live_order_parameter_source_boundary_status():
+    st.markdown("#### Live Order Parameter Source Boundary")
+    st.caption(
+        "This only defines allowed future parameter sources. It does not create actual order parameters, "
+        "does not contain side, price, protection, volume, or risk values, and does not create an MT5 payload. "
+        "Live execution remains disabled, order submission remains disabled, executed=false, order_sent=false."
+    )
+    try:
+        store = LiveOrderParameterSourceJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Source records", summary.total_records)
+        cols[1].metric("Validated", summary.total_validated)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Actual values", "false")
+        if summary.latest_boundary_id:
+            st.caption(
+                f"Latest parameter source boundary={summary.latest_boundary_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("Parameter source journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Live order parameter source journal unavailable: {type(exc).__name__}")
+
+    policy_spec = st.session_state.get("live_order_parameter_policy_spec")
+    policy_validation = st.session_state.get("live_order_parameter_policy_validation_report")
+    contract_skeleton = st.session_state.get("live_order_contract_skeleton")
+    contract_skeleton_validation = st.session_state.get("live_order_contract_skeleton_validation_report")
+    live_order_intent = st.session_state.get("live_order_intent")
+    live_order_intent_validation = st.session_state.get("live_order_intent_validation_report")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+
+    if policy_spec is not None:
+        st.caption(
+            f"Parameter policy={policy_spec.policy_spec_id} | status={policy_spec.status} | "
+            f"source_boundary_allowed={policy_spec.parameter_source_boundary_allowed}"
+        )
+    if policy_validation is not None:
+        st.caption(f"Parameter policy validation valid={policy_validation.valid}")
+    if contract_skeleton is not None:
+        st.caption(f"Contract skeleton status={contract_skeleton.status}")
+    if live_order_intent is not None:
+        st.caption(f"Live order intent status={live_order_intent.status}")
+    if permission_decision is not None:
+        st.caption(f"Permission gate allowed={permission_decision.gate_allowed}")
+    if preflight_report is not None:
+        st.caption(f"Preflight status={preflight_report.preflight_status}")
+    disabled = (
+        policy_spec is None
+        or policy_validation is None
+        or contract_skeleton is None
+        or contract_skeleton_validation is None
+        or live_order_intent is None
+        or live_order_intent_validation is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Validate live order parameter policies before building the parameter source boundary.")
+
+    if st.button(
+        "Build Live Order Parameter Source Boundary",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_build_live_order_parameter_source_boundary",
+    ):
+        try:
+            result = LiveOrderParameterSourceBoundaryService().run(
+                policy_spec,
+                policy_validation,
+                contract_skeleton,
+                contract_skeleton_validation,
+                live_order_intent,
+                live_order_intent_validation,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+            )
+            boundary = result.boundary
+            validation_report = result.validation_report
+            st.session_state["live_order_parameter_source_boundary"] = boundary
+            st.session_state["live_order_parameter_source_validation_report"] = validation_report
+            st.session_state["live_order_parameter_source_journal_record"] = result.journal_record
+            st.info(
+                "Live order parameter source boundary evaluated for future human-reviewed parameter draft only. "
+                f"status={boundary.status}, validation_valid={validation_report.valid}, "
+                f"human_reviewed_parameter_draft_allowed={validation_report.human_reviewed_parameter_draft_allowed}, "
+                f"source_candidates_count={validation_report.source_candidates_count}, "
+                f"missing_sources_count={validation_report.missing_sources_count}, "
+                f"resolved_parameter_values_present={validation_report.resolved_parameter_values_present}, "
+                f"actual_order_values_present={validation_report.actual_order_values_present}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, execution_allowed={validation_report.execution_allowed}, "
+                f"executable={validation_report.executable}, mt5_payload_created={validation_report.mt5_payload_created}, "
+                f"order_sent={validation_report.order_sent}, hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            st.caption(
+                f"Required source types={', '.join(boundary.required_source_types)} | "
+                f"Missing source types={', '.join(boundary.missing_source_types) or 'none'}"
+            )
+            if result.journal_record:
+                st.caption(f"Live order parameter source journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Live order parameter source boundary unavailable: {type(exc).__name__}")
+
+
+def _render_human_reviewed_live_parameter_draft_status():
+    st.markdown("#### Human-Reviewed Live Parameter Draft")
+    st.caption(
+        "This only builds unresolved human-review parameter slots. It does not create actual order parameters, "
+        "does not contain side, price, protection, volume, or risk values, and does not create an MT5 payload. "
+        "Live execution remains disabled, order submission remains disabled, executed=false, order_sent=false."
+    )
+    try:
+        store = HumanReviewedLiveParameterDraftJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Draft records", summary.total_records)
+        cols[1].metric("Created", summary.total_created)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Actual values", "false")
+        if summary.latest_draft_id:
+            st.caption(
+                f"Latest human-reviewed parameter draft={summary.latest_draft_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("Parameter draft journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Human-reviewed parameter draft journal unavailable: {type(exc).__name__}")
+
+    parameter_source_boundary = st.session_state.get("live_order_parameter_source_boundary")
+    parameter_source_validation = st.session_state.get("live_order_parameter_source_validation_report")
+    parameter_policy_spec = st.session_state.get("live_order_parameter_policy_spec")
+    parameter_policy_validation = st.session_state.get("live_order_parameter_policy_validation_report")
+    contract_skeleton = st.session_state.get("live_order_contract_skeleton")
+    contract_skeleton_validation = st.session_state.get("live_order_contract_skeleton_validation_report")
+    live_order_intent = st.session_state.get("live_order_intent")
+    live_order_intent_validation = st.session_state.get("live_order_intent_validation_report")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+
+    if parameter_source_boundary is not None:
+        st.caption(
+            f"Parameter source boundary={parameter_source_boundary.boundary_id} | "
+            f"status={parameter_source_boundary.status} | "
+            f"human_review_allowed={parameter_source_boundary.human_reviewed_parameter_draft_allowed}"
+        )
+    if parameter_source_validation is not None:
+        st.caption(f"Parameter source validation valid={parameter_source_validation.valid}")
+    if parameter_policy_spec is not None:
+        st.caption(f"Parameter policy status={parameter_policy_spec.status}")
+    if contract_skeleton is not None:
+        st.caption(f"Contract skeleton status={contract_skeleton.status}")
+    if live_order_intent is not None:
+        st.caption(f"Live order intent status={live_order_intent.status}")
+    if permission_decision is not None:
+        st.caption(f"Permission gate allowed={permission_decision.gate_allowed}")
+    if preflight_report is not None:
+        st.caption(f"Preflight status={preflight_report.preflight_status}")
+
+    disabled = (
+        parameter_source_boundary is None
+        or parameter_source_validation is None
+        or parameter_policy_spec is None
+        or parameter_policy_validation is None
+        or contract_skeleton is None
+        or contract_skeleton_validation is None
+        or live_order_intent is None
+        or live_order_intent_validation is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Build the live order parameter source boundary before building unresolved parameter draft slots.")
+
+    if st.button(
+        "Build Human-Reviewed Parameter Draft",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_build_human_reviewed_parameter_draft",
+    ):
+        try:
+            result = HumanReviewedLiveParameterDraftService().run(
+                parameter_source_boundary,
+                parameter_source_validation,
+                parameter_policy_spec,
+                parameter_policy_validation,
+                contract_skeleton,
+                contract_skeleton_validation,
+                live_order_intent,
+                live_order_intent_validation,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+            )
+            parameter_draft = result.draft
+            validation_report = result.validation_report
+            st.session_state["human_reviewed_live_parameter_draft"] = parameter_draft
+            st.session_state["human_reviewed_live_parameter_draft_validation_report"] = validation_report
+            st.session_state["human_reviewed_live_parameter_draft_journal_record"] = result.journal_record
+            st.info(
+                "Human-reviewed live parameter draft evaluated for future controlled value proposals only. "
+                f"status={parameter_draft.status}, validation_valid={validation_report.valid}, "
+                f"value_proposal_workflow_allowed={validation_report.value_proposal_workflow_allowed}, "
+                f"slots_count={validation_report.slots_count}, "
+                f"unresolved_slots_count={validation_report.unresolved_slots_count}, "
+                f"resolved_slots_count={validation_report.resolved_slots_count}, "
+                f"missing_slots_count={validation_report.missing_slots_count}, "
+                f"resolved_parameter_values_present={validation_report.resolved_parameter_values_present}, "
+                f"actual_order_values_present={validation_report.actual_order_values_present}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, execution_allowed={validation_report.execution_allowed}, "
+                f"executable={validation_report.executable}, mt5_payload_created={validation_report.mt5_payload_created}, "
+                f"order_sent={validation_report.order_sent}, hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            st.caption(
+                f"Slot types={', '.join(parameter_draft.required_slot_types)} | "
+                f"Missing slots={', '.join(parameter_draft.missing_slot_types) or 'none'}"
+            )
+            if result.journal_record:
+                st.caption(f"Human-reviewed parameter draft journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Human-reviewed live parameter draft unavailable: {type(exc).__name__}")
+
+
+def _render_controlled_live_parameter_value_proposal_status():
+    st.markdown("#### Controlled Live Parameter Value Proposal")
+    st.caption(
+        "This only builds a controlled value proposal boundary. It does not send a trade, does not create an MT5 payload, "
+        "and does not create an executable order. Human approval and value lock are still required. "
+        "Live execution remains disabled, order submission remains disabled, executed=false, order_sent=false."
+    )
+    try:
+        store = ControlledLiveParameterValueProposalJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Proposal records", summary.total_records)
+        cols[1].metric("Created", summary.total_created)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Contract ready", "false")
+        if summary.latest_proposal_id:
+            st.caption(
+                f"Latest controlled value proposal={summary.latest_proposal_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("Controlled value proposal journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Controlled value proposal journal unavailable: {type(exc).__name__}")
+
+    parameter_draft = st.session_state.get("human_reviewed_live_parameter_draft")
+    parameter_draft_validation = st.session_state.get("human_reviewed_live_parameter_draft_validation_report")
+    parameter_source_boundary = st.session_state.get("live_order_parameter_source_boundary")
+    parameter_source_validation = st.session_state.get("live_order_parameter_source_validation_report")
+    parameter_policy_spec = st.session_state.get("live_order_parameter_policy_spec")
+    parameter_policy_validation = st.session_state.get("live_order_parameter_policy_validation_report")
+    contract_skeleton = st.session_state.get("live_order_contract_skeleton")
+    contract_skeleton_validation = st.session_state.get("live_order_contract_skeleton_validation_report")
+    live_order_intent = st.session_state.get("live_order_intent")
+    live_order_intent_validation = st.session_state.get("live_order_intent_validation_report")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+
+    if parameter_draft is not None:
+        st.caption(
+            f"Parameter draft={parameter_draft.draft_id} | status={parameter_draft.status} | "
+            f"value_proposal_workflow_allowed={parameter_draft.value_proposal_workflow_allowed}"
+        )
+    if parameter_draft_validation is not None:
+        st.caption(f"Parameter draft validation valid={parameter_draft_validation.valid}")
+    if parameter_source_boundary is not None:
+        st.caption(f"Parameter source boundary status={parameter_source_boundary.status}")
+    if parameter_policy_spec is not None:
+        st.caption(f"Parameter policy status={parameter_policy_spec.status}")
+    if contract_skeleton is not None:
+        st.caption(f"Contract skeleton status={contract_skeleton.status}")
+    if live_order_intent is not None:
+        st.caption(f"Live order intent status={live_order_intent.status}")
+    if permission_decision is not None:
+        st.caption(f"Permission gate allowed={permission_decision.gate_allowed}")
+    if preflight_report is not None:
+        st.caption(f"Preflight status={preflight_report.preflight_status}")
+
+    disabled = (
+        parameter_draft is None
+        or parameter_draft_validation is None
+        or parameter_source_boundary is None
+        or parameter_source_validation is None
+        or parameter_policy_spec is None
+        or parameter_policy_validation is None
+        or contract_skeleton is None
+        or contract_skeleton_validation is None
+        or live_order_intent is None
+        or live_order_intent_validation is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Build a human-reviewed parameter draft before building the controlled value proposal boundary.")
+
+    if st.button(
+        "Build Controlled Value Proposal",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_build_controlled_value_proposal",
+    ):
+        try:
+            result = ControlledLiveParameterValueProposalService().run(
+                parameter_draft,
+                parameter_draft_validation,
+                parameter_source_boundary,
+                parameter_source_validation,
+                parameter_policy_spec,
+                parameter_policy_validation,
+                contract_skeleton,
+                contract_skeleton_validation,
+                live_order_intent,
+                live_order_intent_validation,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+            )
+            proposal = result.proposal
+            validation_report = result.validation_report
+            st.session_state["controlled_live_parameter_value_proposal"] = proposal
+            st.session_state["controlled_live_parameter_value_proposal_validation_report"] = validation_report
+            st.session_state["controlled_live_parameter_value_proposal_journal_record"] = result.journal_record
+            st.info(
+                "Controlled live parameter value proposal evaluated for future human value approval only. "
+                f"status={proposal.status}, validation_valid={validation_report.valid}, "
+                f"human_value_approval_allowed={validation_report.human_value_approval_allowed}, "
+                f"value_slots_count={validation_report.value_slots_count}, "
+                f"review_required_slots_count={validation_report.review_required_slots_count}, "
+                f"approved_slots_count={validation_report.approved_slots_count}, "
+                f"rejected_slots_count={validation_report.rejected_slots_count}, "
+                f"missing_slots_count={validation_report.missing_slots_count}, "
+                f"value_lock_required={validation_report.value_lock_required}, "
+                f"human_review_required={validation_report.human_review_required}, "
+                f"order_contract_ready={validation_report.order_contract_ready}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, execution_allowed={validation_report.execution_allowed}, "
+                f"executable={validation_report.executable}, mt5_payload_created={validation_report.mt5_payload_created}, "
+                f"order_sent={validation_report.order_sent}, hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            st.caption(
+                f"Value slot types={', '.join(proposal.required_value_slot_types)} | "
+                f"Missing slots={', '.join(proposal.missing_value_slot_types) or 'none'}"
+            )
+            if result.journal_record:
+                st.caption(f"Controlled value proposal journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Controlled live parameter value proposal unavailable: {type(exc).__name__}")
+
+
+def _render_human_value_approval_lock_status():
+    st.markdown("#### Human Value Approval and Lock Boundary")
+    st.caption(
+        "This only locks human approval for future contract parameterization. It does not send a trade, "
+        "does not create an MT5 payload, does not create an executable order, and does not mark order contract ready. "
+        "Live execution remains disabled, order submission remains disabled, executed=false, order_sent=false."
+    )
+    try:
+        store = HumanValueApprovalLockJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Approval locks", summary.total_records)
+        cols[1].metric("Locked", summary.total_locked)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Raw values", "false")
+        if summary.latest_approval_lock_id:
+            st.caption(
+                f"Latest human value approval lock={summary.latest_approval_lock_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("Human value approval lock journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Human value approval lock journal unavailable: {type(exc).__name__}")
+
+    value_proposal = st.session_state.get("controlled_live_parameter_value_proposal")
+    value_proposal_validation = st.session_state.get("controlled_live_parameter_value_proposal_validation_report")
+    parameter_draft = st.session_state.get("human_reviewed_live_parameter_draft")
+    parameter_draft_validation = st.session_state.get("human_reviewed_live_parameter_draft_validation_report")
+    parameter_source_boundary = st.session_state.get("live_order_parameter_source_boundary")
+    parameter_source_validation = st.session_state.get("live_order_parameter_source_validation_report")
+    parameter_policy_spec = st.session_state.get("live_order_parameter_policy_spec")
+    parameter_policy_validation = st.session_state.get("live_order_parameter_policy_validation_report")
+    contract_skeleton = st.session_state.get("live_order_contract_skeleton")
+    contract_skeleton_validation = st.session_state.get("live_order_contract_skeleton_validation_report")
+    live_order_intent = st.session_state.get("live_order_intent")
+    live_order_intent_validation = st.session_state.get("live_order_intent_validation_report")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+
+    if value_proposal is not None:
+        st.caption(
+            f"Controlled value proposal={value_proposal.proposal_id} | status={value_proposal.status} | "
+            f"human_value_approval_allowed={value_proposal.human_value_approval_allowed}"
+        )
+    if value_proposal_validation is not None:
+        st.caption(f"Controlled value proposal validation valid={value_proposal_validation.valid}")
+    if parameter_draft is not None:
+        st.caption(f"Parameter draft status={parameter_draft.status}")
+    if parameter_source_boundary is not None:
+        st.caption(f"Parameter source boundary status={parameter_source_boundary.status}")
+    if parameter_policy_spec is not None:
+        st.caption(f"Parameter policy status={parameter_policy_spec.status}")
+    if contract_skeleton is not None:
+        st.caption(f"Contract skeleton status={contract_skeleton.status}")
+    if live_order_intent is not None:
+        st.caption(f"Live order intent status={live_order_intent.status}")
+    if permission_decision is not None:
+        st.caption(f"Permission gate allowed={permission_decision.gate_allowed}")
+    if preflight_report is not None:
+        st.caption(f"Preflight status={preflight_report.preflight_status}")
+
+    st.caption(f"Required exact phrase: `{EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE}`")
+    confirmation_phrase = st.text_input(
+        "Type the exact phrase to build a future-parameterization-only approval lock",
+        key="dash_human_value_approval_lock_phrase",
+    )
+    disabled = (
+        value_proposal is None
+        or value_proposal_validation is None
+        or parameter_draft is None
+        or parameter_draft_validation is None
+        or parameter_source_boundary is None
+        or parameter_source_validation is None
+        or parameter_policy_spec is None
+        or parameter_policy_validation is None
+        or contract_skeleton is None
+        or contract_skeleton_validation is None
+        or live_order_intent is None
+        or live_order_intent_validation is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Build a controlled value proposal before building the human value approval lock boundary.")
+
+    if st.button(
+        "Build Human Value Approval Lock",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_build_human_value_approval_lock",
+    ):
+        try:
+            result = HumanValueApprovalLockService().run(
+                value_proposal,
+                value_proposal_validation,
+                parameter_draft,
+                parameter_draft_validation,
+                parameter_source_boundary,
+                parameter_source_validation,
+                parameter_policy_spec,
+                parameter_policy_validation,
+                contract_skeleton,
+                contract_skeleton_validation,
+                live_order_intent,
+                live_order_intent_validation,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+                confirmation_phrase=confirmation_phrase,
+            )
+            approval_lock = result.approval_lock
+            validation_report = result.validation_report
+            st.session_state["human_value_approval_lock"] = approval_lock
+            st.session_state["human_value_approval_lock_validation_report"] = validation_report
+            st.session_state["human_value_approval_lock_journal_record"] = result.journal_record
+            st.info(
+                "Human value approval lock evaluated for future contract parameterization only. "
+                f"status={approval_lock.status}, validation_valid={validation_report.valid}, "
+                f"contract_parameterization_workflow_allowed={validation_report.contract_parameterization_workflow_allowed}, "
+                f"confirmation_phrase_valid={validation_report.confirmation_phrase_valid}, "
+                f"slot_locks_count={validation_report.slot_locks_count}, "
+                f"locked_slots_count={validation_report.locked_slots_count}, "
+                f"rejected_slots_count={validation_report.rejected_slots_count}, "
+                f"missing_slots_count={validation_report.missing_slots_count}, "
+                f"value_lock_required={validation_report.value_lock_required}, "
+                f"human_review_required={validation_report.human_review_required}, "
+                f"raw_values_stored={validation_report.raw_values_stored}, "
+                f"executable_order_created={validation_report.executable_order_created}, "
+                f"order_contract_ready={validation_report.order_contract_ready}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, execution_allowed={validation_report.execution_allowed}, "
+                f"executable={validation_report.executable}, mt5_payload_created={validation_report.mt5_payload_created}, "
+                f"order_sent={validation_report.order_sent}, hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            st.caption(
+                f"Slot lock types={', '.join(approval_lock.required_slot_lock_types)} | "
+                f"Missing slot locks={', '.join(approval_lock.missing_slot_lock_types) or 'none'}"
+            )
+            if result.journal_record:
+                st.caption(f"Human value approval lock journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Human value approval lock unavailable: {type(exc).__name__}")
+
+
+def _render_live_order_contract_parameterization_status():
+    st.markdown("#### Live Order Contract Parameterization Boundary")
+    st.caption(
+        "This only builds a contract parameterization boundary for future validation. It does not send a trade, "
+        "does not create an MT5 payload, does not create an executable order, does not allow broker order request mapping yet, "
+        "and does not mark order contract ready. Live execution remains disabled, order_send remains disabled, "
+        "executed=false, order_sent=false."
+    )
+    try:
+        store = LiveOrderContractParameterizationJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Parameterizations", summary.total_records)
+        cols[1].metric("Created", summary.total_created)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Order mapping", "false")
+        if summary.latest_parameterization_id:
+            st.caption(
+                f"Latest contract parameterization={summary.latest_parameterization_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("Contract parameterization journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Contract parameterization journal unavailable: {type(exc).__name__}")
+
+    approval_lock = st.session_state.get("human_value_approval_lock")
+    approval_lock_validation = st.session_state.get("human_value_approval_lock_validation_report")
+    value_proposal = st.session_state.get("controlled_live_parameter_value_proposal")
+    value_proposal_validation = st.session_state.get("controlled_live_parameter_value_proposal_validation_report")
+    parameter_draft = st.session_state.get("human_reviewed_live_parameter_draft")
+    parameter_draft_validation = st.session_state.get("human_reviewed_live_parameter_draft_validation_report")
+    parameter_source_boundary = st.session_state.get("live_order_parameter_source_boundary")
+    parameter_source_validation = st.session_state.get("live_order_parameter_source_validation_report")
+    parameter_policy_spec = st.session_state.get("live_order_parameter_policy_spec")
+    parameter_policy_validation = st.session_state.get("live_order_parameter_policy_validation_report")
+    contract_skeleton = st.session_state.get("live_order_contract_skeleton")
+    contract_skeleton_validation = st.session_state.get("live_order_contract_skeleton_validation_report")
+    live_order_intent = st.session_state.get("live_order_intent")
+    live_order_intent_validation = st.session_state.get("live_order_intent_validation_report")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+
+    if approval_lock is not None:
+        st.caption(
+            f"Approval lock={approval_lock.approval_lock_id} | status={approval_lock.status} | "
+            f"contract_parameterization_workflow_allowed={approval_lock.contract_parameterization_workflow_allowed}"
+        )
+    if approval_lock_validation is not None:
+        st.caption(f"Approval lock validation valid={approval_lock_validation.valid}")
+    if value_proposal is not None:
+        st.caption(f"Controlled value proposal status={value_proposal.status}")
+    if parameter_draft is not None:
+        st.caption(f"Parameter draft status={parameter_draft.status}")
+    if parameter_source_boundary is not None:
+        st.caption(f"Parameter source boundary status={parameter_source_boundary.status}")
+    if parameter_policy_spec is not None:
+        st.caption(f"Parameter policy status={parameter_policy_spec.status}")
+    if contract_skeleton is not None:
+        st.caption(f"Contract skeleton status={contract_skeleton.status}")
+    if live_order_intent is not None:
+        st.caption(f"Live order intent status={live_order_intent.status}")
+    if permission_decision is not None:
+        st.caption(f"Permission gate allowed={permission_decision.gate_allowed}")
+    if preflight_report is not None:
+        st.caption(f"Preflight status={preflight_report.preflight_status}")
+
+    disabled = (
+        approval_lock is None
+        or approval_lock_validation is None
+        or value_proposal is None
+        or value_proposal_validation is None
+        or parameter_draft is None
+        or parameter_draft_validation is None
+        or parameter_source_boundary is None
+        or parameter_source_validation is None
+        or parameter_policy_spec is None
+        or parameter_policy_validation is None
+        or contract_skeleton is None
+        or contract_skeleton_validation is None
+        or live_order_intent is None
+        or live_order_intent_validation is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Build a human value approval lock before building the contract parameterization boundary.")
+
+    if st.button(
+        "Build Contract Parameterization Boundary",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_build_contract_parameterization_boundary",
+    ):
+        try:
+            result = LiveOrderContractParameterizationService().run(
+                approval_lock,
+                approval_lock_validation,
+                value_proposal,
+                value_proposal_validation,
+                parameter_draft,
+                parameter_draft_validation,
+                parameter_source_boundary,
+                parameter_source_validation,
+                parameter_policy_spec,
+                parameter_policy_validation,
+                contract_skeleton,
+                contract_skeleton_validation,
+                live_order_intent,
+                live_order_intent_validation,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+            )
+            parameterization = result.parameterization
+            validation_report = result.validation_report
+            st.session_state["live_order_contract_parameterization"] = parameterization
+            st.session_state["live_order_contract_parameterization_validation_report"] = validation_report
+            st.session_state["live_order_contract_parameterization_journal_record"] = result.journal_record
+            st.info(
+                "Live order contract parameterization evaluated for future contract validation only. "
+                f"status={parameterization.status}, validation_valid={validation_report.valid}, "
+                f"contract_validation_workflow_allowed={validation_report.contract_validation_workflow_allowed}, "
+                f"contract_slots_count={validation_report.contract_slots_count}, "
+                f"parameterized_slots_count={validation_report.parameterized_slots_count}, "
+                f"missing_slots_count={validation_report.missing_slots_count}, "
+                f"invalid_slots_count={validation_report.invalid_slots_count}, "
+                f"raw_values_stored={validation_report.raw_values_stored}, "
+                f"executable_order_created={validation_report.executable_order_created}, "
+                f"order_request_mapping_allowed={validation_report.order_request_mapping_allowed}, "
+                f"order_contract_ready={validation_report.order_contract_ready}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, execution_allowed={validation_report.execution_allowed}, "
+                f"executable={validation_report.executable}, mt5_payload_created={validation_report.mt5_payload_created}, "
+                f"order_sent={validation_report.order_sent}, hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            st.caption(
+                f"Contract slot types={', '.join(parameterization.required_contract_slot_types)} | "
+                f"Missing contract slots={', '.join(parameterization.missing_contract_slot_types) or 'none'}"
+            )
+            if result.journal_record:
+                st.caption(f"Contract parameterization journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Live order contract parameterization unavailable: {type(exc).__name__}")
+
+
+def _render_live_order_contract_final_review_status():
+    st.markdown("#### Contract Parameter Validation and Final Human Review")
+    st.caption(
+        "This only validates the contract parameterization for a future Pre-MT5 mapping boundary. "
+        "It does not send a trade, does not create an MT5 payload, does not create an executable order, "
+        "does not create broker mapping, does not allow order request mapping in this sprint, "
+        "and does not mark order contract ready. Live execution remains disabled, order_send remains disabled, "
+        "executed=false, order_sent=false."
+    )
+    try:
+        store = LiveOrderContractFinalReviewJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Final reviews", summary.total_records)
+        cols[1].metric("Approved", summary.total_approved)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Broker mapping", "false")
+        if summary.latest_final_review_id:
+            st.caption(
+                f"Latest contract final review={summary.latest_final_review_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("Contract final review journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Contract final review journal unavailable: {type(exc).__name__}")
+
+    parameterization = st.session_state.get("live_order_contract_parameterization")
+    parameterization_validation = st.session_state.get("live_order_contract_parameterization_validation_report")
+    approval_lock = st.session_state.get("human_value_approval_lock")
+    approval_lock_validation = st.session_state.get("human_value_approval_lock_validation_report")
+    value_proposal = st.session_state.get("controlled_live_parameter_value_proposal")
+    value_proposal_validation = st.session_state.get("controlled_live_parameter_value_proposal_validation_report")
+    parameter_draft = st.session_state.get("human_reviewed_live_parameter_draft")
+    parameter_draft_validation = st.session_state.get("human_reviewed_live_parameter_draft_validation_report")
+    parameter_source_boundary = st.session_state.get("live_order_parameter_source_boundary")
+    parameter_source_validation = st.session_state.get("live_order_parameter_source_validation_report")
+    parameter_policy_spec = st.session_state.get("live_order_parameter_policy_spec")
+    parameter_policy_validation = st.session_state.get("live_order_parameter_policy_validation_report")
+    contract_skeleton = st.session_state.get("live_order_contract_skeleton")
+    contract_skeleton_validation = st.session_state.get("live_order_contract_skeleton_validation_report")
+    live_order_intent = st.session_state.get("live_order_intent")
+    live_order_intent_validation = st.session_state.get("live_order_intent_validation_report")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+
+    if parameterization is not None:
+        st.caption(
+            f"Contract parameterization={parameterization.parameterization_id} | status={parameterization.status} | "
+            f"contract_validation_workflow_allowed={parameterization.contract_validation_workflow_allowed}"
+        )
+    if parameterization_validation is not None:
+        st.caption(f"Contract parameterization validation valid={parameterization_validation.valid}")
+    if approval_lock is not None:
+        st.caption(f"Approval lock status={approval_lock.status}")
+    if value_proposal is not None:
+        st.caption(f"Controlled value proposal status={value_proposal.status}")
+    if parameter_draft is not None:
+        st.caption(f"Parameter draft status={parameter_draft.status}")
+    if parameter_source_boundary is not None:
+        st.caption(f"Parameter source boundary status={parameter_source_boundary.status}")
+    if parameter_policy_spec is not None:
+        st.caption(f"Parameter policy status={parameter_policy_spec.status}")
+    if contract_skeleton is not None:
+        st.caption(f"Contract skeleton status={contract_skeleton.status}")
+    if live_order_intent is not None:
+        st.caption(f"Live order intent status={live_order_intent.status}")
+    if permission_decision is not None:
+        st.caption(f"Permission gate allowed={permission_decision.gate_allowed}")
+    if preflight_report is not None:
+        st.caption(f"Preflight status={preflight_report.preflight_status}")
+
+    st.caption(f"Required exact phrase: `{EXPECTED_CONTRACT_FINAL_REVIEW_PHRASE}`")
+    confirmation_phrase = st.text_input(
+        "Type the exact phrase to build a future Pre-MT5 mapping-boundary-only final review",
+        key="dash_contract_final_review_phrase",
+    )
+    disabled = (
+        parameterization is None
+        or parameterization_validation is None
+        or approval_lock is None
+        or approval_lock_validation is None
+        or value_proposal is None
+        or value_proposal_validation is None
+        or parameter_draft is None
+        or parameter_draft_validation is None
+        or parameter_source_boundary is None
+        or parameter_source_validation is None
+        or parameter_policy_spec is None
+        or parameter_policy_validation is None
+        or contract_skeleton is None
+        or contract_skeleton_validation is None
+        or live_order_intent is None
+        or live_order_intent_validation is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Build a contract parameterization boundary before building the contract final review.")
+
+    if st.button(
+        "Build Contract Final Review",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_build_contract_final_review",
+    ):
+        try:
+            result = LiveOrderContractFinalReviewService().run(
+                parameterization,
+                parameterization_validation,
+                approval_lock,
+                approval_lock_validation,
+                value_proposal,
+                value_proposal_validation,
+                parameter_draft,
+                parameter_draft_validation,
+                parameter_source_boundary,
+                parameter_source_validation,
+                parameter_policy_spec,
+                parameter_policy_validation,
+                contract_skeleton,
+                contract_skeleton_validation,
+                live_order_intent,
+                live_order_intent_validation,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+                confirmation_phrase=confirmation_phrase,
+            )
+            final_review = result.final_review
+            validation_report = result.validation_report
+            st.session_state["live_order_contract_final_review"] = final_review
+            st.session_state["live_order_contract_final_review_validation_report"] = validation_report
+            st.session_state["live_order_contract_final_review_journal_record"] = result.journal_record
+            st.info(
+                "Contract final review evaluated for a future Pre-MT5 mapping boundary only. "
+                f"status={final_review.status}, validation_valid={validation_report.valid}, "
+                f"pre_mt5_mapping_boundary_workflow_allowed={validation_report.pre_mt5_mapping_boundary_workflow_allowed}, "
+                f"confirmation_phrase_valid={validation_report.confirmation_phrase_valid}, "
+                f"slot_validations_count={validation_report.slot_validations_count}, "
+                f"passed_slot_validations_count={validation_report.passed_slot_validations_count}, "
+                f"blocked_slot_validations_count={validation_report.blocked_slot_validations_count}, "
+                f"missing_slot_validations_count={validation_report.missing_slot_validations_count}, "
+                f"raw_values_stored={validation_report.raw_values_stored}, "
+                f"executable_order_created={validation_report.executable_order_created}, "
+                f"broker_mapping_created={validation_report.broker_mapping_created}, "
+                f"order_request_mapping_allowed={validation_report.order_request_mapping_allowed}, "
+                f"order_contract_ready={validation_report.order_contract_ready}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, execution_allowed={validation_report.execution_allowed}, "
+                f"executable={validation_report.executable}, mt5_payload_created={validation_report.mt5_payload_created}, "
+                f"order_sent={validation_report.order_sent}, hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            st.caption(
+                f"Slot validation types={', '.join(final_review.required_slot_validation_types)} | "
+                f"Missing slot validations={', '.join(final_review.missing_slot_validation_types) or 'none'}"
+            )
+            if result.journal_record:
+                st.caption(f"Contract final review journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Contract final review unavailable: {type(exc).__name__}")
+
+
+def _render_pre_mt5_order_request_mapping_status():
+    st.markdown("#### Pre-MT5 Order Request Mapping Boundary")
+    st.caption(
+        "This only builds a Pre-MT5 mapping boundary for a future dry-run payload validator. "
+        "It does not send a trade, does not create MT5 payload, does not create an MT5 request dictionary, "
+        "does not create an executable order, does not create broker submission mapping, "
+        "and does not mark order contract ready. Live execution remains disabled, order_send remains disabled, "
+        "executed=false, order_sent=false."
+    )
+    try:
+        store = PreMT5OrderRequestMappingJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Mapping boundaries", summary.total_records)
+        cols[1].metric("Created", summary.total_created)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("MT5 payload", "false")
+        if summary.latest_mapping_boundary_id:
+            st.caption(
+                f"Latest Pre-MT5 mapping boundary={summary.latest_mapping_boundary_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("Pre-MT5 mapping journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"Pre-MT5 mapping journal unavailable: {type(exc).__name__}")
+
+    final_review = st.session_state.get("live_order_contract_final_review")
+    final_review_validation = st.session_state.get("live_order_contract_final_review_validation_report")
+    parameterization = st.session_state.get("live_order_contract_parameterization")
+    parameterization_validation = st.session_state.get("live_order_contract_parameterization_validation_report")
+    approval_lock = st.session_state.get("human_value_approval_lock")
+    approval_lock_validation = st.session_state.get("human_value_approval_lock_validation_report")
+    value_proposal = st.session_state.get("controlled_live_parameter_value_proposal")
+    value_proposal_validation = st.session_state.get("controlled_live_parameter_value_proposal_validation_report")
+    parameter_draft = st.session_state.get("human_reviewed_live_parameter_draft")
+    parameter_draft_validation = st.session_state.get("human_reviewed_live_parameter_draft_validation_report")
+    parameter_source_boundary = st.session_state.get("live_order_parameter_source_boundary")
+    parameter_source_validation = st.session_state.get("live_order_parameter_source_validation_report")
+    parameter_policy_spec = st.session_state.get("live_order_parameter_policy_spec")
+    parameter_policy_validation = st.session_state.get("live_order_parameter_policy_validation_report")
+    contract_skeleton = st.session_state.get("live_order_contract_skeleton")
+    contract_skeleton_validation = st.session_state.get("live_order_contract_skeleton_validation_report")
+    live_order_intent = st.session_state.get("live_order_intent")
+    live_order_intent_validation = st.session_state.get("live_order_intent_validation_report")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+
+    if final_review is not None:
+        st.caption(
+            f"Contract final review={final_review.final_review_id} | status={final_review.status} | "
+            f"pre_mt5_mapping_boundary_workflow_allowed={final_review.pre_mt5_mapping_boundary_workflow_allowed}"
+        )
+    if final_review_validation is not None:
+        st.caption(f"Contract final review validation valid={final_review_validation.valid}")
+    if parameterization is not None:
+        st.caption(f"Contract parameterization status={parameterization.status}")
+    if approval_lock is not None:
+        st.caption(f"Approval lock status={approval_lock.status}")
+    if value_proposal is not None:
+        st.caption(f"Controlled value proposal status={value_proposal.status}")
+    if parameter_draft is not None:
+        st.caption(f"Parameter draft status={parameter_draft.status}")
+    if parameter_source_boundary is not None:
+        st.caption(f"Parameter source boundary status={parameter_source_boundary.status}")
+    if parameter_policy_spec is not None:
+        st.caption(f"Parameter policy status={parameter_policy_spec.status}")
+    if contract_skeleton is not None:
+        st.caption(f"Contract skeleton status={contract_skeleton.status}")
+    if live_order_intent is not None:
+        st.caption(f"Live order intent status={live_order_intent.status}")
+    if permission_decision is not None:
+        st.caption(f"Permission gate allowed={permission_decision.gate_allowed}")
+    if preflight_report is not None:
+        st.caption(f"Preflight status={preflight_report.preflight_status}")
+
+    disabled = (
+        final_review is None
+        or final_review_validation is None
+        or parameterization is None
+        or parameterization_validation is None
+        or approval_lock is None
+        or approval_lock_validation is None
+        or value_proposal is None
+        or value_proposal_validation is None
+        or parameter_draft is None
+        or parameter_draft_validation is None
+        or parameter_source_boundary is None
+        or parameter_source_validation is None
+        or parameter_policy_spec is None
+        or parameter_policy_validation is None
+        or contract_skeleton is None
+        or contract_skeleton_validation is None
+        or live_order_intent is None
+        or live_order_intent_validation is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Build a contract final review before building the Pre-MT5 mapping boundary.")
+
+    if st.button(
+        "Build Pre-MT5 Mapping Boundary",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_build_pre_mt5_mapping_boundary",
+    ):
+        try:
+            result = PreMT5OrderRequestMappingService().run(
+                final_review,
+                final_review_validation,
+                parameterization,
+                parameterization_validation,
+                approval_lock,
+                approval_lock_validation,
+                value_proposal,
+                value_proposal_validation,
+                parameter_draft,
+                parameter_draft_validation,
+                parameter_source_boundary,
+                parameter_source_validation,
+                parameter_policy_spec,
+                parameter_policy_validation,
+                contract_skeleton,
+                contract_skeleton_validation,
+                live_order_intent,
+                live_order_intent_validation,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+            )
+            boundary = result.mapping_boundary
+            validation_report = result.validation_report
+            st.session_state["pre_mt5_order_request_mapping_boundary"] = boundary
+            st.session_state["pre_mt5_order_request_mapping_validation_report"] = validation_report
+            st.session_state["pre_mt5_order_request_mapping_journal_record"] = result.journal_record
+            st.info(
+                "Pre-MT5 mapping boundary evaluated for a future dry-run payload validator only. "
+                f"status={boundary.status}, validation_valid={validation_report.valid}, "
+                f"mt5_dry_run_payload_validation_workflow_allowed="
+                f"{validation_report.mt5_dry_run_payload_validation_workflow_allowed}, "
+                f"mapping_slots_count={validation_report.mapping_slots_count}, "
+                f"mapped_slots_count={validation_report.mapped_slots_count}, "
+                f"missing_slots_count={validation_report.missing_slots_count}, "
+                f"invalid_slots_count={validation_report.invalid_slots_count}, "
+                f"mt5_request_dict_created={validation_report.mt5_request_dict_created}, "
+                f"mt5_payload_created={validation_report.mt5_payload_created}, "
+                f"raw_values_stored={validation_report.raw_values_stored}, "
+                f"executable_order_created={validation_report.executable_order_created}, "
+                f"broker_mapping_created={validation_report.broker_mapping_created}, "
+                f"order_request_mapping_allowed={validation_report.order_request_mapping_allowed}, "
+                f"order_contract_ready={validation_report.order_contract_ready}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, execution_allowed={validation_report.execution_allowed}, "
+                f"executable={validation_report.executable}, order_sent={validation_report.order_sent}, "
+                f"hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            st.caption(
+                f"Mapping slot types={', '.join(boundary.required_mapping_slot_types)} | "
+                f"Missing mapping slots={', '.join(boundary.missing_mapping_slot_types) or 'none'}"
+            )
+            if result.journal_record:
+                st.caption(f"Pre-MT5 mapping journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"Pre-MT5 mapping boundary unavailable: {type(exc).__name__}")
 
 
 def _render_ingestion_state():
