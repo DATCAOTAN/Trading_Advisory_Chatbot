@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 from dotenv import load_dotenv
 
 from tools.mt5_bridge.execution import ControlledMT5ExecutionService
+from tools.mt5_bridge.reconciliation import ControlledMT5ReconciliationService
 from tools.mt5_bridge.mt5_client import MT5Client
 
 
@@ -51,6 +52,12 @@ class MT5BridgeHandler(BaseHTTPRequestHandler):
                 payload = self._read_json_body()
                 token = self.headers.get("X-MT5-Bridge-Execution-Token", "")
                 response, status = ControlledMT5ExecutionService(CLIENT).handle(payload, token)
+                self._send(response, status=status)
+                return
+            if parsed.path == "/execution/reconcile":
+                payload = self._read_json_body()
+                token = self.headers.get("X-MT5-Bridge-Execution-Token", "")
+                response, status = ControlledMT5ReconciliationService(CLIENT).handle(payload, token)
                 self._send(response, status=status)
                 return
             self._send({"status": "NOT_FOUND", "message": "unknown endpoint"}, status=404)

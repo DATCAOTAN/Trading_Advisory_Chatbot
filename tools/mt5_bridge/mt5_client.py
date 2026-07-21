@@ -226,6 +226,37 @@ class MT5Client:
             )
         return {"status": "OK", "positions": positions}
 
+    def reconciliation_evidence(self, start: datetime, end: datetime) -> Dict[str, Any]:
+        ok, message = self.ensure_initialized()
+        if not ok:
+            return {"status": "QUERY_FAILED", "message": message, "orders": [], "deals": [], "positions": []}
+        try:
+            orders = _call_mt5(mt5.history_orders_get, start, end)
+            deals = _call_mt5(mt5.history_deals_get, start, end)
+            positions = _call_mt5(mt5.positions_get)
+            if orders is None or deals is None or positions is None:
+                return {
+                    "status": "QUERY_FAILED",
+                    "message": "MT5_QUERY_RETURNED_NONE",
+                    "orders": [],
+                    "deals": [],
+                    "positions": [],
+                }
+        except Exception as exc:
+            return {
+                "status": "QUERY_FAILED",
+                "message": type(exc).__name__,
+                "orders": [],
+                "deals": [],
+                "positions": [],
+            }
+        return {
+            "status": "OK",
+            "orders": [_normalize_reconciliation_row(item, "order") for item in orders or []],
+            "deals": [_normalize_reconciliation_row(item, "deal") for item in deals or []],
+            "positions": [_normalize_reconciliation_row(item, "position") for item in positions or []],
+        }
+
     def close(self) -> None:
         if mt5 is not None and self._initialized:
             try:
@@ -273,6 +304,42 @@ def _safe_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_reconciliation_row(item: Any, kind: str) -> Dict[str, Any]:
+    data = item._asdict()
+    type_value = data.get("type")
+    buy_names = {
+        "order": "ORDER_TYPE_BUY",
+        "deal": "DEAL_TYPE_BUY",
+        "position": "POSITION_TYPE_BUY",
+    }
+    sell_names = {
+        "order": "ORDER_TYPE_SELL",
+        "deal": "DEAL_TYPE_SELL",
+        "position": "POSITION_TYPE_SELL",
+    }
+    if type_value == getattr(mt5, buy_names[kind], object()):
+        direction = "BUY"
+    elif type_value == getattr(mt5, sell_names[kind], object()):
+        direction = "SELL"
+    else:
+        direction = "UNKNOWN"
+    volume = (
+        data.get("volume_initial")
+        if kind == "order"
+        else data.get("volume")
+    )
+    return {
+        "ticket": data.get("ticket"),
+        "order": data.get("order"),
+        "position_id": data.get("position_id") or data.get("position"),
+        "symbol": data.get("symbol"),
+        "direction": direction,
+        "volume": volume,
+        "time": _timestamp(data.get("time_msc") or data.get("time_setup_msc") or data.get("time")),
+        "comment": str(data.get("comment", ""))[:64],
+    }
 
 
 def _account_context_fingerprint(account_data: Dict[str, Any]) -> str:

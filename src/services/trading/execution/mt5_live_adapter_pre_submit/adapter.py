@@ -9,6 +9,10 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled impor
     MT5ControlledExecutionReceipt,
     MT5ControlledExecutionRequest,
 )
+from src.services.trading.execution.mt5_live_adapter_pre_submit.reconciliation import (
+    MT5ReconciliationReceipt,
+    MT5ReconciliationRequest,
+)
 from src.services.trading.execution.mt5_live_adapter_pre_submit.models import (
     MT5LiveAdapterDisabledReceipt,
     hash_text,
@@ -130,6 +134,39 @@ class MT5LiveAdapterDisabled:
                 "UNKNOWN", "RESULT_UNKNOWN", False, False, False, "BRIDGE_RESULT_UNKNOWN"
             )
         return MT5ControlledExecutionReceipt.from_payload(payload)
+
+    def reconcile_controlled(
+        self,
+        request: MT5ReconciliationRequest,
+        *,
+        typed_confirmation: str,
+    ) -> MT5ReconciliationReceipt:
+        phrase = str(typed_confirmation or "").strip()
+        if not self.config.reconciliation_enabled or not self.config.execution_auth_token:
+            return MT5ReconciliationReceipt.from_payload(
+                {"status": "BLOCKED", "reason": "RECONCILIATION_DISABLED"}
+            )
+        if not hmac.compare_digest(phrase, self.config.reconciliation_confirmation_phrase):
+            return MT5ReconciliationReceipt.from_payload(
+                {"status": "BLOCKED", "reason": "HUMAN_CONFIRMATION_INVALID"}
+            )
+        current_context = self.capture_account_context()
+        if not hmac.compare_digest(
+            current_context["account_context_fingerprint"],
+            request.expected_account_context_fingerprint,
+        ):
+            return MT5ReconciliationReceipt.from_payload(
+                {"status": "BLOCKED", "reason": "ACCOUNT_CONTEXT_CHANGED"}
+            )
+        try:
+            payload = self.execution_client.reconcile(
+                request.as_protected_dict(), self.config.execution_auth_token
+            )
+        except Exception:
+            return MT5ReconciliationReceipt.from_payload(
+                {"status": "FAILED", "reason": "RECONCILIATION_TRANSPORT_FAILED"}
+            )
+        return MT5ReconciliationReceipt.from_payload(payload)
 
     def _controlled_submission_blocker(self, typed_confirmation: str) -> str:
         if (

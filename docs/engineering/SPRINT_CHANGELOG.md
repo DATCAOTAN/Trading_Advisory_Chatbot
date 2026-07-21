@@ -195,3 +195,40 @@ Commit: included in this commit
 - Next: Sprint 35 - Order/Position Reconciliation and Failure Recovery.
 
 ---
+
+### Sprint 35 - MT5 Reconciliation and Failure Recovery
+
+Date: 2026-07-21
+Verification: `FOCUSED_PASS`
+Commit: included in this commit
+
+#### Implemented
+
+- Extended the existing protected execution journal with stable correlation metadata and restart-safe reconciliation records.
+- Added authenticated read-only bridge reconciliation for bounded MT5 order, deal, and position evidence.
+- Added stale `RESERVED` abandonment and stale `SUBMISSION_STARTED` recovery to `RESULT_UNKNOWN`.
+- Confirmed unknown results only from one unique correlated evidence group; ambiguity, no match, and query failure remain non-retryable.
+- Kept exact broker identifiers in the protected journal and exposed only redacted presence flags.
+- Added one app-side reconciliation contract and reused the existing adapter and bridge client.
+
+#### Verification
+
+- New focused tests: 20 passed.
+- Direct neighboring tests: controlled execution 16, disabled pre-submit 12, final validation/bridge skeleton 24, request-dict dry-run builder 75; focused total 147 passed.
+- Compileall for `src`, `scripts`, and `tools`: passed.
+- Static scan: 0 `MetaTrader5` imports under `src`; exactly 1 production `.order_send(` call-site; 0 forbidden bridge endpoints.
+- Docker Compose config, app restart, and container health: passed (`healthy`).
+- Manual reconciliation, terminal-backed reconciliation, broker submission, live check, and full regression: NOT RUN.
+
+#### Current state
+
+- Reconciliation is read-only and enabled; submission, execution, order-send, and automatic retry remain disabled by default.
+- Kill switch remains engaged; no order was sent during verification.
+
+#### Known limitations / next step
+
+- Existing pre-Sprint-35 journal entries without correlation metadata cannot use the new reconciliation endpoint.
+- Correlation currently relies on protected metadata plus broker relationships unless an approved comment already carries the stable tag.
+- Next: Sprint 36 - End-to-End Runtime Testing and Simplification.
+
+---

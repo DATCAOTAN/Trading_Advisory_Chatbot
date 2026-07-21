@@ -23,10 +23,12 @@ SEMANTIC_FIELDS = (
 )
 IDEMPOTENCY_STATES = {
     "RESERVED", "SUBMISSION_STARTED", "RESULT_CONFIRMED", "RESULT_REJECTED", "RESULT_UNKNOWN",
+    "RESERVATION_ABANDONED",
 }
 IDEMPOTENCY_TRANSITIONS = {
-    "RESERVED": {"SUBMISSION_STARTED", "RESULT_REJECTED"},
+    "RESERVED": {"SUBMISSION_STARTED", "RESULT_REJECTED", "RESERVATION_ABANDONED"},
     "SUBMISSION_STARTED": {"RESULT_CONFIRMED", "RESULT_REJECTED", "RESULT_UNKNOWN"},
+    "RESULT_UNKNOWN": {"RESULT_CONFIRMED"},
 }
 
 
@@ -127,21 +129,28 @@ class ProtectedExecutionJournal:
         self.path = Path(path)
         self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
 
-    def reserve(self, idempotency_key: str, request_hash: str, account_fingerprint: str) -> bool:
+    def reserve(
+        self,
+        idempotency_key: str,
+        request_hash: str,
+        account_fingerprint: str,
+        protected_execution: Mapping[str, Any] | None = None,
+    ) -> bool:
         key_hash = _sha256(idempotency_key)
         with self._exclusive_lock():
             if any(row.get("idempotency_key_hash") == key_hash for row in self._read_rows()):
                 return False
-            self._append_unlocked(
-                {
-                    "state": "RESERVED",
-                    "created_at": _now(),
-                    "idempotency_key_hash": key_hash,
-                    "request_hash": request_hash,
-                    "account_context_fingerprint": account_fingerprint,
-                    "metadata_redacted": True,
-                }
-            )
+            row = {
+                "state": "RESERVED",
+                "created_at": _now(),
+                "idempotency_key_hash": key_hash,
+                "request_hash": request_hash,
+                "account_context_fingerprint": account_fingerprint,
+                "metadata_redacted": True,
+            }
+            if protected_execution:
+                row["protected_execution"] = dict(protected_execution)
+            self._append_unlocked(row)
             return True
 
     def transition(self, idempotency_key: str, state: str, **protected_result: Any) -> None:
@@ -166,6 +175,183 @@ class ProtectedExecutionJournal:
             if protected_result:
                 row["protected_result"] = protected_result
             self._append_unlocked(row)
+
+    def execution_record(self, correlation_identity: str) -> dict[str, Any] | None:
+        rows = self._read_rows()
+        reservation = next(
+            (
+                row
+                for row in rows
+                if row.get("protected_execution", {}).get("correlation_identity")
+                == correlation_identity
+            ),
+            None,
+        )
+        if reservation is None:
+            return None
+        key_hash = reservation.get("idempotency_key_hash")
+        state_rows = [
+            row
+            for row in rows
+            if row.get("idempotency_key_hash") == key_hash and row.get("state")
+        ]
+        latest = state_rows[-1]
+        return {
+            "idempotency_key_hash": key_hash,
+            "account_context_fingerprint": reservation.get("account_context_fingerprint"),
+            "protected_execution": dict(reservation.get("protected_execution", {})),
+            "state": latest.get("state"),
+            "state_created_at": latest.get("created_at"),
+        }
+
+    def begin_reconciliation(
+        self,
+        reconciliation_reference: str,
+        correlation_identity: str,
+        *,
+        recovery_state: str | None = None,
+        recovery_reason: str = "",
+    ) -> tuple[dict[str, Any], bool]:
+        with self._exclusive_lock():
+            rows = self._read_rows()
+            existing = [
+                row
+                for row in rows
+                if row.get("reconciliation_reference") == reconciliation_reference
+            ]
+            if existing:
+                completed = [
+                    row for row in existing if row.get("reconciliation_status") != "PENDING"
+                ]
+                if completed:
+                    return completed[-1], False
+                return existing[-1], True
+            reservation = next(
+                (
+                    row
+                    for row in rows
+                    if row.get("protected_execution", {}).get("correlation_identity")
+                    == correlation_identity
+                ),
+                None,
+            )
+            if reservation is None:
+                raise ValueError("EXECUTION_RECORD_NOT_FOUND")
+            key_hash = reservation["idempotency_key_hash"]
+            if recovery_state:
+                self._append_state_transition_unlocked(
+                    rows,
+                    key_hash,
+                    recovery_state,
+                    {"recovery_reason": recovery_reason},
+                )
+            row = {
+                "record_type": "RECONCILIATION",
+                "reconciliation_reference": reconciliation_reference,
+                "correlation_identity": correlation_identity,
+                "reconciliation_status": "PENDING",
+                "created_at": _now(),
+                "metadata_redacted": True,
+            }
+            self._append_unlocked(row)
+            return row, True
+
+    def complete_reconciliation(
+        self,
+        reconciliation_reference: str,
+        correlation_identity: str,
+        *,
+        reconciliation_status: str,
+        evidence_classification: str,
+        original_execution_state: str,
+        resulting_execution_state: str,
+        retry_decision: str,
+        reasons: list[str],
+        account_fingerprint: str,
+        protected_broker_references: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        with self._exclusive_lock():
+            rows = self._read_rows()
+            completed = [
+                row
+                for row in rows
+                if row.get("reconciliation_reference") == reconciliation_reference
+                and row.get("reconciliation_status") != "PENDING"
+            ]
+            if completed:
+                return completed[-1]
+            reservation = next(
+                (
+                    row
+                    for row in rows
+                    if row.get("protected_execution", {}).get("correlation_identity")
+                    == correlation_identity
+                ),
+                None,
+            )
+            if reservation is None:
+                raise ValueError("EXECUTION_RECORD_NOT_FOUND")
+            key_hash = reservation["idempotency_key_hash"]
+            state_rows = [
+                row
+                for row in rows
+                if row.get("idempotency_key_hash") == key_hash and row.get("state")
+            ]
+            current_state = state_rows[-1]["state"]
+            if resulting_execution_state != current_state:
+                self._append_state_transition_unlocked(
+                    rows,
+                    key_hash,
+                    resulting_execution_state,
+                    {
+                        "reconciliation_reference": reconciliation_reference,
+                        "protected_broker_references": dict(protected_broker_references or {}),
+                    },
+                )
+            row = {
+                "record_type": "RECONCILIATION",
+                "reconciliation_reference": reconciliation_reference,
+                "correlation_identity": correlation_identity,
+                "reconciliation_status": reconciliation_status,
+                "evidence_classification": evidence_classification,
+                "original_execution_state": original_execution_state,
+                "resulting_execution_state": resulting_execution_state,
+                "retry_decision": retry_decision,
+                "reasons": list(reasons),
+                "account_context_fingerprint": account_fingerprint,
+                "protected_broker_references": dict(protected_broker_references or {}),
+                "created_at": _now(),
+                "metadata_redacted": True,
+            }
+            self._append_unlocked(row)
+            return row
+
+    def _append_state_transition_unlocked(
+        self,
+        rows: list[dict[str, Any]],
+        key_hash: str,
+        state: str,
+        protected_result: Mapping[str, Any],
+    ) -> None:
+        if state not in IDEMPOTENCY_STATES:
+            raise ValueError("invalid idempotency state")
+        previous_states = [
+            row.get("state")
+            for row in rows
+            if row.get("idempotency_key_hash") == key_hash and row.get("state")
+        ]
+        previous_state = previous_states[-1] if previous_states else None
+        if state not in IDEMPOTENCY_TRANSITIONS.get(previous_state, set()):
+            raise RuntimeError("invalid idempotency state transition")
+        self._append_unlocked(
+            {
+                "state": state,
+                "created_at": _now(),
+                "idempotency_key_hash": key_hash,
+                "protected_result": dict(protected_result),
+                "metadata_redacted": True,
+            }
+        )
 
     def _read_rows(self) -> list[dict[str, Any]]:
         if not self.path.exists():
@@ -235,7 +421,23 @@ class ControlledMT5ExecutionService:
             first_context = self._validated_account_context(request.expected_account_context_fingerprint)
             self._validate_mapping(values)
             request_hash = _sha256(json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
-            if not self.journal.reserve(request.idempotency_key, request_hash, first_context["account_context_fingerprint"]):
+            correlation = execution_correlation(request)
+            if not self.journal.reserve(
+                request.idempotency_key,
+                request_hash,
+                first_context["account_context_fingerprint"],
+                protected_execution={
+                    **correlation,
+                    "canonical_semantic_hash": request.canonical_semantic_hash,
+                    "approval_reference": request.approval_reference,
+                    "lock_reference": request.lock_reference,
+                    "source_artifact_reference": request.source_artifact_reference,
+                    "symbol": values["symbol"],
+                    "order_type": values["order_type"],
+                    "volume": _decimal_text(values["volume"]),
+                    "submission_window_start": request.lock_timestamp,
+                },
+            ):
                 return _blocked("IDEMPOTENCY_DUPLICATE", idempotency_status="DUPLICATE_BLOCKED"), 409
             mt5_request = self._map_request(values)
             try:
@@ -408,6 +610,27 @@ def _isolated_order_send(mt5_module: Any, mt5_request: dict[str, Any], timeout_s
     if ok:
         return value
     raise value
+
+
+def execution_correlation(request: ProtectedBridgeExecutionRequest) -> dict[str, str]:
+    key_hash = _sha256(request.idempotency_key)
+    identity = _sha256(
+        "|".join(
+            (
+                "controlled-execution-correlation/v1",
+                key_hash,
+                request.canonical_semantic_hash,
+                request.approval_reference,
+                request.lock_reference,
+                request.source_artifact_reference,
+            )
+        )
+    )
+    return {
+        "protected_execution_reference": "mt5_execution_" + identity[:24],
+        "correlation_identity": identity,
+        "correlation_tag": "mt5r" + identity[:12],
+    }
 
 
 def _semantic_hash(protected: Mapping[str, Any], values: Mapping[str, Any]) -> str:

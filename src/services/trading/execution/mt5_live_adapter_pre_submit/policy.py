@@ -27,6 +27,8 @@ class MT5LiveAdapterPreSubmitConfig:
     bridge_url: str = "http://host.docker.internal:8765"
     bridge_timeout_seconds: float = 3.0
     controlled_execution_http_timeout_seconds: float = 10.0
+    reconciliation_enabled: bool = True
+    reconciliation_confirmation_phrase: str = "RECONCILE CONTROLLED MT5 EXECUTION"
 
     @classmethod
     def from_config(cls, config=None) -> "MT5LiveAdapterPreSubmitConfig":
@@ -63,5 +65,11 @@ class MT5LiveAdapterPreSubmitConfig:
             bridge_timeout_seconds=getattr(config, "MT5_BRIDGE_TIMEOUT_SECONDS", 3.0),
             controlled_execution_http_timeout_seconds=getattr(
                 config, "TRADING_MT5_CONTROLLED_EXECUTION_HTTP_TIMEOUT_SECONDS", 10.0
+            ),
+            reconciliation_enabled=getattr(config, "TRADING_MT5_RECONCILIATION_ENABLED", True),
+            reconciliation_confirmation_phrase=getattr(
+                config,
+                "TRADING_MT5_RECONCILIATION_CONFIRMATION_PHRASE",
+                "RECONCILE CONTROLLED MT5 EXECUTION",
             ),
         )

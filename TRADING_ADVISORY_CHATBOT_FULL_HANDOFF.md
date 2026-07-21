@@ -76,21 +76,24 @@ The immediate development focus is no longer broad RAG tuning, UI polish, or add
 
 The latest completed sprint is:
 
-`Sprint 34B - Controlled MT5 Execution Integration`
+`Sprint 35 - MT5 Reconciliation and Failure Recovery`
 
 Current validated state reported by the workspace:
 
 ```text
-controlled_execution_pipeline=FOCUSED_VERIFIED
-protected_semantic_transport_verified=true
-bridge_authentication_fail_closed=true
-bridge_integrity_validation_verified=true
-account_context_revalidation_verified=true
-atomic_idempotency_reservation_verified=true
-result_unknown_no_retry_verified=true
+reconciliation_pipeline=FOCUSED_VERIFIED
+result_unknown_reconciliation_verified=true
+stale_reserved_recovery_verified=true
+stale_submission_started_recovery_verified=true
+restart_persistence_verified=true
+reconciliation_idempotency_verified=true
+exact_broker_identifiers_protected=true
+automatic_retry_allowed=false
 production_order_send_call_sites=1
 automated_broker_submission=NOT_RUN
 manual_broker_submission=NOT_RUN
+manual_reconciliation=NOT_RUN
+full_regression=NOT_RUN
 live_submission_allowed=false
 live_execution_allowed=false
 order_send_allowed=false
@@ -102,32 +105,34 @@ kill_switch_engaged=true
 
 Meaning:
 
-- one immutable semantic contract transports exact approved values only through a protected request;
-- the host bridge authenticates the write request and independently revalidates schema, hash, references, freshness, confirmation, permissions, terminal capability, and account context;
-- account context is fingerprinted without returning the raw login and is checked again immediately before submission;
-- restart-safe idempotency states cover reservation, submission start, confirmed, rejected, and unknown outcomes;
-- timeout or unknown outcome blocks duplicate retry and requires reconciliation;
-- one shared account-agnostic adapter path exists, with exactly one isolated production `order_send` call-site in the host bridge;
-- ticket/deal values remain redacted from responses and are retained only in the protected execution journal when returned;
-- automated verification used fake MT5 only and did not submit to a broker;
-- all execution defaults remain disabled, the kill switch remains engaged, and no manual broker submission was run.
+- the protected execution journal now preserves stable correlation metadata and restart-safe reconciliation records;
+- stale `RESERVED` records become `RESERVATION_ABANDONED`, remain unusable, and require a new request;
+- stale `SUBMISSION_STARTED` records become `RESULT_UNKNOWN` before read-only reconciliation;
+- the authenticated host bridge performs bounded read-only order, deal, and position queries and independently revalidates request integrity and account context;
+- only a unique symbol, direction, volume, and broker-relationship match can confirm an unknown result;
+- ambiguous, absent, or failed broker evidence never proves rejection and never permits automatic retry;
+- exact broker identifiers remain only in the protected execution journal and are reduced to presence flags in public receipts;
+- automated verification used fake MT5 only; the manual reconciliation script, terminal-backed reconciliation, and broker submission were not run;
+- all execution defaults remain disabled, the kill switch remains engaged, and the single isolated production `order_send` call-site remains unchanged.
 
 ## 2.2 Immediate goal
 
-Add order/position reconciliation and failure recovery before any retry or autonomous operation.
+Run Sprint 36 end-to-end runtime testing and targeted simplification without broad architectural consolidation.
 
 The immediate target is:
 
 ```text
-protected execution reservation/result
--> MT5 order and position lookup
--> confirmed/rejected/unknown reconciliation
--> duplicate-safe recovery decision
--> recovery journal
--> no blind retry
+protected controlled request
+-> submit-once bridge boundary under explicit manual controls
+-> restart and transport-loss scenarios
+-> read-only reconciliation
+-> journal corruption and duplicate scenarios
+-> measured runtime evidence
+-> targeted simplification
+-> milestone full regression
 ```
 
-Controlled manual broker verification remains a separate operator action. It must use an intentionally selected testing account and explicit flags; it was not run during Sprint 34B.
+Controlled manual broker verification and manual reconciliation remain separate operator actions. Neither was run during Sprint 35.
 
 ## 2.3 Long-term end-state
 
@@ -1675,25 +1680,26 @@ Verify whether:
 
 ---
 
-# 27. IMMEDIATE NEXT MILESTONE: RECONCILIATION AND FAILURE RECOVERY
+# 27. IMMEDIATE NEXT MILESTONE: END-TO-END RUNTIME TESTING
 
 The next engineering milestone is:
 
-`Sprint 35 - Order/Position Reconciliation and Failure Recovery`
+`Sprint 36 - End-to-End Runtime Testing and Simplification`
 
-Sprint 34B introduced the protected submit-once path. Sprint 35 must resolve broker state after confirmed, rejected, timeout, transport-loss, and unknown outcomes before any retry or autonomous workflow.
+Sprint 35 added restart-safe, read-only reconciliation for stale and unknown protected execution records. Sprint 36 must exercise the complete controlled runtime path, including process restarts, transport loss, duplicate requests, stale records, and damaged journals, before any autonomous workflow or promotion toward live-account operation.
 
 Required properties:
 
-- read-only lookup of relevant MT5 orders, deals, and positions through the host bridge;
-- correlation to protected request, idempotency, and broker-result records;
-- explicit reconciled, rejected, unresolved, and conflict states;
-- no blind retry;
-- restart-safe recovery journal;
-- fail closed when account context, broker state, or correlation is ambiguous;
-- no account switching, autonomous execution, or live-account promotion.
+- test the full protected submit-once and reconciliation flow under explicit disabled-by-default controls;
+- test app and bridge restarts, disconnects, timeouts, stale records, duplicates, and corrupt or missing journals;
+- verify absence of broker evidence never authorizes retry;
+- measure stage latency and operational recovery behavior;
+- preserve one account-agnostic adapter and one isolated host-bridge submission call-site;
+- perform only targeted simplification justified by runtime evidence;
+- run the milestone full regression;
+- keep autonomous execution and live-account promotion disabled.
 
-Controlled manual broker verification remains an operator-only action and was not run in Sprint 34B.
+Controlled manual broker verification remains operator-only and was not run in Sprint 35.
 
 ---
 # 28. ROADMAP TO THE AUTONOMOUS END-STATE
@@ -1722,19 +1728,20 @@ Delivered:
 - one isolated submission call-site with no automatic retry;
 - disabled-by-default manual entry point;
 - fake-MT5 focused verification only; manual broker submission not run.
-### Sprint 35 — Order/Position Reconciliation and Failure Recovery
+### Sprint 35 - Order/Position Reconciliation and Failure Recovery (implemented)
 
-Deliver:
+Delivered:
 
-- reconcile internal request/result records with MT5 orders/positions;
-- detect timeout-with-unknown-outcome;
-- duplicate detection;
-- failure classification;
-- no blind retry;
-- recovery journal;
-- emergency stop behavior.
+- authenticated, independently validated `POST /execution/reconcile` on the host bridge;
+- stable protected correlation metadata and restart-safe reconciliation journaling;
+- bounded read-only MT5 order, deal, and position evidence queries;
+- explicit unique, ambiguous, no-match, query-failed, account-changed, and ineligible classifications;
+- stale reservation abandonment and stale submission-start recovery to unknown state;
+- exact broker identifiers restricted to the protected journal;
+- no automatic retry and no additional submission call-site;
+- fake-MT5 focused verification only; manual reconciliation and broker submission not run.
 
-### Sprint 36 — End-to-End Runtime Testing and Simplification
+### Sprint 36 - End-to-End Runtime Testing and Simplification
 
 Deliver:
 
@@ -2182,4 +2189,4 @@ Inspect the repository, verify the current state, and cite exact files and symbo
 
 # 35. CURRENT ONE-PARAGRAPH SUMMARY
 
-`Trading_Advisory_Chatbot` is a large RAG, market-context, decision, and MT5 integration codebase whose execution side has progressed through Sprint 34B. The system reads real MT5 market data through a host bridge, binds exact approved semantic values to an immutable hash, transports them through an authenticated protected request, independently validates them at the bridge, rechecks a redacted account fingerprint, reserves idempotency atomically, and owns one isolated submit-once call-site with protected result classification and no automatic retry. All execution defaults remain disabled and the kill switch remains engaged; automated tests used fake MT5, and no manual broker submission was run. The immediate objective is Sprint 35 reconciliation and failure recovery for confirmed, rejected, and unknown outcomes. The long-term objective remains an autonomous demo-first MT5 system governed by deterministic policy, reconciliation, lifecycle management, and runtime supervision, with live-account operation gated by a separate explicit promotion.
+`Trading_Advisory_Chatbot` is a large RAG, market-context, decision, and MT5 integration codebase whose execution side has progressed through Sprint 35. The system reads real MT5 market data through a host bridge, binds approved semantic values to an immutable protected request, owns one isolated submit-once call-site, and now records stable correlation metadata for restart-safe read-only reconciliation. Stale reservations are abandoned without key reuse, stale submission starts become unknown, and only unique bounded broker evidence can confirm an unknown result; ambiguous, absent, or failed evidence never authorizes retry. Exact broker identifiers remain in the protected journal, public receipts are redacted, all execution defaults remain disabled, and the kill switch remains engaged. Automated verification used fake MT5; no manual reconciliation or broker submission was run. The immediate objective is Sprint 36 end-to-end runtime testing and targeted simplification, while the long-term objective remains an autonomous demo-first MT5 system governed by deterministic policy, reconciliation, lifecycle management, and runtime supervision, with live-account operation gated by a separate explicit promotion.

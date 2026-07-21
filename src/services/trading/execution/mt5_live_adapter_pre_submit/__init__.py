@@ -4,6 +4,10 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled impor
     MT5ControlledExecutionRequest,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.formatter import MT5LiveAdapterPreSubmitFormatter
+from src.services.trading.execution.mt5_live_adapter_pre_submit.reconciliation import (
+    MT5ReconciliationReceipt,
+    MT5ReconciliationRequest,
+)
 from src.services.trading.execution.mt5_live_adapter_pre_submit.gate import MT5PreSubmitGate
 from src.services.trading.execution.mt5_live_adapter_pre_submit.idempotency import MT5PreSubmitIdempotencyGuard
 from src.services.trading.execution.mt5_live_adapter_pre_submit.kill_switch import MT5KillSwitchService
@@ -39,6 +43,8 @@ __all__ = [
     "MT5_PRE_SUBMIT_GATE_STATUSES",
     "MT5ControlledExecutionReceipt",
     "MT5ControlledExecutionRequest",
+    "MT5ReconciliationReceipt",
+    "MT5ReconciliationRequest",
     "MT5IdempotencyCheck",
     "MT5KillSwitchCheck",
     "MT5KillSwitchService",
