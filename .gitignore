@@ -73,11 +73,14 @@ logs/
 !logs/.gitkeep
 tmp/
 temp/
+Trading_Advisory_Chatbot.zip
+tmp_debug_mt5_dry/
 
 # =============================================================================
 # INGESTION STATE (auto-generated, rebuild từ PDF)
 # =============================================================================
 data/ingestion_state.json
+data/trading/execution_journal/*.jsonl
 
 # =============================================================================
 # JUPYTER (nếu dùng notebook để thử nghiệm)

@@ -1,0 +1,18 @@
+{
+  "macro_id": "usd_high_impact_calendar_risk",
+  "title": "USD high impact calendar risk",
+  "source_type": "calendar_context",
+  "source_refs": ["data/knowledge_repository/report/macro"],
+  "event_type": "calendar_risk",
+  "affected_assets": ["XAUUSD", "GOLD"],
+  "affected_currencies": ["USD"],
+  "release_date": "",
+  "freshness": "LIVE_CONTEXT",
+  "key_points": ["High impact USD events can create unstable conditions around release windows.", "Calendar risk is a blocker or warning context, not a directional forecast."],
+  "gold_impact": "Gold can be sensitive to USD event repricing and rate expectations.",
+  "usd_impact": "USD event surprises can affect cross-asset pricing.",
+  "uncertainty": "Event outcomes and market reaction are uncertain.",
+  "metadata": {
+    "compiled_for": "knowledge_router_v1"
+  }
+}

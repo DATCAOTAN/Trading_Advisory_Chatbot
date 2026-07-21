@@ -1,0 +1,20 @@
+{
+  "playbook_id": "no_trade_news_risk_v1",
+  "method_id": "risk_management_core",
+  "name": "News risk caution playbook",
+  "compatible_regimes": ["NEWS_RISK", "ANY"],
+  "required_market_features": ["calendar_risk_state", "volatility_state"],
+  "no_trade_conditions": ["IMMEDIATE_HIGH_IMPACT calendar risk", "EVENT_ACTIVE calendar risk", "provider unavailable"],
+  "confirmation_rules": ["Surface calendar risk clearly.", "Use macro context as risk information only."],
+  "invalidation_rules": ["Calendar context becomes unavailable.", "Data quality becomes INVALID."],
+  "preferred_timeframes": ["M15", "H1", "H4"],
+  "scoring_weights": {
+    "calendar": 0.5,
+    "volatility": 0.25,
+    "data_quality": 0.25
+  },
+  "source_refs": ["data/knowledge_repository/report/macro"],
+  "metadata": {
+    "compiled_for": "knowledge_router_v1"
+  }
+}

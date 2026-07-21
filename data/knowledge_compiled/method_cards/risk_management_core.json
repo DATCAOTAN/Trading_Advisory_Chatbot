@@ -1,0 +1,19 @@
+{
+  "method_id": "risk_management_core",
+  "method_name": "Risk management review framework",
+  "source_type": "book",
+  "source_refs": ["data/knowledge_repository/book/risk/position_sizing/van_tharp"],
+  "domains": ["risk", "review", "learning"],
+  "suitable_regimes": ["TRENDING_UP", "TRENDING_DOWN", "RANGING", "CHOPPY", "NEWS_RISK", "UNKNOWN", "HIGH_VOLATILITY"],
+  "bad_regimes": [],
+  "required_features": ["data_quality_status"],
+  "confirmation_features": ["volatility_state", "calendar_risk_state"],
+  "invalidation_features": ["blockers"],
+  "preferred_timeframes": ["M15", "H1", "H4"],
+  "asset_scope": ["ALL"],
+  "risk_notes": ["Prioritize uncertainty, invalidation, and review discipline.", "Do not convert review notes into execution instructions."],
+  "confidence": 0.8,
+  "metadata": {
+    "compiled_for": "knowledge_router_v1"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "macro_id": "gold_usd_rate_sensitivity",
+  "title": "Gold USD rate sensitivity context",
+  "source_type": "macro_report",
+  "source_refs": ["data/knowledge_repository/report/market/gold/world_gold_council", "data/knowledge_repository/report/macro/central_bank/federal_reserve"],
+  "event_type": "macro_sensitivity",
+  "affected_assets": ["XAUUSD", "GOLD"],
+  "affected_currencies": ["USD"],
+  "release_date": "",
+  "freshness": "REFERENCE",
+  "key_points": ["Gold context can be affected by real yield expectations, USD repricing, and risk sentiment.", "Use as background context only."],
+  "gold_impact": "Rate and USD sensitivity can alter gold market conditions.",
+  "usd_impact": "USD strength or weakness can influence XAUUSD conditions.",
+  "uncertainty": "Macro relationships can vary by regime.",
+  "metadata": {
+    "compiled_for": "knowledge_router_v1"
+  }
+}

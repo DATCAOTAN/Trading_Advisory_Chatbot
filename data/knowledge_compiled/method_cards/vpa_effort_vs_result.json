@@ -1,0 +1,19 @@
+{
+  "method_id": "vpa_effort_vs_result",
+  "method_name": "Volume price analysis effort versus result",
+  "source_type": "book",
+  "source_refs": ["data/knowledge_repository/book/technical/volume/anna_coulling"],
+  "domains": ["volume", "confirmation", "price_action"],
+  "suitable_regimes": ["TRENDING_UP", "TRENDING_DOWN", "RANGING", "BREAKOUT_CANDIDATE", "PULLBACK_UPTREND", "PULLBACK_DOWNTREND"],
+  "bad_regimes": ["NEWS_RISK"],
+  "required_features": ["volatility_state", "momentum_state"],
+  "confirmation_features": ["range_chop_score", "breakout_candidate"],
+  "invalidation_features": ["data_quality_status"],
+  "preferred_timeframes": ["M15", "H1"],
+  "asset_scope": ["XAUUSD", "ALL"],
+  "risk_notes": ["Use volume context as supporting evidence, not as an executable instruction."],
+  "confidence": 0.68,
+  "metadata": {
+    "compiled_for": "knowledge_router_v1"
+  }
+}

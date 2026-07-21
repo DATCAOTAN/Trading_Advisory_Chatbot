@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import json
 import math
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
-import requests
-
 from src.config import Config
+from src.services.trading.calendar import (
+    CalendarContextBuilder,
+    CalendarFormatter,
+    ForexFactoryCalendarProvider,
+    filter_by_impact,
+)
 from src.services.trading.market import (
     MarketSnapshot,
     ProviderRegistry,
@@ -29,8 +32,7 @@ from src.services.trading.market import (
 class MarketDataService:
     def __init__(self, provider: Any | None = None):
         self.provider = provider or ProviderRegistry.build_provider()
-        self._calendar_cache: Dict[str, Any] = {}
-        self.forex_factory_url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+        self.calendar_provider = ForexFactoryCalendarProvider()
 
     def provider_health(self):
         return self.provider.health_check()
@@ -85,39 +87,20 @@ class MarketDataService:
 
     def get_economic_calendar(self, impact: str = "All") -> str:
         try:
-            now = datetime.now()
-            events = None
-            if self._calendar_cache and (now - self._calendar_cache.get("time", datetime.min)).total_seconds() < 3600:
-                events = self._calendar_cache.get("data")
-
-            if not events:
-                headers = {"User-Agent": "Trading-Advisory-Chatbot/1.0"}
-                response = requests.get(self.forex_factory_url, headers=headers, timeout=5)
-                if response.status_code != 200:
-                    return f"Economic calendar unavailable (status={response.status_code})."
-                events = response.json()
-                self._calendar_cache["data"] = events
-                self._calendar_cache["time"] = now
-
-            target_events = [item for item in events if item.get("impact") == impact] if impact and impact != "All" else events
-            if not target_events:
-                return "Economic calendar: no matching events found."
-
-            lines = []
-            vn_tz = timezone(timedelta(hours=7))
-            for event in target_events:
-                date_str = str(event.get("date", ""))
-                try:
-                    date_str = datetime.fromisoformat(date_str).astimezone(vn_tz).strftime("%d/%m/%Y %H:%M")
-                except Exception:
-                    pass
-                lines.append(
-                    f"{date_str} | {event.get('country', event.get('currency', 'N/A'))} | "
-                    f"[{event.get('impact', 'Low')}] {event.get('title', '')}"
-                )
-            return "**Economic events this week:**\n\n" + "\n".join(lines)
+            events = self.calendar_provider.fetch_events()
+            health = self.calendar_provider.health_check()
+            if not events and health.status not in {"OK", "DEGRADED"}:
+                return f"Economic calendar unavailable: {health.message or health.status}"
+            return CalendarFormatter.format_for_chatbot(events, impact)
         except Exception as exc:
             return f"Economic calendar unavailable: {type(exc).__name__}"
+
+    def get_calendar_events(self, impact: str = "All"):
+        events = self.calendar_provider.fetch_events()
+        return filter_by_impact(events, impact)
+
+    def get_structured_calendar_context(self, symbol: str = "XAUUSD"):
+        return CalendarContextBuilder(self.calendar_provider).build(symbol=symbol)
 
     def get_latest_macro_report(self) -> str:
         return (

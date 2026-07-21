@@ -1,0 +1,21 @@
+{
+  "playbook_id": "vpa_confirmation_v1",
+  "method_id": "vpa_effort_vs_result",
+  "name": "VPA confirmation analytical playbook",
+  "compatible_regimes": ["TRENDING_UP", "TRENDING_DOWN", "RANGING", "BREAKOUT_CANDIDATE", "PULLBACK_UPTREND", "PULLBACK_DOWNTREND"],
+  "required_market_features": ["volatility_state", "momentum_state"],
+  "no_trade_conditions": ["NEWS_RISK regime", "missing volume context", "INVALID data quality"],
+  "confirmation_rules": ["Compare effort and result context.", "Use VPA as supporting context only."],
+  "invalidation_rules": ["Data quality becomes INVALID.", "Calendar risk becomes immediate."],
+  "preferred_timeframes": ["M15", "H1"],
+  "scoring_weights": {
+    "volume_context": 0.4,
+    "momentum": 0.25,
+    "volatility": 0.2,
+    "calendar": 0.15
+  },
+  "source_refs": ["data/knowledge_repository/book/technical/volume/anna_coulling"],
+  "metadata": {
+    "compiled_for": "knowledge_router_v1"
+  }
+}

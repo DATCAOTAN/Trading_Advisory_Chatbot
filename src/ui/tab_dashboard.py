@@ -46,6 +46,19 @@ from src.services.trading.execution import (
     LivePermissionJournalStore,
     LivePermissionPolicy,
     MT5ExecutionSkeletonService,
+    MT5DryRunPayloadValidationJournalStore,
+    MT5OrderRequestDryRunPayloadValidationService,
+    MT5RequestDraftJournalStore,
+    MT5RequestDraftService,
+    MT5RequestDraftFinalApprovalJournalStore,
+    MT5RequestDraftFinalApprovalService,
+    MT5RequestDictDryRunBuilderJournalStore,
+    MT5RequestDictDryRunBuilderService,
+    MT5RequestDictFinalValidationJournalStore,
+    MT5RequestDictFinalValidationService,
+    MT5BridgeWriteSkeletonService,
+    MT5LiveAdapterPreSubmitService,
+    MT5PreSubmitJournalStore,
     PreMT5OrderRequestMappingJournalStore,
     PreMT5OrderRequestMappingService,
     SimulatedExecutionJournalStore,
@@ -184,6 +197,12 @@ def render(orchestrator):
     _render_live_order_contract_parameterization_status()
     _render_live_order_contract_final_review_status()
     _render_pre_mt5_order_request_mapping_status()
+    _render_mt5_dry_run_payload_validator_status()
+    _render_mt5_request_draft_boundary_status()
+    _render_mt5_request_draft_final_approval_status()
+    _render_mt5_request_dict_dry_run_builder_status()
+    _render_mt5_request_dict_final_validation_and_bridge_skeleton_status()
+    _render_mt5_live_adapter_disabled_pre_submit_status()
 
     st.markdown("---")
 
@@ -2148,6 +2167,915 @@ def _render_pre_mt5_order_request_mapping_status():
                 st.warning(result.warning)
         except Exception as exc:
             st.warning(f"Pre-MT5 mapping boundary unavailable: {type(exc).__name__}")
+
+
+def _render_mt5_dry_run_payload_validator_status():
+    st.markdown("#### MT5 Order Request Dry-Run Payload Validator")
+    st.caption(
+        "This only validates MT5 dry-run payload shape. It does not create a real MT5 payload, "
+        "does not create an MT5 request dictionary, does not create an executable order, and does not call MT5. "
+        "Live execution remains disabled and order_send remains disabled."
+    )
+    try:
+        store = MT5DryRunPayloadValidationJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Dry-run validations", summary.total_records)
+        cols[1].metric("Validated", summary.total_validated)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("MT5 constants", "false")
+        if summary.latest_dry_run_validation_id:
+            st.caption(
+                f"Latest MT5 dry-run validation={summary.latest_dry_run_validation_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("MT5 dry-run payload validation journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"MT5 dry-run payload validation journal unavailable: {type(exc).__name__}")
+
+    pre_mt5_mapping = st.session_state.get("pre_mt5_order_request_mapping_boundary")
+    pre_mt5_mapping_validation = st.session_state.get("pre_mt5_order_request_mapping_validation_report")
+    final_review = st.session_state.get("live_order_contract_final_review")
+    final_review_validation = st.session_state.get("live_order_contract_final_review_validation_report")
+    parameterization = st.session_state.get("live_order_contract_parameterization")
+    parameterization_validation = st.session_state.get("live_order_contract_parameterization_validation_report")
+    approval_lock = st.session_state.get("human_value_approval_lock")
+    approval_lock_validation = st.session_state.get("human_value_approval_lock_validation_report")
+    value_proposal = st.session_state.get("controlled_live_parameter_value_proposal")
+    value_proposal_validation = st.session_state.get("controlled_live_parameter_value_proposal_validation_report")
+    parameter_draft = st.session_state.get("human_reviewed_live_parameter_draft")
+    parameter_draft_validation = st.session_state.get("human_reviewed_live_parameter_draft_validation_report")
+    parameter_source_boundary = st.session_state.get("live_order_parameter_source_boundary")
+    parameter_source_validation = st.session_state.get("live_order_parameter_source_validation_report")
+    parameter_policy_spec = st.session_state.get("live_order_parameter_policy_spec")
+    parameter_policy_validation = st.session_state.get("live_order_parameter_policy_validation_report")
+    contract_skeleton = st.session_state.get("live_order_contract_skeleton")
+    contract_skeleton_validation = st.session_state.get("live_order_contract_skeleton_validation_report")
+    live_order_intent = st.session_state.get("live_order_intent")
+    live_order_intent_validation = st.session_state.get("live_order_intent_validation_report")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+
+    if pre_mt5_mapping is not None:
+        st.caption(
+            f"Pre-MT5 mapping={pre_mt5_mapping.mapping_boundary_id} | status={pre_mt5_mapping.status} | "
+            f"mt5_dry_run_payload_validation_workflow_allowed="
+            f"{pre_mt5_mapping.mt5_dry_run_payload_validation_workflow_allowed}"
+        )
+    if pre_mt5_mapping_validation is not None:
+        st.caption(f"Pre-MT5 mapping validation valid={pre_mt5_mapping_validation.valid}")
+
+    disabled = (
+        pre_mt5_mapping is None
+        or pre_mt5_mapping_validation is None
+        or final_review is None
+        or final_review_validation is None
+        or parameterization is None
+        or parameterization_validation is None
+        or approval_lock is None
+        or approval_lock_validation is None
+        or value_proposal is None
+        or value_proposal_validation is None
+        or parameter_draft is None
+        or parameter_draft_validation is None
+        or parameter_source_boundary is None
+        or parameter_source_validation is None
+        or parameter_policy_spec is None
+        or parameter_policy_validation is None
+        or contract_skeleton is None
+        or contract_skeleton_validation is None
+        or live_order_intent is None
+        or live_order_intent_validation is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Build a Pre-MT5 mapping boundary before validating MT5 dry-run payload shape.")
+
+    if st.button(
+        "Validate MT5 Dry-Run Payload Shape",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_validate_mt5_dry_run_payload_shape",
+    ):
+        try:
+            result = MT5OrderRequestDryRunPayloadValidationService().run(
+                pre_mt5_mapping,
+                pre_mt5_mapping_validation,
+                final_review,
+                final_review_validation,
+                parameterization,
+                parameterization_validation,
+                approval_lock,
+                approval_lock_validation,
+                value_proposal,
+                value_proposal_validation,
+                parameter_draft,
+                parameter_draft_validation,
+                parameter_source_boundary,
+                parameter_source_validation,
+                parameter_policy_spec,
+                parameter_policy_validation,
+                contract_skeleton,
+                contract_skeleton_validation,
+                live_order_intent,
+                live_order_intent_validation,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+            )
+            dry_run_validation = result.dry_run_validation
+            validation_report = result.validation_report
+            st.session_state["mt5_order_request_dry_run_payload_validation"] = dry_run_validation
+            st.session_state["mt5_order_request_dry_run_payload_validation_report"] = validation_report
+            st.session_state["mt5_order_request_dry_run_payload_validation_journal_record"] = result.journal_record
+            st.info(
+                "MT5 dry-run payload shape evaluated for a future request draft boundary only. "
+                f"status={dry_run_validation.status}, validation_valid={validation_report.valid}, "
+                f"mt5_request_draft_workflow_allowed={validation_report.mt5_request_draft_workflow_allowed}, "
+                f"field_validations_count={validation_report.field_validations_count}, "
+                f"validated_fields_count={validation_report.validated_fields_count}, "
+                f"missing_fields_count={validation_report.missing_fields_count}, "
+                f"invalid_fields_count={validation_report.invalid_fields_count}, "
+                f"mt5_payload_created={validation_report.mt5_payload_created}, "
+                f"mt5_request_dict_created={validation_report.mt5_request_dict_created}, "
+                f"mt5_constants_used={validation_report.mt5_constants_used}, "
+                f"raw_values_stored={validation_report.raw_values_stored}, "
+                f"executable_order_created={validation_report.executable_order_created}, "
+                f"broker_mapping_created={validation_report.broker_mapping_created}, "
+                f"order_request_mapping_allowed={validation_report.order_request_mapping_allowed}, "
+                f"order_contract_ready={validation_report.order_contract_ready}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, execution_allowed={validation_report.execution_allowed}, "
+                f"executable={validation_report.executable}, order_sent={validation_report.order_sent}, "
+                f"hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            st.caption(
+                f"Field categories={', '.join(dry_run_validation.required_field_categories)} | "
+                f"Missing fields={', '.join(dry_run_validation.missing_field_categories) or 'none'}"
+            )
+            if result.journal_record:
+                st.caption(f"MT5 dry-run payload validation journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"MT5 dry-run payload validator unavailable: {type(exc).__name__}")
+
+
+def _render_mt5_request_draft_boundary_status():
+    st.markdown("#### MT5 Request Draft Boundary")
+    st.caption(
+        "This only builds an MT5 request draft boundary. It does not create a real MT5 payload, "
+        "does not create an MT5 request dictionary, does not use MT5 constants, does not create an executable order, "
+        "and does not call MT5. Live execution remains disabled and order_send remains disabled."
+    )
+    try:
+        store = MT5RequestDraftJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Request drafts", summary.total_records)
+        cols[1].metric("Created", summary.total_created)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Broker submission", "false")
+        if summary.latest_request_draft_id:
+            st.caption(
+                f"Latest request draft={summary.latest_request_draft_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("MT5 request draft journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"MT5 request draft journal unavailable: {type(exc).__name__}")
+
+    dry_run_validation = st.session_state.get("mt5_order_request_dry_run_payload_validation")
+    dry_run_validation_report = st.session_state.get("mt5_order_request_dry_run_payload_validation_report")
+    pre_mt5_mapping = st.session_state.get("pre_mt5_order_request_mapping_boundary")
+    pre_mt5_mapping_validation = st.session_state.get("pre_mt5_order_request_mapping_validation_report")
+    final_review = st.session_state.get("live_order_contract_final_review")
+    final_review_validation = st.session_state.get("live_order_contract_final_review_validation_report")
+    parameterization = st.session_state.get("live_order_contract_parameterization")
+    parameterization_validation = st.session_state.get("live_order_contract_parameterization_validation_report")
+    approval_lock = st.session_state.get("human_value_approval_lock")
+    approval_lock_validation = st.session_state.get("human_value_approval_lock_validation_report")
+    value_proposal = st.session_state.get("controlled_live_parameter_value_proposal")
+    value_proposal_validation = st.session_state.get("controlled_live_parameter_value_proposal_validation_report")
+    parameter_draft = st.session_state.get("human_reviewed_live_parameter_draft")
+    parameter_draft_validation = st.session_state.get("human_reviewed_live_parameter_draft_validation_report")
+    parameter_source_boundary = st.session_state.get("live_order_parameter_source_boundary")
+    parameter_source_validation = st.session_state.get("live_order_parameter_source_validation_report")
+    parameter_policy_spec = st.session_state.get("live_order_parameter_policy_spec")
+    parameter_policy_validation = st.session_state.get("live_order_parameter_policy_validation_report")
+    contract_skeleton = st.session_state.get("live_order_contract_skeleton")
+    contract_skeleton_validation = st.session_state.get("live_order_contract_skeleton_validation_report")
+    live_order_intent = st.session_state.get("live_order_intent")
+    live_order_intent_validation = st.session_state.get("live_order_intent_validation_report")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+
+    if dry_run_validation is not None:
+        st.caption(
+            f"Dry-run payload validation={dry_run_validation.dry_run_validation_id} | "
+            f"status={dry_run_validation.status} | "
+            f"mt5_request_draft_workflow_allowed={dry_run_validation.mt5_request_draft_workflow_allowed}"
+        )
+    if dry_run_validation_report is not None:
+        st.caption(f"Dry-run payload validation report valid={dry_run_validation_report.valid}")
+
+    disabled = (
+        dry_run_validation is None
+        or dry_run_validation_report is None
+        or pre_mt5_mapping is None
+        or pre_mt5_mapping_validation is None
+        or final_review is None
+        or final_review_validation is None
+        or parameterization is None
+        or parameterization_validation is None
+        or approval_lock is None
+        or approval_lock_validation is None
+        or value_proposal is None
+        or value_proposal_validation is None
+        or parameter_draft is None
+        or parameter_draft_validation is None
+        or parameter_source_boundary is None
+        or parameter_source_validation is None
+        or parameter_policy_spec is None
+        or parameter_policy_validation is None
+        or contract_skeleton is None
+        or contract_skeleton_validation is None
+        or live_order_intent is None
+        or live_order_intent_validation is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Validate the MT5 dry-run payload shape before building the MT5 request draft boundary.")
+
+    if st.button(
+        "Build MT5 Request Draft Boundary",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_build_mt5_request_draft_boundary",
+    ):
+        try:
+            result = MT5RequestDraftService().run(
+                dry_run_validation,
+                dry_run_validation_report,
+                pre_mt5_mapping,
+                pre_mt5_mapping_validation,
+                final_review,
+                final_review_validation,
+                parameterization,
+                parameterization_validation,
+                approval_lock,
+                approval_lock_validation,
+                value_proposal,
+                value_proposal_validation,
+                parameter_draft,
+                parameter_draft_validation,
+                parameter_source_boundary,
+                parameter_source_validation,
+                parameter_policy_spec,
+                parameter_policy_validation,
+                contract_skeleton,
+                contract_skeleton_validation,
+                live_order_intent,
+                live_order_intent_validation,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+            )
+            request_draft = result.request_draft
+            validation_report = result.validation_report
+            st.session_state["mt5_request_draft_boundary"] = request_draft
+            st.session_state["mt5_request_draft_validation_report"] = validation_report
+            st.session_state["mt5_request_draft_journal_record"] = result.journal_record
+            st.info(
+                "MT5 request draft boundary evaluated for a future final approval workflow only. "
+                f"status={request_draft.status}, validation_valid={validation_report.valid}, "
+                f"mt5_request_draft_final_approval_workflow_allowed="
+                f"{validation_report.mt5_request_draft_final_approval_workflow_allowed}, "
+                f"draft_fields_count={validation_report.draft_fields_count}, "
+                f"created_draft_fields_count={validation_report.created_draft_fields_count}, "
+                f"missing_draft_fields_count={validation_report.missing_draft_fields_count}, "
+                f"invalid_draft_fields_count={validation_report.invalid_draft_fields_count}, "
+                f"mt5_payload_created={validation_report.mt5_payload_created}, "
+                f"mt5_request_dict_created={validation_report.mt5_request_dict_created}, "
+                f"mt5_constants_used={validation_report.mt5_constants_used}, "
+                f"broker_submission_created={validation_report.broker_submission_created}, "
+                f"raw_values_stored={validation_report.raw_values_stored}, "
+                f"executable_order_created={validation_report.executable_order_created}, "
+                f"broker_mapping_created={validation_report.broker_mapping_created}, "
+                f"order_request_mapping_allowed={validation_report.order_request_mapping_allowed}, "
+                f"order_contract_ready={validation_report.order_contract_ready}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, "
+                f"execution_allowed={validation_report.execution_allowed}, "
+                f"executable={validation_report.executable}, order_sent={validation_report.order_sent}, "
+                f"hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            st.caption(
+                f"Draft field categories={', '.join(request_draft.required_draft_field_categories)} | "
+                f"Missing draft fields={', '.join(request_draft.missing_draft_field_categories) or 'none'}"
+            )
+            if result.journal_record:
+                st.caption(f"MT5 request draft journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"MT5 request draft boundary unavailable: {type(exc).__name__}")
+
+
+def _render_mt5_request_draft_final_approval_status():
+    st.markdown("#### MT5 Request Draft Final Approval Boundary")
+    st.caption(
+        "This only approves the MT5 request draft for a future dry-run request dictionary builder. "
+        "It does not create a real MT5 payload, does not create an MT5 request dictionary, "
+        "does not use MT5 constants, does not create broker submission, does not create an executable order, "
+        "and does not call MT5. Live execution remains disabled and order_send remains disabled."
+    )
+    try:
+        store = MT5RequestDraftFinalApprovalJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Final approvals", summary.total_records)
+        cols[1].metric("Approved", summary.total_approved)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Broker submission", "false")
+        if summary.latest_final_approval_id:
+            st.caption(
+                f"Latest final approval={summary.latest_final_approval_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("MT5 request draft final approval journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"MT5 request draft final approval journal unavailable: {type(exc).__name__}")
+
+    request_draft = st.session_state.get("mt5_request_draft_boundary")
+    request_draft_validation_report = st.session_state.get("mt5_request_draft_validation_report")
+    dry_run_validation = st.session_state.get("mt5_order_request_dry_run_payload_validation")
+    dry_run_validation_report = st.session_state.get("mt5_order_request_dry_run_payload_validation_report")
+    pre_mt5_mapping = st.session_state.get("pre_mt5_order_request_mapping_boundary")
+    pre_mt5_mapping_validation = st.session_state.get("pre_mt5_order_request_mapping_validation_report")
+    final_review = st.session_state.get("live_order_contract_final_review")
+    final_review_validation = st.session_state.get("live_order_contract_final_review_validation_report")
+    parameterization = st.session_state.get("live_order_contract_parameterization")
+    parameterization_validation = st.session_state.get("live_order_contract_parameterization_validation_report")
+    approval_lock = st.session_state.get("human_value_approval_lock")
+    approval_lock_validation = st.session_state.get("human_value_approval_lock_validation_report")
+    value_proposal = st.session_state.get("controlled_live_parameter_value_proposal")
+    value_proposal_validation = st.session_state.get("controlled_live_parameter_value_proposal_validation_report")
+    parameter_draft = st.session_state.get("human_reviewed_live_parameter_draft")
+    parameter_draft_validation = st.session_state.get("human_reviewed_live_parameter_draft_validation_report")
+    parameter_source_boundary = st.session_state.get("live_order_parameter_source_boundary")
+    parameter_source_validation = st.session_state.get("live_order_parameter_source_validation_report")
+    parameter_policy_spec = st.session_state.get("live_order_parameter_policy_spec")
+    parameter_policy_validation = st.session_state.get("live_order_parameter_policy_validation_report")
+    contract_skeleton = st.session_state.get("live_order_contract_skeleton")
+    contract_skeleton_validation = st.session_state.get("live_order_contract_skeleton_validation_report")
+    live_order_intent = st.session_state.get("live_order_intent")
+    live_order_intent_validation = st.session_state.get("live_order_intent_validation_report")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+
+    if request_draft is not None:
+        st.caption(
+            f"Request draft={request_draft.request_draft_id} | status={request_draft.status} | "
+            f"mt5_request_draft_final_approval_workflow_allowed="
+            f"{request_draft.mt5_request_draft_final_approval_workflow_allowed}"
+        )
+    if request_draft_validation_report is not None:
+        st.caption(f"Request draft validation report valid={request_draft_validation_report.valid}")
+
+    approval_phrase = st.text_input(
+        "Final approval phrase",
+        type="password",
+        key="dash_mt5_request_draft_final_approval_phrase",
+    )
+    disabled = (
+        request_draft is None
+        or request_draft_validation_report is None
+        or dry_run_validation is None
+        or dry_run_validation_report is None
+        or pre_mt5_mapping is None
+        or pre_mt5_mapping_validation is None
+        or final_review is None
+        or final_review_validation is None
+        or parameterization is None
+        or parameterization_validation is None
+        or approval_lock is None
+        or approval_lock_validation is None
+        or value_proposal is None
+        or value_proposal_validation is None
+        or parameter_draft is None
+        or parameter_draft_validation is None
+        or parameter_source_boundary is None
+        or parameter_source_validation is None
+        or parameter_policy_spec is None
+        or parameter_policy_validation is None
+        or contract_skeleton is None
+        or contract_skeleton_validation is None
+        or live_order_intent is None
+        or live_order_intent_validation is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Build the MT5 request draft boundary before approving it for the future dry-run request dictionary builder.")
+
+    if st.button(
+        "Approve MT5 Request Draft for Dry-Run Builder",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_approve_mt5_request_draft_final_approval",
+    ):
+        try:
+            result = MT5RequestDraftFinalApprovalService().run(
+                request_draft,
+                request_draft_validation_report,
+                dry_run_validation,
+                dry_run_validation_report,
+                pre_mt5_mapping,
+                pre_mt5_mapping_validation,
+                final_review,
+                final_review_validation,
+                parameterization,
+                parameterization_validation,
+                approval_lock,
+                approval_lock_validation,
+                value_proposal,
+                value_proposal_validation,
+                parameter_draft,
+                parameter_draft_validation,
+                parameter_source_boundary,
+                parameter_source_validation,
+                parameter_policy_spec,
+                parameter_policy_validation,
+                contract_skeleton,
+                contract_skeleton_validation,
+                live_order_intent,
+                live_order_intent_validation,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+                confirmation_phrase=approval_phrase,
+            )
+            final_approval = result.final_approval
+            validation_report = result.validation_report
+            st.session_state["mt5_request_draft_final_approval"] = final_approval
+            st.session_state["mt5_request_draft_final_approval_validation_report"] = validation_report
+            st.session_state["mt5_request_draft_final_approval_journal_record"] = result.journal_record
+            st.info(
+                "MT5 request draft final approval evaluated for a future dry-run request dictionary builder only. "
+                f"status={final_approval.status}, validation_valid={validation_report.valid}, "
+                f"confirmation_phrase_valid={validation_report.confirmation_phrase_valid}, "
+                f"mt5_request_dict_dry_run_builder_workflow_allowed="
+                f"{validation_report.mt5_request_dict_dry_run_builder_workflow_allowed}, "
+                f"approved_fields_count={validation_report.approved_fields_count}, "
+                f"approved_fields_valid_count={validation_report.approved_fields_valid_count}, "
+                f"missing_approved_fields_count={validation_report.missing_approved_fields_count}, "
+                f"invalid_approved_fields_count={validation_report.invalid_approved_fields_count}, "
+                f"mt5_payload_created={validation_report.mt5_payload_created}, "
+                f"mt5_request_dict_created={validation_report.mt5_request_dict_created}, "
+                f"mt5_constants_used={validation_report.mt5_constants_used}, "
+                f"broker_submission_created={validation_report.broker_submission_created}, "
+                f"raw_values_stored={validation_report.raw_values_stored}, "
+                f"executable_order_created={validation_report.executable_order_created}, "
+                f"broker_mapping_created={validation_report.broker_mapping_created}, "
+                f"order_request_mapping_allowed={validation_report.order_request_mapping_allowed}, "
+                f"order_contract_ready={validation_report.order_contract_ready}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, "
+                f"execution_allowed={validation_report.execution_allowed}, "
+                f"executable={validation_report.executable}, order_sent={validation_report.order_sent}, "
+                f"hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            st.caption(
+                f"Approved field categories={', '.join(final_approval.required_approved_field_categories)} | "
+                f"Missing approved fields={', '.join(final_approval.missing_approved_field_categories) or 'none'}"
+            )
+            if result.journal_record:
+                st.caption(f"MT5 request draft final approval journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"MT5 request draft final approval unavailable: {type(exc).__name__}")
+
+
+def _render_mt5_request_dict_dry_run_builder_status():
+    st.markdown("#### MT5 Request Dict Dry-Run Builder Boundary")
+    st.caption(
+        "This only builds a dry-run request-dict boundary for future validation. "
+        "It does not create a real MT5 payload. It does not create a broker-submittable MT5 request dictionary. "
+        "It does not use MT5 constants. It does not create broker submission. It does not create an executable order. "
+        "It does not call MT5. Live execution remains disabled and order_send remains disabled."
+    )
+    try:
+        store = MT5RequestDictDryRunBuilderJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Dry-run request dicts", summary.total_records)
+        cols[1].metric("Ready for validation", summary.total_ready)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Broker-submittable", "false")
+        if summary.latest_dry_run_request_dict_id:
+            st.caption(
+                f"Latest dry-run request dict={summary.latest_dry_run_request_dict_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("MT5 request dict dry-run builder journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"MT5 request dict dry-run builder journal unavailable: {type(exc).__name__}")
+
+    final_approval = st.session_state.get("mt5_request_draft_final_approval")
+    final_approval_validation = st.session_state.get("mt5_request_draft_final_approval_validation_report")
+    request_draft = st.session_state.get("mt5_request_draft_boundary")
+    request_draft_validation = st.session_state.get("mt5_request_draft_validation_report")
+    dry_run_validation = st.session_state.get("mt5_order_request_dry_run_payload_validation")
+    dry_run_validation_report = st.session_state.get("mt5_order_request_dry_run_payload_validation_report")
+    pre_mt5_mapping = st.session_state.get("pre_mt5_order_request_mapping_boundary")
+    pre_mt5_mapping_validation = st.session_state.get("pre_mt5_order_request_mapping_validation_report")
+    final_review = st.session_state.get("live_order_contract_final_review")
+    final_review_validation = st.session_state.get("live_order_contract_final_review_validation_report")
+    parameterization = st.session_state.get("live_order_contract_parameterization")
+    parameterization_validation = st.session_state.get("live_order_contract_parameterization_validation_report")
+    approval_lock = st.session_state.get("human_value_approval_lock")
+    approval_lock_validation = st.session_state.get("human_value_approval_lock_validation_report")
+    value_proposal = st.session_state.get("controlled_live_parameter_value_proposal")
+    value_proposal_validation = st.session_state.get("controlled_live_parameter_value_proposal_validation_report")
+    parameter_draft = st.session_state.get("human_reviewed_live_parameter_draft")
+    parameter_draft_validation = st.session_state.get("human_reviewed_live_parameter_draft_validation_report")
+    parameter_source_boundary = st.session_state.get("live_order_parameter_source_boundary")
+    parameter_source_validation = st.session_state.get("live_order_parameter_source_validation_report")
+    parameter_policy_spec = st.session_state.get("live_order_parameter_policy_spec")
+    parameter_policy_validation = st.session_state.get("live_order_parameter_policy_validation_report")
+    contract_skeleton = st.session_state.get("live_order_contract_skeleton")
+    contract_skeleton_validation = st.session_state.get("live_order_contract_skeleton_validation_report")
+    live_order_intent = st.session_state.get("live_order_intent")
+    live_order_intent_validation = st.session_state.get("live_order_intent_validation_report")
+    permission_decision = st.session_state.get("live_permission_gate_decision")
+    preflight_report = st.session_state.get("live_execution_preflight_readiness_report")
+    draft = st.session_state.get("non_executable_trade_proposal_draft")
+    contract = st.session_state.get("simulated_order_contract")
+    simulated_receipt = st.session_state.get("simulated_execution_receipt")
+
+    if final_approval is not None:
+        st.caption(
+            f"Draft final approval={final_approval.final_approval_id} | status={final_approval.status} | "
+            f"mt5_request_dict_dry_run_builder_workflow_allowed="
+            f"{final_approval.mt5_request_dict_dry_run_builder_workflow_allowed}"
+        )
+    if final_approval_validation is not None:
+        st.caption(f"Draft final approval validation report valid={final_approval_validation.valid}")
+
+    disabled = (
+        final_approval is None
+        or final_approval_validation is None
+        or request_draft is None
+        or request_draft_validation is None
+        or dry_run_validation is None
+        or dry_run_validation_report is None
+        or pre_mt5_mapping is None
+        or pre_mt5_mapping_validation is None
+        or final_review is None
+        or final_review_validation is None
+        or parameterization is None
+        or parameterization_validation is None
+        or approval_lock is None
+        or approval_lock_validation is None
+        or value_proposal is None
+        or value_proposal_validation is None
+        or parameter_draft is None
+        or parameter_draft_validation is None
+        or parameter_source_boundary is None
+        or parameter_source_validation is None
+        or parameter_policy_spec is None
+        or parameter_policy_validation is None
+        or contract_skeleton is None
+        or contract_skeleton_validation is None
+        or live_order_intent is None
+        or live_order_intent_validation is None
+        or permission_decision is None
+        or preflight_report is None
+        or draft is None
+        or contract is None
+    )
+    if disabled:
+        st.info("Approve the MT5 request draft for the future dry-run request-dict builder before building this boundary.")
+
+    if st.button(
+        "Build MT5 Request Dict Dry-Run Boundary",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_build_mt5_request_dict_dry_run_builder_boundary",
+    ):
+        try:
+            result = MT5RequestDictDryRunBuilderService().run(
+                final_approval,
+                final_approval_validation,
+                request_draft,
+                request_draft_validation,
+                dry_run_validation,
+                dry_run_validation_report,
+                pre_mt5_mapping,
+                pre_mt5_mapping_validation,
+                final_review,
+                final_review_validation,
+                parameterization,
+                parameterization_validation,
+                approval_lock,
+                approval_lock_validation,
+                value_proposal,
+                value_proposal_validation,
+                parameter_draft,
+                parameter_draft_validation,
+                parameter_source_boundary,
+                parameter_source_validation,
+                parameter_policy_spec,
+                parameter_policy_validation,
+                contract_skeleton,
+                contract_skeleton_validation,
+                live_order_intent,
+                live_order_intent_validation,
+                permission_decision,
+                preflight_report,
+                draft,
+                contract,
+                simulated_receipt=simulated_receipt,
+            )
+            boundary = result.boundary
+            validation_report = result.validation_report
+            st.session_state["mt5_request_dict_dry_run_builder_boundary"] = boundary
+            st.session_state["mt5_request_dict_dry_run_builder_validation_report"] = validation_report
+            st.session_state["mt5_request_dict_dry_run_builder_journal_record"] = result.journal_record
+            st.info(
+                "MT5 request dict dry-run builder boundary evaluated for future final validation only. "
+                f"status={boundary.status}, validation_valid={validation_report.valid}, "
+                f"mt5_request_dict_final_validation_workflow_allowed="
+                f"{validation_report.mt5_request_dict_final_validation_workflow_allowed}, "
+                f"dry_run_fields_count={validation_report.dry_run_fields_count}, "
+                f"created_dry_run_fields_count={validation_report.created_dry_run_fields_count}, "
+                f"missing_dry_run_fields_count={validation_report.missing_dry_run_fields_count}, "
+                f"invalid_dry_run_fields_count={validation_report.invalid_dry_run_fields_count}, "
+                f"real_mt5_payload_created={validation_report.real_mt5_payload_created}, "
+                f"broker_submittable_request_dict_created="
+                f"{validation_report.broker_submittable_request_dict_created}, "
+                f"mt5_constants_used={validation_report.mt5_constants_used}, "
+                f"broker_submission_created={validation_report.broker_submission_created}, "
+                f"raw_values_stored={validation_report.raw_values_stored}, "
+                f"executable_order_created={validation_report.executable_order_created}, "
+                f"broker_mapping_created={validation_report.broker_mapping_created}, "
+                f"order_request_mapping_allowed={validation_report.order_request_mapping_allowed}, "
+                f"order_contract_ready={validation_report.order_contract_ready}, "
+                f"live_execution_allowed={validation_report.live_execution_allowed}, "
+                f"order_send_allowed={validation_report.order_send_allowed}, "
+                f"execution_allowed={validation_report.execution_allowed}, "
+                f"executable={validation_report.executable}, order_sent={validation_report.order_sent}, "
+                f"hard_live_block_required={validation_report.hard_live_block_required}"
+            )
+            st.caption(
+                f"Dry-run key labels={', '.join(field.dry_run_key_label for field in boundary.dry_run_fields)} | "
+                f"Missing dry-run fields={', '.join(boundary.missing_dry_run_field_categories) or 'none'}"
+            )
+            if result.journal_record:
+                st.caption(f"MT5 request dict dry-run builder journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"MT5 request dict dry-run builder unavailable: {type(exc).__name__}")
+
+
+def _render_mt5_request_dict_final_validation_and_bridge_skeleton_status():
+    st.markdown("#### MT5 Request Dict Final Validation + Bridge Write Skeleton")
+    st.caption(
+        "This validates the dry-run request dict boundary and checks that the bridge write skeleton is reachable "
+        "but hard-blocked. It does not send an order."
+    )
+    try:
+        store = MT5RequestDictFinalValidationJournalStore()
+        summary = store.summarize()
+        cols = st.columns(4)
+        cols[0].metric("Final validations", summary.total_records)
+        cols[1].metric("Passed", summary.total_passed)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Execution", "false")
+        if summary.latest_final_validation_id:
+            st.caption(
+                f"Latest final validation={summary.latest_final_validation_id} | "
+                f"status={summary.latest_status} | validation={summary.latest_validation_report_id}"
+            )
+        if summary.warnings:
+            st.caption("MT5 request dict final validation journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"MT5 request dict final validation journal unavailable: {type(exc).__name__}")
+
+    dry_run_boundary = st.session_state.get("mt5_request_dict_dry_run_builder_boundary")
+    dry_run_report = st.session_state.get("mt5_request_dict_dry_run_builder_validation_report")
+    final_validation = st.session_state.get("mt5_request_dict_final_validation")
+    final_validation_report = st.session_state.get("mt5_request_dict_final_validation_report")
+    bridge_check = st.session_state.get("mt5_bridge_write_skeleton_check")
+
+    if dry_run_boundary is not None:
+        st.caption(
+            f"Dry-run request dict={dry_run_boundary.dry_run_request_dict_id} | status={dry_run_boundary.status} | "
+            f"mt5_request_dict_final_validation_workflow_allowed="
+            f"{dry_run_boundary.mt5_request_dict_final_validation_workflow_allowed}"
+        )
+    if final_validation_report is not None:
+        st.caption(
+            f"Final validation status={final_validation.status if final_validation else 'n/a'} | "
+            f"bridge_write_skeleton_check_allowed={final_validation_report.bridge_write_skeleton_check_allowed} | "
+            f"validated_fields_count={final_validation_report.validated_fields_count} | "
+            f"missing_fields_count={final_validation_report.missing_fields_count} | "
+            f"invalid_fields_count={final_validation_report.invalid_fields_count} | "
+            f"live_execution_allowed={final_validation_report.live_execution_allowed} | "
+            f"order_send_allowed={final_validation_report.order_send_allowed} | "
+            f"execution_allowed={final_validation_report.execution_allowed} | "
+            f"order_sent={final_validation_report.order_sent} | "
+            f"hard_live_block_required={final_validation_report.hard_live_block_required}"
+        )
+    if bridge_check is not None:
+        st.caption(
+            f"Bridge write skeleton reachable={bridge_check.reachable} | status={bridge_check.status} | "
+            f"write_skeleton_available={bridge_check.write_skeleton_available} | "
+            f"live_execution_allowed={bridge_check.live_execution_allowed} | "
+            f"order_send_allowed={bridge_check.order_send_allowed} | "
+            f"execution_allowed={bridge_check.execution_allowed} | "
+            f"order_sent={bridge_check.order_sent} | hard_live_block_required={bridge_check.hard_live_block_required}"
+        )
+
+    validation_disabled = dry_run_boundary is None or dry_run_report is None
+    if validation_disabled:
+        st.info("Build the MT5 request dict dry-run boundary before running final validation.")
+
+    if st.button(
+        "Validate MT5 Request Dict Boundary",
+        disabled=validation_disabled,
+        use_container_width=True,
+        key="dash_validate_mt5_request_dict_boundary",
+    ):
+        try:
+            result = MT5RequestDictFinalValidationService().run(dry_run_boundary, dry_run_report)
+            st.session_state["mt5_request_dict_final_validation"] = result.final_validation
+            st.session_state["mt5_request_dict_final_validation_report"] = result.validation_report
+            st.session_state["mt5_request_dict_final_validation_journal_record"] = result.journal_record
+            st.info(
+                "MT5 request dict final validation evaluated for bridge write skeleton check only. "
+                f"status={result.final_validation.status}, validation_valid={result.validation_report.valid}, "
+                f"bridge_write_skeleton_check_allowed={result.validation_report.bridge_write_skeleton_check_allowed}, "
+                f"validated_fields_count={result.validation_report.validated_fields_count}, "
+                f"missing_fields_count={result.validation_report.missing_fields_count}, "
+                f"invalid_fields_count={result.validation_report.invalid_fields_count}, "
+                f"live_execution_allowed={result.validation_report.live_execution_allowed}, "
+                f"order_send_allowed={result.validation_report.order_send_allowed}, "
+                f"execution_allowed={result.validation_report.execution_allowed}, "
+                f"order_sent={result.validation_report.order_sent}, "
+                f"hard_live_block_required={result.validation_report.hard_live_block_required}"
+            )
+            if result.journal_record:
+                st.caption(f"MT5 request dict final validation journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"MT5 request dict final validation unavailable: {type(exc).__name__}")
+
+    bridge_disabled = final_validation_report is None or not getattr(final_validation_report, "bridge_write_skeleton_check_allowed", False)
+    if st.button(
+        "Check MT5 Bridge Write Skeleton",
+        disabled=bridge_disabled,
+        use_container_width=True,
+        key="dash_check_mt5_bridge_write_skeleton",
+    ):
+        try:
+            result = MT5BridgeWriteSkeletonService().run()
+            st.session_state["mt5_bridge_write_skeleton_check"] = result.check
+            st.session_state["mt5_bridge_write_skeleton_validation"] = result.validation
+            st.info(
+                "MT5 bridge write skeleton checked. "
+                f"reachable={result.check.reachable}, status={result.check.status}, "
+                f"write_skeleton_available={result.check.write_skeleton_available}, "
+                f"live_execution_allowed={result.check.live_execution_allowed}, "
+                f"order_send_allowed={result.check.order_send_allowed}, "
+                f"execution_allowed={result.check.execution_allowed}, "
+                f"order_sent={result.check.order_sent}, ticket={result.check.ticket}, deal={result.check.deal}, "
+                f"hard_live_block_required={result.check.hard_live_block_required}"
+            )
+            if not result.validation.passed:
+                st.warning("Bridge write skeleton blocked-response validation failed: " + ", ".join(result.validation.issues))
+        except Exception as exc:
+            st.warning(f"MT5 bridge write skeleton check unavailable: {type(exc).__name__}")
+
+
+def _render_mt5_live_adapter_disabled_pre_submit_status():
+    st.markdown("#### MT5 Live Adapter Disabled + Pre-Submit Gate")
+    st.caption(
+        "This runs a disabled pre-submit safety check only. It does not send an order. "
+        "Live submission and order_send remain disabled."
+    )
+    try:
+        summary = MT5PreSubmitJournalStore().summarize()
+        cols = st.columns(4)
+        cols[0].metric("Pre-submit checks", summary.total_records)
+        cols[1].metric("Valid", summary.total_valid)
+        cols[2].metric("Blocked", summary.total_blocked)
+        cols[3].metric("Live submission", "false")
+        if summary.latest_report_id:
+            st.caption(f"Latest pre-submit report={summary.latest_report_id} | status={summary.latest_status}")
+        if summary.warnings:
+            st.caption("MT5 pre-submit journal warnings: " + ", ".join(summary.warnings[:3]))
+    except Exception as exc:
+        st.caption(f"MT5 pre-submit journal unavailable: {type(exc).__name__}")
+
+    final_validation = st.session_state.get("mt5_request_dict_final_validation")
+    final_validation_report = st.session_state.get("mt5_request_dict_final_validation_report")
+    pre_submit_report = st.session_state.get("mt5_pre_submit_gate_report")
+    adapter_receipt = st.session_state.get("mt5_live_adapter_disabled_receipt")
+    bridge_check = st.session_state.get("mt5_pre_submit_bridge_write_skeleton_check")
+
+    if pre_submit_report is not None:
+        st.caption(
+            f"adapter_status={adapter_receipt.adapter_status if adapter_receipt else 'n/a'} | "
+            f"pre_submit_gate_status={pre_submit_report.status} | "
+            f"controlled_demo_integration_workflow_allowed="
+            f"{pre_submit_report.controlled_demo_integration_workflow_allowed} | "
+            f"live_submission_allowed={pre_submit_report.live_submission_allowed} | "
+            f"bridge_write_skeleton_reachable={pre_submit_report.bridge_write_skeleton_reachable} | "
+            f"bridge_write_skeleton_status={pre_submit_report.bridge_write_skeleton_status} | "
+            f"kill_switch_engaged={pre_submit_report.kill_switch_engaged} | "
+            f"idempotency_status={pre_submit_report.idempotency_status} | "
+            f"live_execution_allowed={pre_submit_report.live_execution_allowed} | "
+            f"order_send_allowed={pre_submit_report.order_send_allowed} | "
+            f"execution_allowed={pre_submit_report.execution_allowed} | "
+            f"executable={pre_submit_report.executable} | order_sent={pre_submit_report.order_sent} | "
+            f"hard_live_block_required={pre_submit_report.hard_live_block_required}"
+        )
+    if bridge_check is not None:
+        st.caption(f"Bridge skeleton check id={bridge_check.check_id} | status={bridge_check.status}")
+
+    disabled = final_validation is None or final_validation_report is None
+    if disabled:
+        st.info("Run MT5 request dict final validation before the disabled pre-submit safety check.")
+
+    if st.button(
+        "Run MT5 Pre-Submit Safety Check",
+        disabled=disabled,
+        use_container_width=True,
+        key="dash_run_mt5_pre_submit_safety_check",
+    ):
+        try:
+            result = MT5LiveAdapterPreSubmitService().run(final_validation, final_validation_report)
+            st.session_state["mt5_pre_submit_gate_report"] = result.report
+            st.session_state["mt5_live_adapter_disabled_receipt"] = result.adapter_receipt
+            st.session_state["mt5_pre_submit_bridge_write_skeleton_check"] = result.bridge_check
+            st.session_state["mt5_kill_switch_check"] = result.kill_switch_check
+            st.session_state["mt5_pre_submit_idempotency_check"] = result.idempotency_check
+            st.session_state["mt5_pre_submit_journal_record"] = result.journal_record
+            st.info(
+                "MT5 disabled pre-submit safety check evaluated. "
+                f"adapter_status={result.adapter_receipt.adapter_status}, "
+                f"pre_submit_status={result.report.status}, valid={result.report.valid}, "
+                f"controlled_demo_integration_workflow_allowed="
+                f"{result.report.controlled_demo_integration_workflow_allowed}, "
+                f"live_submission_allowed={result.report.live_submission_allowed}, "
+                f"bridge_write_skeleton_reachable={result.report.bridge_write_skeleton_reachable}, "
+                f"bridge_write_skeleton_status={result.report.bridge_write_skeleton_status}, "
+                f"kill_switch_engaged={result.report.kill_switch_engaged}, "
+                f"idempotency_status={result.report.idempotency_status}, "
+                f"live_execution_allowed={result.report.live_execution_allowed}, "
+                f"order_send_allowed={result.report.order_send_allowed}, "
+                f"execution_allowed={result.report.execution_allowed}, executable={result.report.executable}, "
+                f"order_sent={result.report.order_sent}, ticket={result.report.ticket}, deal={result.report.deal}, "
+                f"hard_live_block_required={result.report.hard_live_block_required}"
+            )
+            if result.journal_record:
+                st.caption(f"MT5 pre-submit journal record: {result.journal_record.journal_record_id}")
+            if result.warning:
+                st.warning(result.warning)
+        except Exception as exc:
+            st.warning(f"MT5 disabled pre-submit safety check unavailable: {type(exc).__name__}")
 
 
 def _render_ingestion_state():

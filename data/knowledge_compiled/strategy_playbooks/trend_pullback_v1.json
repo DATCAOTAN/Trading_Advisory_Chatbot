@@ -1,0 +1,21 @@
+{
+  "playbook_id": "trend_pullback_v1",
+  "method_id": "al_brooks_trend_pullback",
+  "name": "Trend pullback analytical playbook",
+  "compatible_regimes": ["TRENDING_UP", "TRENDING_DOWN", "PULLBACK_UPTREND", "PULLBACK_DOWNTREND"],
+  "required_market_features": ["trend_direction", "trend_strength", "pullback_detected"],
+  "no_trade_conditions": ["NEWS_RISK regime", "INVALID data quality", "calendar immediate high impact"],
+  "confirmation_rules": ["Check multi-timeframe alignment.", "Check momentum state.", "Check range/chop is not elevated."],
+  "invalidation_rules": ["Regime changes to CHOPPY or NEWS_RISK.", "Data quality becomes INVALID."],
+  "preferred_timeframes": ["M15", "H1", "H4"],
+  "scoring_weights": {
+    "trend": 0.35,
+    "alignment": 0.25,
+    "momentum": 0.2,
+    "calendar": 0.2
+  },
+  "source_refs": ["data/knowledge_repository/book/technical/price_action/al_brooks"],
+  "metadata": {
+    "compiled_for": "knowledge_router_v1"
+  }
+}

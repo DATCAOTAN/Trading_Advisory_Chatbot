@@ -1,0 +1,19 @@
+{
+  "method_id": "al_brooks_trend_pullback",
+  "method_name": "Al Brooks trend pullback analysis",
+  "source_type": "book",
+  "source_refs": ["data/knowledge_repository/book/technical/price_action/al_brooks"],
+  "domains": ["price_action", "trend", "pullback"],
+  "suitable_regimes": ["TRENDING_UP", "TRENDING_DOWN", "PULLBACK_UPTREND", "PULLBACK_DOWNTREND"],
+  "bad_regimes": ["NEWS_RISK", "CHOPPY"],
+  "required_features": ["trend_direction", "trend_strength", "pullback_detected"],
+  "confirmation_features": ["multi_timeframe_alignment", "momentum_state"],
+  "invalidation_features": ["range_chop_score", "calendar_risk_state"],
+  "preferred_timeframes": ["M15", "H1", "H4"],
+  "asset_scope": ["XAUUSD", "ALL"],
+  "risk_notes": ["Use as analytical context only.", "Avoid forcing a method when data quality is weak."],
+  "confidence": 0.72,
+  "metadata": {
+    "compiled_for": "knowledge_router_v1"
+  }
+}

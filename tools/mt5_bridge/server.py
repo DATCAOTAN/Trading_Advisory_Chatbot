@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -35,6 +36,17 @@ class MT5BridgeHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._send({"status": "UNAVAILABLE", "message": f"bridge error: {type(exc).__name__}"}, status=503)
 
+    def do_POST(self):  # noqa: N802
+        parsed = urlparse(self.path)
+        try:
+            if parsed.path == "/execution/write-skeleton/check":
+                self._discard_request_body()
+                self._send(_blocked_write_skeleton_response())
+                return
+            self._send({"status": "NOT_FOUND", "message": "unknown endpoint"}, status=404)
+        except Exception as exc:
+            self._send({"status": "UNAVAILABLE", "message": f"bridge error: {type(exc).__name__}"}, status=503)
+
     def log_message(self, fmt, *args):  # noqa: A003
         safe = str(fmt).replace("%s", "{}")
         try:
@@ -49,6 +61,44 @@ class MT5BridgeHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _discard_request_body(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            length = 0
+        if length > 0:
+            self.rfile.read(length)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _blocked_write_skeleton_response():
+    _ = (
+        _env_bool("MT5_BRIDGE_WRITE_SKELETON_ENABLED", True),
+        _env_bool("MT5_BRIDGE_WRITE_SKELETON_HARD_BLOCK", True),
+        _env_bool("MT5_BRIDGE_ORDER_SEND_ENABLED", False),
+        _env_bool("MT5_BRIDGE_LIVE_EXECUTION_ENABLED", False),
+    )
+    return {
+        "status": "BLOCKED",
+        "endpoint": "/execution/write-skeleton/check",
+        "write_skeleton_available": True,
+        "live_execution_allowed": False,
+        "order_send_allowed": False,
+        "execution_allowed": False,
+        "hard_live_block_required": True,
+        "reason": "MT5 bridge write endpoint skeleton is disabled by design",
+        "order_sent": False,
+        "ticket": None,
+        "deal": None,
+        "metadata_redacted": True,
+    }
 
 
 def _redact_payload(payload):
@@ -77,4 +127,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
-

@@ -1,0 +1,58 @@
+[
+  {
+    "regime": "TRENDING_UP",
+    "preferred_method_ids": ["al_brooks_trend_pullback"],
+    "supporting_method_ids": ["vpa_effort_vs_result", "risk_management_core"],
+    "avoided_method_ids": [],
+    "notes": ["Trend context can prioritize pullback analysis while keeping risk review available."]
+  },
+  {
+    "regime": "TRENDING_DOWN",
+    "preferred_method_ids": ["al_brooks_trend_pullback"],
+    "supporting_method_ids": ["vpa_effort_vs_result", "risk_management_core"],
+    "avoided_method_ids": [],
+    "notes": ["Trend context can prioritize pullback analysis while keeping risk review available."]
+  },
+  {
+    "regime": "PULLBACK_UPTREND",
+    "preferred_method_ids": ["al_brooks_trend_pullback"],
+    "supporting_method_ids": ["vpa_effort_vs_result", "risk_management_core"],
+    "avoided_method_ids": [],
+    "notes": ["Pullback regime should keep method selection analytical and bounded."]
+  },
+  {
+    "regime": "PULLBACK_DOWNTREND",
+    "preferred_method_ids": ["al_brooks_trend_pullback"],
+    "supporting_method_ids": ["vpa_effort_vs_result", "risk_management_core"],
+    "avoided_method_ids": [],
+    "notes": ["Pullback regime should keep method selection analytical and bounded."]
+  },
+  {
+    "regime": "RANGING",
+    "preferred_method_ids": ["vpa_effort_vs_result"],
+    "supporting_method_ids": ["risk_management_core"],
+    "avoided_method_ids": ["al_brooks_trend_pullback"],
+    "notes": ["Ranging conditions avoid trend-pullback as a primary method."]
+  },
+  {
+    "regime": "CHOPPY",
+    "preferred_method_ids": ["risk_management_core"],
+    "supporting_method_ids": ["vpa_effort_vs_result"],
+    "avoided_method_ids": ["al_brooks_trend_pullback"],
+    "notes": ["Choppy conditions prioritize caution and review."]
+  },
+  {
+    "regime": "NEWS_RISK",
+    "preferred_method_ids": ["risk_management_core"],
+    "supporting_method_ids": [],
+    "avoided_method_ids": ["al_brooks_trend_pullback", "vpa_effort_vs_result"],
+    "notes": ["News risk prioritizes calendar and risk context."]
+  },
+  {
+    "regime": "UNKNOWN",
+    "preferred_method_ids": ["risk_management_core"],
+    "supporting_method_ids": [],
+    "avoided_method_ids": [],
+    "notes": ["Unknown regime prioritizes data quality and review."]
+  }
+]

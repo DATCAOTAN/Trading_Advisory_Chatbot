@@ -168,10 +168,13 @@ def _position_from_mapping(item: Mapping[str, Any]) -> PositionSnapshot:
 
 
 def _config_symbol_map() -> Dict[str, str]:
-    mapping = {"XAUUSD": getattr(Config, "MT5_SYMBOL_MAP_XAUUSD", "XAUUSD")}
+    mapping = {"XAUUSD": getattr(Config, "MARKET_BROKER_SYMBOL_XAUUSD", getattr(Config, "MT5_SYMBOL_MAP_XAUUSD", "XAUUSD"))}
     for key, value in os.environ.items():
         if key.startswith("MT5_SYMBOL_MAP_") and value:
             mapping[key.replace("MT5_SYMBOL_MAP_", "").upper()] = value
+    for key, value in os.environ.items():
+        if key.startswith("MARKET_BROKER_SYMBOL_") and value:
+            mapping[key.replace("MARKET_BROKER_SYMBOL_", "").upper()] = value
     return mapping
 
 
@@ -200,4 +203,3 @@ def _safe_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
