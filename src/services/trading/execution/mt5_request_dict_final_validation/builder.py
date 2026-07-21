@@ -32,7 +32,26 @@ class MT5RequestDictFinalValidationBuilder:
         blockers: list[str] = []
         warnings: list[str] = []
         source_refs: list[str] = []
+        approved_values_required = bool(
+            getattr(dry_run_builder_boundary, "approved_semantic_values_required", False)
+        )
+        approved_values_present = bool(
+            getattr(dry_run_builder_boundary, "approved_semantic_values_present", False)
+        )
+        approved_values_hash = str(
+            getattr(dry_run_builder_boundary, "approved_semantic_values_hash", "")
+        )
+        approved_values_verified = bool(
+            approved_values_present
+            and getattr(dry_run_builder_boundary, "approved_semantic_values_verified", False) is True
+            and approved_values_hash
+            and getattr(dry_run_builder_boundary, "artifact_hash", "") == approved_values_hash
+        )
 
+        if approved_values_present and not approved_values_verified:
+            blockers.append("APPROVED_SEMANTIC_VALUES_INTEGRITY_FAILED")
+        if approved_values_required and not approved_values_verified:
+            blockers.append("APPROVED_SEMANTIC_VALUES_REQUIRED")
         if not self.config.enabled:
             blockers.append("INVALID_INPUT")
         if dry_run_builder_boundary is None:
@@ -93,6 +112,9 @@ class MT5RequestDictFinalValidationBuilder:
                     "report": getattr(dry_run_builder_validation_report, "validation_report_id", ""),
                     "categories": validated_categories,
                     "source_refs": source_refs,
+                    "approved_semantic_values_hash": (
+                        approved_values_hash if approved_values_verified else ""
+                    ),
                 },
                 sort_keys=True,
             ).encode("utf-8")
@@ -114,6 +136,10 @@ class MT5RequestDictFinalValidationBuilder:
             status=status,
             scope="BRIDGE_WRITE_SKELETON_CHECK_ONLY" if status == "FINAL_VALIDATION_PASSED" else "EXECUTION_NOT_ALLOWED",
             bridge_write_skeleton_check_allowed=status == "FINAL_VALIDATION_PASSED",
+            approved_semantic_values_required=approved_values_required,
+            approved_semantic_values_present=approved_values_present,
+            approved_semantic_values_verified=approved_values_verified,
+            approved_semantic_values_hash=(approved_values_hash if approved_values_verified else ""),
             source_dry_run_request_dict_id=getattr(dry_run_builder_boundary, "dry_run_request_dict_id", ""),
             source_dry_run_request_dict_validation_report_id=getattr(dry_run_builder_validation_report, "validation_report_id", ""),
             validated_fields=fields,
@@ -121,7 +147,7 @@ class MT5RequestDictFinalValidationBuilder:
             validated_field_categories=validated_categories,
             missing_field_categories=missing_categories,
             invalid_field_categories=invalid_categories,
-            artifact_hash=base_hash,
+            artifact_hash=(approved_values_hash if approved_values_verified else base_hash),
             idempotency_key=idempotency_key,
             expires_at=expires_at,
             blockers=list(dict.fromkeys(blockers)),

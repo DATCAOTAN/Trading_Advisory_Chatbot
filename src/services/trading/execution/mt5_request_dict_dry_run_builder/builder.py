@@ -140,6 +140,7 @@ class MT5RequestDictDryRunBuilder:
         simulated_receipt=None,
         current_time: datetime | None = None,
         existing_idempotency_keys: Iterable[str] | None = None,
+        require_approved_semantic_values: bool = False,
     ) -> MT5RequestDictDryRunBuilderBoundary:
         now = current_time or datetime.now(timezone.utc)
         created_at = now.isoformat()
@@ -184,7 +185,27 @@ class MT5RequestDictDryRunBuilder:
             + list(getattr(simulated_contract, "source_refs", []) or [])
             + list(getattr(simulated_receipt, "source_refs", []) or [])
         )
+        approved_parameters = getattr(approval_lock, "approved_semantic_parameters", None)
+        approved_values_hash = (
+            approved_parameters.canonical_values_hash if approved_parameters is not None else ""
+        )
+        approved_values_verified = bool(
+            approved_parameters is not None
+            and callable(getattr(approval_lock, "approved_semantic_integrity_valid", None))
+            and approval_lock.approved_semantic_integrity_valid()
+            and getattr(approval_lock_validation, "valid", False) is True
+            and getattr(parameterization, "artifact_hash", "") == approved_values_hash
+            and getattr(parameterization_validation, "valid", False) is True
+            and getattr(final_review, "artifact_hash", "") == approved_values_hash
+            and getattr(final_review_validation, "valid", False) is True
+            and getattr(request_draft, "artifact_hash", "") == approved_values_hash
+            and getattr(request_draft_validation_report, "valid", False) is True
+            and getattr(draft_final_approval, "artifact_hash", "") == approved_values_hash
+            and getattr(draft_final_approval_validation_report, "valid", False) is True
+        )
         artifact_hash = (
+            approved_values_hash if approved_values_verified else ""
+        ) or (
             getattr(draft_final_approval, "artifact_hash", "")
             or getattr(request_draft, "artifact_hash", "")
             or getattr(dry_run_validation, "artifact_hash", "")
@@ -205,11 +226,16 @@ class MT5RequestDictDryRunBuilder:
                     base_idempotency,
                     getattr(draft_final_approval, "final_approval_id", ""),
                     getattr(draft_final_approval_validation_report, "validation_report_id", ""),
+                    approved_values_hash if approved_values_verified else "",
                 ]
             )
         )
 
         blockers: list[str] = []
+        if approved_parameters is not None and not approved_values_verified:
+            blockers.append("APPROVED_SEMANTIC_VALUES_INTEGRITY_FAILED")
+        if require_approved_semantic_values and not approved_values_verified:
+            blockers.append("APPROVED_SEMANTIC_VALUES_REQUIRED")
         if not self.config.enabled:
             blockers.append("INVALID_INPUT")
         if draft_final_approval is None and self.config.require_draft_final_approval:
@@ -373,6 +399,10 @@ class MT5RequestDictDryRunBuilder:
             order_request_mapping_allowed=False,
             broker_mapping_created=False,
             raw_values_stored=False,
+            approved_semantic_values_required=require_approved_semantic_values,
+            approved_semantic_values_present=approved_parameters is not None,
+            approved_semantic_values_verified=approved_values_verified,
+            approved_semantic_values_hash=(approved_values_hash if approved_values_verified else ""),
             executable_order_created=False,
             source_draft_final_approval_id=getattr(draft_final_approval, "final_approval_id", ""),
             source_draft_final_approval_validation_report_id=getattr(draft_final_approval_validation_report, "validation_report_id", ""),

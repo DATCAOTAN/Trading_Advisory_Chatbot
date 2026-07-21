@@ -93,6 +93,7 @@ class LiveOrderContractParameterizationBuilder:
         simulated_receipt=None,
         current_time: datetime | None = None,
         existing_idempotency_keys: Iterable[str] | None = None,
+        require_approved_semantic_values: bool = False,
     ) -> LiveOrderContractParameterizationBoundary:
         now = current_time or datetime.now(timezone.utc)
         created_at = now.isoformat()
@@ -128,8 +129,16 @@ class LiveOrderContractParameterizationBuilder:
             + list(getattr(simulated_contract, "source_refs", []) or [])
             + list(getattr(simulated_receipt, "source_refs", []) or [])
         )
+        approved_parameters = getattr(approval_lock, "approved_semantic_parameters", None)
+        approved_integrity_valid = bool(
+            approved_parameters is not None
+            and callable(getattr(approval_lock, "approved_semantic_integrity_valid", None))
+            and approval_lock.approved_semantic_integrity_valid()
+        )
+        approved_values_hash = approved_parameters.canonical_values_hash if approved_integrity_valid else ""
         artifact_hash = (
-            getattr(approval_lock, "artifact_hash", "")
+            approved_values_hash
+            or getattr(approval_lock, "artifact_hash", "")
             or getattr(value_proposal, "artifact_hash", "")
             or getattr(parameter_draft, "artifact_hash", "")
             or getattr(parameter_source_boundary, "artifact_hash", "")
@@ -159,11 +168,16 @@ class LiveOrderContractParameterizationBuilder:
                     getattr(approval_lock_validation, "validation_report_id", ""),
                     getattr(value_proposal, "proposal_id", ""),
                     getattr(contract_skeleton, "contract_skeleton_id", ""),
+                    approved_values_hash,
                 ]
             )
         )
 
         blockers: list[str] = []
+        if approved_parameters is not None and not approved_integrity_valid:
+            blockers.append("APPROVED_SEMANTIC_VALUES_INTEGRITY_FAILED")
+        if require_approved_semantic_values and not approved_integrity_valid:
+            blockers.append("APPROVED_SEMANTIC_VALUES_REQUIRED")
         if not self.config.enabled:
             blockers.append("INVALID_INPUT")
         if approval_lock is None and self.config.require_approval_lock:

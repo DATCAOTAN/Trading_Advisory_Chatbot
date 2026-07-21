@@ -65,6 +65,7 @@ class HumanValueApprovalLockService:
         simulated_receipt=None,
         confirmation_phrase: str | None = None,
         current_time=None,
+        approved_semantic_values=None,
     ) -> HumanValueApprovalLockServiceResult:
         started = perf_counter()
         warning_parts: list[str] = []
@@ -93,6 +94,7 @@ class HumanValueApprovalLockService:
             current_time=current_time,
             existing_idempotency_keys=existing_keys,
             existing_confirmation_ids=existing_confirmation_ids,
+            approved_semantic_values=approved_semantic_values,
         )
         build_latency = (perf_counter() - build_started) * 1000
         validation_started = perf_counter()

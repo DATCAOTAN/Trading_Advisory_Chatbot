@@ -105,6 +105,7 @@ class LiveOrderContractFinalReviewBuilder:
         confirmation: LiveOrderContractFinalReviewConfirmation | None = None,
         current_time: datetime | None = None,
         existing_idempotency_keys: Iterable[str] | None = None,
+        require_approved_semantic_values: bool = False,
     ) -> LiveOrderContractFinalReview:
         now = current_time or datetime.now(timezone.utc)
         created_at = now.isoformat()
@@ -141,8 +142,17 @@ class LiveOrderContractFinalReviewBuilder:
             + list(getattr(simulated_receipt, "source_refs", []) or [])
         )
         confirmation = confirmation or self.confirmation_service.confirm(confirmation_phrase, now, source_refs)
+        approved_parameters = getattr(approval_lock, "approved_semantic_parameters", None)
+        approved_integrity_valid = bool(
+            approved_parameters is not None
+            and callable(getattr(approval_lock, "approved_semantic_integrity_valid", None))
+            and approval_lock.approved_semantic_integrity_valid()
+            and getattr(parameterization, "artifact_hash", "") == approved_parameters.canonical_values_hash
+        )
+        approved_values_hash = approved_parameters.canonical_values_hash if approved_integrity_valid else ""
         artifact_hash = (
-            getattr(parameterization, "artifact_hash", "")
+            approved_values_hash
+            or getattr(parameterization, "artifact_hash", "")
             or getattr(approval_lock, "artifact_hash", "")
             or getattr(value_proposal, "artifact_hash", "")
             or getattr(parameter_draft, "artifact_hash", "")
@@ -168,11 +178,16 @@ class LiveOrderContractFinalReviewBuilder:
                     base_idempotency,
                     getattr(parameterization, "parameterization_id", ""),
                     getattr(parameterization_validation, "validation_report_id", ""),
+                    approved_values_hash,
                 ]
             )
         )
 
         blockers: list[str] = []
+        if approved_parameters is not None and not approved_integrity_valid:
+            blockers.append("APPROVED_SEMANTIC_VALUES_HASH_MISMATCH")
+        if require_approved_semantic_values and not approved_integrity_valid:
+            blockers.append("APPROVED_SEMANTIC_VALUES_REQUIRED")
         if not self.config.enabled:
             blockers.append("INVALID_INPUT")
         if parameterization is None and self.config.require_parameterization:

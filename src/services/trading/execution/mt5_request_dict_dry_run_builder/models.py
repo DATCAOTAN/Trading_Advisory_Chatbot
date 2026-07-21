@@ -208,6 +208,10 @@ class MT5RequestDictDryRunBuilderBoundary:
     order_request_mapping_allowed: bool = False
     broker_mapping_created: bool = False
     raw_values_stored: bool = False
+    approved_semantic_values_required: bool = False
+    approved_semantic_values_present: bool = False
+    approved_semantic_values_verified: bool = False
+    approved_semantic_values_hash: str = ""
     executable_order_created: bool = False
     source_draft_final_approval_id: str = ""
     source_draft_final_approval_validation_report_id: str = ""
@@ -268,6 +272,10 @@ class MT5RequestDictDryRunBuilderBoundary:
             "order_request_mapping_allowed": False,
             "broker_mapping_created": False,
             "raw_values_stored": False,
+            "approved_semantic_values_required": bool(self.approved_semantic_values_required),
+            "approved_semantic_values_present": bool(self.approved_semantic_values_present),
+            "approved_semantic_values_verified": bool(self.approved_semantic_values_verified),
+            "approved_semantic_values_hash": self.approved_semantic_values_hash,
             "executable_order_created": False,
             "source_draft_final_approval_id": self.source_draft_final_approval_id,
             "source_draft_final_approval_validation_report_id": self.source_draft_final_approval_validation_report_id,

@@ -76,11 +76,14 @@ The immediate development focus is no longer broad RAG tuning, UI polish, or add
 
 The latest completed sprint is:
 
-`MT5 Live Adapter Disabled + Pre-Submit Gate`
+`Sprint 34A - Immutable Approved Semantic Execution Parameters`
 
 Current validated state reported by the workspace:
 
 ```text
+approved_semantic_execution_parameters=FOCUSED_VERIFIED
+canonical_values_hash_verified=true
+approval_lock_hash_binding_verified=true
 adapter_status=BLOCKED_BY_DISABLED_ADAPTER
 pre_submit_status=PASSED_DISABLED_PRE_SUBMIT_CHECK
 validation_valid=true
@@ -102,6 +105,10 @@ hard_live_block_required=true
 
 Meaning:
 
+- one immutable, typed semantic execution-parameter contract now belongs to the existing human approval and lock flow;
+- deterministic canonical hashing binds the exact approved values to approval, lock, source, and timestamps;
+- downstream parameterization, final review, dry-run request-dict, and final validation can require and verify the same hash;
+- changed or reconstructed values fail the concrete approved-value path closed;
 - the app-side live adapter shape exists;
 - it is intentionally disabled;
 - the bridge write-skeleton endpoint is reachable;
@@ -191,6 +198,7 @@ The architecture should eventually support both through an explicit account-envi
 - kill switch check;
 - check-only idempotency;
 - pre-submit safety gate;
+- immutable approved semantic execution parameters with deterministic integrity hashing;
 - append-only journals.
 
 ## Not currently implemented
@@ -1066,6 +1074,7 @@ Real MT5 Market Data
 → Human-Reviewed Live Parameter Draft
 → Controlled Live Parameter Value Proposal
 → Human Value Approval and Lock Boundary
+→ Immutable Approved Semantic Execution Parameters
 → Live Order Contract Parameterization Boundary
 → Contract Parameter Validation and Final Human Review
 → Pre-MT5 Order Request Mapping Boundary
@@ -1119,11 +1128,12 @@ The project has progressed through the following engineering milestones:
 31. MT5 Request Dict Dry-Run Builder Boundary
 32. MT5 Request Dict Final Validation and Bridge Write Endpoint Skeleton
 33. MT5 Live Adapter Disabled and Pre-Submit Gate
+34A. Immutable Approved Semantic Execution Parameters
 
 Current milestone:
 
 ```text
-33 complete
+34A complete
 ```
 
 ---
@@ -1487,6 +1497,35 @@ Run it for:
 
 # 22. REPORTED LATEST TEST STATE
 
+Latest immutable approved semantic execution parameter sprint:
+
+```powershell
+.\venv\Scripts\python.exe -m pytest scripts\test_approved_semantic_execution_parameters.py -q
+```
+
+Reported result:
+
+```text
+19 passed
+```
+
+Adjacent focused groups reported for the same working tree:
+
+```text
+proposal/draft/approval: 198 passed
+parameterization/final review: 129 passed
+request-draft/dry-run/final-validation/pre-submit: 188 passed
+focused total: 534 passed
+compileall on changed paths: passed
+docker-compose config: passed
+docker-compose restart app: passed
+Streamlit health: HTTP 200, ok
+disabled pre-submit live check: passed after starting the existing local bridge
+static scan: 0 MetaTrader5 imports under src; 0 real order_send calls under src/tools
+```
+
+Full scripts regression was not run for Sprint 34A.
+
 Latest pre-submit sprint:
 
 ```powershell
@@ -1568,7 +1607,9 @@ Until the first controlled-demo execution sprint explicitly changes them:
 - disabled adapter returns blocked receipt;
 - kill switch engaged;
 - idempotency check-only;
-- all execution flags false.
+- all execution flags false;
+- approved semantic values do not grant execution permission;
+- exact approved values remain redacted from general journals, formatters, and documentation.
 
 Allowed harmless field/config names:
 
@@ -1615,7 +1656,9 @@ The current system can:
 18. evaluate a kill switch;
 19. register check-only idempotency;
 20. run a disabled pre-submit gate;
-21. append safe journal records.
+21. build and integrity-check one immutable approved semantic execution-parameter contract;
+22. propagate its canonical hash through parameterization, final review, dry-run request-dict, and final validation;
+23. append safe journal records.
 
 ---
 
@@ -1724,21 +1767,23 @@ Verify whether:
 
 ---
 
-# 27. IMMEDIATE NEXT MILESTONE: CONTROLLED DEMO SUBMISSION
+# 27. IMMEDIATE NEXT MILESTONE: CONTROLLED DEMO BRIDGE SUBMISSION PREREQUISITES
 
 The next engineering milestone is:
 
-`Controlled Demo order_send Integration`
+`Controlled Demo Bridge Submission Prerequisites`
 
-This is the first milestone where a real MT5 write call may exist.
+This milestone must complete the bridge-side trust and submission prerequisites before any real MT5 write call is introduced.
 
 ## Required design properties
 
 - demo/local account only;
-- one-shot request;
+- protected semantic-value transport from the approved contract;
+- independent demo-account classification;
+- one-shot request schema and freshness checks;
 - explicit configuration;
 - no autonomous trigger;
-- narrow bridge endpoint;
+- narrow bridge endpoint design;
 - app-side kill switch;
 - bridge-side kill switch;
 - idempotency reservation, not only check;
@@ -1749,6 +1794,8 @@ This is the first milestone where a real MT5 write call may exist.
 - no automatic retry;
 - safe response redaction;
 - record unknown state when timeout makes outcome uncertain.
+
+This prerequisite milestone must keep `order_send` absent and all live-submission flags disabled.
 
 ## The bridge must not trust the app
 
@@ -1787,6 +1834,19 @@ Before adding the first real call:
 The remaining work should be divided into release milestones.
 
 ## Release A — Controlled Demo Execution MVP
+
+### Sprint 34A - Immutable Approved Semantic Execution Parameters (completed)
+
+Delivered:
+
+- one typed immutable approved semantic-value contract in the existing approval/lock flow;
+- deterministic canonical hash binding and mutation detection;
+- downstream hash recognition without execution permission;
+- redacted general serialization and unchanged execution hard blocks.
+
+### Next prerequisite - Controlled Demo Bridge Submission Prerequisites
+
+Deliver bridge-side trust controls, protected value transport, demo-account policy, and idempotency reservation while keeping real submission disabled.
 
 ### Sprint 34 — Controlled Demo `order_send` Integration
 
@@ -2260,4 +2320,4 @@ Inspect the repository, verify the current state, and cite exact files and symbo
 
 # 35. CURRENT ONE-PARAGRAPH SUMMARY
 
-`Trading_Advisory_Chatbot` is a large RAG, market-context, decision, and MT5 integration codebase whose execution side has progressed through 33 staged milestones. The current system reads real MT5 market data through a host-side bridge, builds structured intelligence and execution-preparation artifacts, final-validates a schema-only MT5 request boundary, reaches a blocked write-skeleton endpoint, and passes a disabled pre-submit check with kill switch and check-only idempotency. It cannot yet submit an order. The immediate objective is a one-shot controlled-demo submission with bridge-side independent validation and immediate journaling, followed by reconciliation and failure recovery. The long-term objective is an autonomous demo-first MT5 system in which prompts express operating intent, structured decision logic proposes actions, deterministic policy authorizes or blocks them, the bridge independently validates them, and a lifecycle supervisor reconciles and manages positions. Live-account operation is a separate explicit promotion after autonomous demo soak testing; no system component may promise guaranteed profit or bypass the policy chain.
+`Trading_Advisory_Chatbot` is a large RAG, market-context, decision, and MT5 integration codebase whose execution side has progressed through Sprint 34A. The current system reads real MT5 market data through a host-side bridge, builds structured intelligence and execution-preparation artifacts, can bind exact approved semantic values to an immutable canonical hash, final-validates a non-submitting request boundary, reaches a blocked write-skeleton endpoint, and passes a disabled pre-submit check with kill switch and check-only idempotency. It cannot yet submit an order. The immediate objective is to complete controlled-demo bridge submission prerequisites, then introduce a separately approved one-shot demo submission followed by reconciliation and failure recovery. The long-term objective is an autonomous demo-first MT5 system in which prompts express operating intent, structured decision logic proposes actions, deterministic policy authorizes or blocks them, the bridge independently validates them, and a lifecycle supervisor reconciles and manages positions. Live-account operation is a separate explicit promotion after autonomous demo soak testing; no system component may promise guaranteed profit or bypass the policy chain.

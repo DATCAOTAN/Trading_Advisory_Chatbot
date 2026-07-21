@@ -27,6 +27,8 @@ MT5_REQUEST_DICT_FINAL_VALIDATION_BLOCK_REASONS = {
     "MISSING_SOURCE_REFS",
     "MISSING_IDEMPOTENCY",
     "MISSING_REQUIRED_DRY_RUN_FIELDS",
+    "APPROVED_SEMANTIC_VALUES_REQUIRED",
+    "APPROVED_SEMANTIC_VALUES_INTEGRITY_FAILED",
     "RAW_VALUES_NOT_ALLOWED",
     "REAL_MT5_PAYLOAD_NOT_ALLOWED",
     "BROKER_SUBMITTABLE_REQUEST_DICT_NOT_ALLOWED",
@@ -125,6 +127,10 @@ class MT5RequestDictFinalValidationBoundary:
     broker_submission_created: bool = False
     order_sent: bool = False
     hard_live_block_required: bool = True
+    approved_semantic_values_required: bool = False
+    approved_semantic_values_present: bool = False
+    approved_semantic_values_verified: bool = False
+    approved_semantic_values_hash: str = ""
     source_dry_run_request_dict_id: str = ""
     source_dry_run_request_dict_validation_report_id: str = ""
     validated_fields: List[MT5RequestDictFinalValidationField] = field(default_factory=list)
@@ -150,6 +156,7 @@ class MT5RequestDictFinalValidationBoundary:
             "status": self.status if self.status in MT5_REQUEST_DICT_FINAL_VALIDATION_STATUSES else "UNKNOWN",
             "scope": self.scope if self.scope in MT5_REQUEST_DICT_FINAL_VALIDATION_SCOPES else "UNKNOWN",
             "bridge_write_skeleton_check_allowed": bool(self.bridge_write_skeleton_check_allowed),
+
             "live_execution_allowed": False,
             "order_send_allowed": False,
             "execution_allowed": False,
@@ -160,6 +167,10 @@ class MT5RequestDictFinalValidationBoundary:
             "broker_submission_created": False,
             "order_sent": False,
             "hard_live_block_required": True,
+            "approved_semantic_values_required": bool(self.approved_semantic_values_required),
+            "approved_semantic_values_present": bool(self.approved_semantic_values_present),
+            "approved_semantic_values_verified": bool(self.approved_semantic_values_verified),
+            "approved_semantic_values_hash": self.approved_semantic_values_hash,
             "source_dry_run_request_dict_id": self.source_dry_run_request_dict_id,
             "source_dry_run_request_dict_validation_report_id": self.source_dry_run_request_dict_validation_report_id,
             "validated_fields": [item.as_dict() for item in self.validated_fields],
@@ -210,6 +221,11 @@ class MT5RequestDictFinalValidationReport:
             "source_final_validation_id": self.source_final_validation_id,
             "valid": bool(self.valid),
             "bridge_write_skeleton_check_allowed": bool(self.bridge_write_skeleton_check_allowed),
+            "concrete_value_created": bool(
+                self.valid
+                and self.validation_checks.get("approved_semantic_values_present", False)
+                and self.validation_checks.get("approved_semantic_values_integrity", False)
+            ),
             "live_execution_allowed": False,
             "order_send_allowed": False,
             "execution_allowed": False,
@@ -271,6 +287,7 @@ class MT5RequestDictFinalValidationJournalRecord:
             "status": self.status,
             "scope": self.scope,
             "bridge_write_skeleton_check_allowed": bool(self.bridge_write_skeleton_check_allowed),
+
             "live_execution_allowed": False,
             "order_send_allowed": False,
             "execution_allowed": False,

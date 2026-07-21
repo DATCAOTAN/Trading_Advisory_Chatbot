@@ -20,6 +20,12 @@ class MT5RequestDictFinalValidationGate:
         fields = list(boundary.validated_fields or [])
         missing = list(boundary.missing_field_categories or [])
         invalid = list(boundary.invalid_field_categories or [])
+        approved_integrity = bool(
+            boundary.approved_semantic_values_present
+            and boundary.approved_semantic_values_verified
+            and boundary.approved_semantic_values_hash
+            and boundary.artifact_hash == boundary.approved_semantic_values_hash
+        )
         checks = {
             "source_boundary_present": bool(boundary.source_dry_run_request_dict_id),
             "source_report_present": bool(boundary.source_dry_run_request_dict_validation_report_id),
@@ -30,6 +36,9 @@ class MT5RequestDictFinalValidationGate:
             "no_invalid_fields": not invalid,
             "no_payload_or_execution": _safety_flags_false(boundary),
             "hard_block_required": boundary.hard_live_block_required is True,
+            "approved_semantic_values_integrity": (
+                not boundary.approved_semantic_values_required or approved_integrity
+            ),
         }
         valid = all(checks.values()) and not boundary.blockers and boundary.status == "FINAL_VALIDATION_PASSED"
         report = MT5RequestDictFinalValidationReport(
@@ -41,7 +50,11 @@ class MT5RequestDictFinalValidationGate:
             validated_fields_count=len(fields),
             missing_fields_count=len(missing),
             invalid_fields_count=len(invalid),
-            validation_checks=checks,
+            validation_checks={
+                **checks,
+                "approved_semantic_values_present": boundary.approved_semantic_values_present,
+                "approved_semantic_values_verified": approved_integrity,
+            },
             blockers=[] if valid else list(dict.fromkeys(list(boundary.blockers) + [key for key, passed in checks.items() if not passed])),
             warnings=list(boundary.warnings),
             source_refs=list(boundary.source_refs),

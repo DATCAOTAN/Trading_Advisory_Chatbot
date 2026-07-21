@@ -3,13 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from src.services.trading.execution.live_value_approval_lock.confirmation import (
     HumanValueApprovalConfirmationService,
 )
 from src.services.trading.execution.live_value_approval_lock.models import (
     REQUIRED_HUMAN_VALUE_SLOT_LOCK_TYPES,
+    ApprovedSemanticExecutionParameters,
     HumanValueApprovalLock,
     HumanValueApprovalSlotLock,
 )
@@ -87,6 +88,7 @@ class HumanValueApprovalLockBuilder:
         current_time: datetime | None = None,
         existing_idempotency_keys: Iterable[str] | None = None,
         existing_confirmation_ids: Iterable[str] | None = None,
+        approved_semantic_values: Mapping[str, object] | None = None,
     ) -> HumanValueApprovalLock:
         now = current_time or datetime.now(timezone.utc)
         created_at = now.isoformat()
@@ -157,8 +159,27 @@ class HumanValueApprovalLockBuilder:
                 ]
             )
         )
+        approval_lock_id = f"human_value_approval_lock_{_stable_hash(f'{idempotency_key}|{created_at}')[:16]}"
+        approved_parameters = None
+        approved_parameters_invalid = False
+        if approved_semantic_values is not None:
+            try:
+                approved_parameters = ApprovedSemanticExecutionParameters.from_mapping(
+                    approved_semantic_values,
+                    approval_artifact_ref=confirmation.confirmation_id,
+                    lock_artifact_ref=approval_lock_id,
+                    source_artifact_ref=str(getattr(value_proposal, "proposal_id", "")),
+                    approved_at=confirmation.created_at,
+                    locked_at=created_at,
+                )
+                confirmation.approved_semantic_values_hash = approved_parameters.canonical_values_hash
+                artifact_hash = approved_parameters.canonical_values_hash
+            except (TypeError, ValueError):
+                approved_parameters_invalid = True
 
         blockers: list[str] = []
+        if approved_parameters_invalid:
+            blockers.append("INVALID_APPROVED_SEMANTIC_VALUES")
         if not self.config.enabled:
             blockers.append("INVALID_INPUT")
         if value_proposal is None and self.config.require_value_proposal:
@@ -258,7 +279,7 @@ class HumanValueApprovalLockBuilder:
         scope = "CONTRACT_PARAMETERIZATION_ONLY" if allowed else "EXECUTION_NOT_ALLOWED"
         locked_types = [slot.slot_type for slot in slot_locks if allowed and slot.approved_for_future_parameterization]
         lock = HumanValueApprovalLock(
-            approval_lock_id=f"human_value_approval_lock_{_stable_hash(f'{idempotency_key}|{created_at}')[:16]}",
+            approval_lock_id=approval_lock_id,
             created_at=created_at,
             mode=getattr(value_proposal, "mode", getattr(parameter_draft, "mode", "REVIEW_ONLY")),
             symbol=getattr(value_proposal, "symbol", getattr(parameter_draft, "symbol", "")),
@@ -277,6 +298,10 @@ class HumanValueApprovalLockBuilder:
             value_lock_required=True,
             human_review_required=True,
             raw_values_stored=False,
+            approved_semantic_parameters=approved_parameters,
+            approved_semantic_values_hash=(approved_parameters.canonical_values_hash if approved_parameters else ""),
+            approval_value_hash=(approved_parameters.canonical_values_hash if approved_parameters else ""),
+            lock_value_hash=(approved_parameters.canonical_values_hash if approved_parameters else ""),
             executable_order_created=False,
             source_value_proposal_id=getattr(value_proposal, "proposal_id", ""),
             source_value_proposal_validation_id=getattr(value_proposal_validation, "validation_report_id", ""),

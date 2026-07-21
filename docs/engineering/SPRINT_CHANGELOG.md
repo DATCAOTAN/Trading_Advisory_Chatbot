@@ -124,3 +124,40 @@ Commit:
 - ...
 
 ---
+
+### Sprint 34A - Immutable Approved Semantic Execution Parameters
+
+Date: 2026-07-21
+Verification: `FOCUSED_AND_LIVE_PASS`
+Commit: included in this commit
+
+#### Implemented
+
+- Added one frozen, typed approved semantic execution-parameter contract to the existing approval/lock module.
+- Canonicalized 12 allow-listed semantic fields and bound them to approval, lock, source, and timestamps with SHA-256.
+- Made value mutation, reference mutation, missing fields, extra fields, unsupported semantics, and non-finite numerics fail closed.
+- Propagated and verified the same hash through parameterization, final review, dry-run request-dict, and final validation.
+- Kept legacy schema-only behavior compatible; the explicit approved-value path must opt in and fails closed when values are absent.
+- Kept exact values out of general serialization, formatters, journals, logs, and documentation.
+
+#### Verification
+
+- New focused tests: 19 passed.
+- Neighboring focused tests: 198 + 129 + 188 = 515 passed; total focused tests: 534 passed.
+- Compileall on changed paths: passed.
+- Static scan: 0 `MetaTrader5` imports under `src`; 0 real `order_send` calls under `src`/`tools`; bridge code unchanged.
+- Docker Compose config and app restart: passed; Streamlit health returned HTTP 200 `ok`.
+- Disabled pre-submit live check: passed with bridge reachable and `BLOCKED`, kill switch engaged, and no order sent.
+- Full regression: NOT RUN.
+
+#### Current state
+
+- Approved semantic values can be integrity-bound without granting execution permission.
+- Live submission, execution, and `order_send` remain disabled; ticket/deal remain none.
+
+#### Known limitations / next step
+
+- No protected persisted value store, bridge submission schema, account classification, idempotency reservation, result classification, or reconciliation exists yet.
+- Next: Controlled Demo Bridge Submission Prerequisites.
+
+---
