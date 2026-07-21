@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import hmac
 from time import perf_counter
 
 from src.services.trading.execution.mt5_bridge_write_skeleton import MT5BridgeWriteSkeletonService
+from src.services.trading.execution.mt5_bridge_write_skeleton.client import MT5BridgeWriteSkeletonClient
+from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled import (
+    MT5ControlledExecutionReceipt,
+    MT5ControlledExecutionRequest,
+)
 from src.services.trading.execution.mt5_live_adapter_pre_submit.models import (
     MT5LiveAdapterDisabledReceipt,
     hash_text,
@@ -12,9 +18,18 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.policy import MT
 
 
 class MT5LiveAdapterDisabled:
-    def __init__(self, config: MT5LiveAdapterPreSubmitConfig | None = None, bridge_service: MT5BridgeWriteSkeletonService | None = None):
+    def __init__(
+        self,
+        config: MT5LiveAdapterPreSubmitConfig | None = None,
+        bridge_service: MT5BridgeWriteSkeletonService | None = None,
+        execution_client: MT5BridgeWriteSkeletonClient | None = None,
+    ):
         self.config = config or MT5LiveAdapterPreSubmitConfig.from_config()
         self.bridge_service = bridge_service or MT5BridgeWriteSkeletonService()
+        self.execution_client = execution_client or MT5BridgeWriteSkeletonClient(
+            self.config.bridge_url,
+            timeout_seconds=self.config.controlled_execution_http_timeout_seconds,
+        )
 
     def health_check(self) -> dict:
         return {
@@ -28,6 +43,111 @@ class MT5LiveAdapterDisabled:
 
     def check_bridge_write_skeleton(self):
         return self.bridge_service.run()
+
+    def capture_account_context(self) -> dict:
+        payload = self.execution_client.account_context()
+        fingerprint = str(payload.get("account_context_fingerprint", ""))
+        if payload.get("status") != "OK" or not fingerprint:
+            raise ValueError("MT5 account context is unavailable")
+        return {
+            "account_context_fingerprint": fingerprint,
+            "account_id_hash": str(payload.get("account_id_hash", "")),
+            "server_redacted": str(payload.get("server_redacted", "")),
+            "currency": payload.get("currency"),
+            "trade_mode": payload.get("trade_mode"),
+            "redacted": True,
+        }
+
+    def submit_controlled(
+        self,
+        approval_lock,
+        final_validation,
+        final_validation_report,
+        pre_submit_report,
+        *,
+        expected_account_context_fingerprint: str,
+        typed_confirmation: str,
+    ) -> MT5ControlledExecutionReceipt:
+        blocker = self._controlled_submission_blocker(typed_confirmation)
+        if blocker:
+            return MT5ControlledExecutionReceipt("BLOCKED", "NOT_RESERVED", False, False, False, blocker)
+        current_context = self.capture_account_context()
+        if not hmac.compare_digest(
+            current_context["account_context_fingerprint"],
+            str(expected_account_context_fingerprint or ""),
+        ):
+            return MT5ControlledExecutionReceipt(
+                "BLOCKED", "NOT_RESERVED", False, False, False, "ACCOUNT_CONTEXT_CHANGED"
+            )
+        request = MT5ControlledExecutionRequest.from_artifacts(
+            approval_lock,
+            final_validation,
+            final_validation_report,
+            pre_submit_report,
+            expected_account_context_fingerprint=current_context["account_context_fingerprint"],
+            human_confirmation_phrase=typed_confirmation,
+        )
+        try:
+            payload = self.execution_client.submit_controlled(
+                request.as_protected_dict(), self.config.execution_auth_token
+            )
+        except Exception:
+            return MT5ControlledExecutionReceipt(
+                "UNKNOWN", "RESULT_UNKNOWN", False, False, False, "BRIDGE_RESULT_UNKNOWN"
+            )
+        return MT5ControlledExecutionReceipt.from_payload(payload)
+
+    def submit_prepared_request(
+        self, request: MT5ControlledExecutionRequest, *, typed_confirmation: str
+    ) -> MT5ControlledExecutionReceipt:
+        blocker = self._controlled_submission_blocker(typed_confirmation)
+        if blocker:
+            return MT5ControlledExecutionReceipt("BLOCKED", "NOT_RESERVED", False, False, False, blocker)
+        if not hmac.compare_digest(request.human_confirmation_phrase, typed_confirmation.strip()):
+            return MT5ControlledExecutionReceipt(
+                "BLOCKED", "NOT_RESERVED", False, False, False, "HUMAN_CONFIRMATION_INVALID"
+            )
+        expected_ref = hash_text(
+            f"{typed_confirmation.strip()}|{request.idempotency_key}|{request.expected_account_context_fingerprint}"
+        )
+        if not hmac.compare_digest(request.human_confirmation_reference, expected_ref):
+            return MT5ControlledExecutionReceipt(
+                "BLOCKED", "NOT_RESERVED", False, False, False, "HUMAN_CONFIRMATION_INVALID"
+            )
+        current_context = self.capture_account_context()
+        if not hmac.compare_digest(
+            current_context["account_context_fingerprint"], request.expected_account_context_fingerprint
+        ):
+            return MT5ControlledExecutionReceipt(
+                "BLOCKED", "NOT_RESERVED", False, False, False, "ACCOUNT_CONTEXT_CHANGED"
+            )
+        try:
+            payload = self.execution_client.submit_controlled(
+                request.as_protected_dict(), self.config.execution_auth_token
+            )
+        except Exception:
+            return MT5ControlledExecutionReceipt(
+                "UNKNOWN", "RESULT_UNKNOWN", False, False, False, "BRIDGE_RESULT_UNKNOWN"
+            )
+        return MT5ControlledExecutionReceipt.from_payload(payload)
+
+    def _controlled_submission_blocker(self, typed_confirmation: str) -> str:
+        if (
+            not self.config.controlled_execution_enabled
+            or not self.config.live_adapter_enabled
+            or self.config.live_adapter_hard_block
+            or not self.config.allow_live_submission
+            or not self.config.allow_order_send
+            or self.config.kill_switch_engaged
+        ):
+            return "CONTROLLED_EXECUTION_DISABLED"
+        if not self.config.execution_auth_token:
+            return "CONTROLLED_EXECUTION_AUTHENTICATION_MISSING"
+        if not hmac.compare_digest(
+            str(typed_confirmation or "").strip(), self.config.execution_confirmation_phrase
+        ):
+            return "HUMAN_CONFIRMATION_INVALID"
+        return ""
 
     def pre_submit_check(self) -> MT5LiveAdapterDisabledReceipt:
         bridge_result = self.check_bridge_write_skeleton()

@@ -76,67 +76,58 @@ The immediate development focus is no longer broad RAG tuning, UI polish, or add
 
 The latest completed sprint is:
 
-`Sprint 34A - Immutable Approved Semantic Execution Parameters`
+`Sprint 34B - Controlled MT5 Execution Integration`
 
 Current validated state reported by the workspace:
 
 ```text
-approved_semantic_execution_parameters=FOCUSED_VERIFIED
-canonical_values_hash_verified=true
-approval_lock_hash_binding_verified=true
-adapter_status=BLOCKED_BY_DISABLED_ADAPTER
-pre_submit_status=PASSED_DISABLED_PRE_SUBMIT_CHECK
-validation_valid=true
-controlled_demo_integration_workflow_allowed=true
+controlled_execution_pipeline=FOCUSED_VERIFIED
+protected_semantic_transport_verified=true
+bridge_authentication_fail_closed=true
+bridge_integrity_validation_verified=true
+account_context_revalidation_verified=true
+atomic_idempotency_reservation_verified=true
+result_unknown_no_retry_verified=true
+production_order_send_call_sites=1
+automated_broker_submission=NOT_RUN
+manual_broker_submission=NOT_RUN
 live_submission_allowed=false
-bridge_write_skeleton_reachable=true
-bridge_write_skeleton_status=BLOCKED
-kill_switch_engaged=true
-idempotency_status=CHECK_REGISTERED
 live_execution_allowed=false
 order_send_allowed=false
 execution_allowed=false
 executable=false
 order_sent=false
-ticket=None
-deal=None
-hard_live_block_required=true
+kill_switch_engaged=true
 ```
 
 Meaning:
 
-- one immutable, typed semantic execution-parameter contract now belongs to the existing human approval and lock flow;
-- deterministic canonical hashing binds the exact approved values to approval, lock, source, and timestamps;
-- downstream parameterization, final review, dry-run request-dict, and final validation can require and verify the same hash;
-- changed or reconstructed values fail the concrete approved-value path closed;
-- the app-side live adapter shape exists;
-- it is intentionally disabled;
-- the bridge write-skeleton endpoint is reachable;
-- the bridge returns `BLOCKED`;
-- the kill switch exists and is engaged;
-- check-only idempotency exists;
-- the pre-submit safety gate passes as a disabled safety check;
-- no real order request is submitted;
-- no `order_send` function call exists in the current verified path.
+- one immutable semantic contract transports exact approved values only through a protected request;
+- the host bridge authenticates the write request and independently revalidates schema, hash, references, freshness, confirmation, permissions, terminal capability, and account context;
+- account context is fingerprinted without returning the raw login and is checked again immediately before submission;
+- restart-safe idempotency states cover reservation, submission start, confirmed, rejected, and unknown outcomes;
+- timeout or unknown outcome blocks duplicate retry and requires reconciliation;
+- one shared account-agnostic adapter path exists, with exactly one isolated production `order_send` call-site in the host bridge;
+- ticket/deal values remain redacted from responses and are retained only in the protected execution journal when returned;
+- automated verification used fake MT5 only and did not submit to a broker;
+- all execution defaults remain disabled, the kill switch remains engaged, and no manual broker submission was run.
 
 ## 2.2 Immediate goal
 
-Finish a minimal, controlled, one-shot MT5 execution path on a demo/local terminal.
+Add order/position reconciliation and failure recovery before any retry or autonomous operation.
 
 The immediate target is:
 
 ```text
-validated request artifact
-→ pre-submit validation
-→ explicit controlled-demo permission
-→ narrow host bridge write endpoint
-→ one MT5 submission attempt
-→ immediate result journal
-→ no automatic retry
-→ follow-up reconciliation
+protected execution reservation/result
+-> MT5 order and position lookup
+-> confirmed/rejected/unknown reconciliation
+-> duplicate-safe recovery decision
+-> recovery journal
+-> no blind retry
 ```
 
-The first write path must be demo-first, explicitly enabled, independently checked by the host bridge, journaled, and non-autonomous.
+Controlled manual broker verification remains a separate operator action. It must use an intentionally selected testing account and explicit flags; it was not run during Sprint 34B.
 
 ## 2.3 Long-term end-state
 
@@ -187,32 +178,24 @@ The architecture should eventually support both through an explicit account-envi
 
 ## Current scope
 
-- advisory and RAG system;
-- live MT5 market data;
-- structured context, scoring, and readiness;
-- human-reviewed execution-preparation artifacts;
-- dry-run request boundaries;
-- final validation;
-- blocked bridge write skeleton;
-- disabled live adapter;
-- kill switch check;
-- check-only idempotency;
-- pre-submit safety gate;
+- advisory, RAG, and live MT5 market-data system;
+- structured intelligence, decision, review, and execution-preparation artifacts;
 - immutable approved semantic execution parameters with deterministic integrity hashing;
-- append-only journals.
+- final validation and disabled pre-submit safety gate;
+- authenticated, account-agnostic controlled execution endpoint;
+- account-context fingerprint capture and immediate pre-submit revalidation;
+- atomic restart-safe execution idempotency and protected result classification;
+- one isolated host-bridge `order_send` call-site behind disabled-by-default manual controls;
+- append-only general and protected execution journals.
 
 ## Not currently implemented
 
-- a broker-submittable MT5 request dictionary;
-- real MT5 execution constants in an active submit path;
-- `order_send`;
-- actual ticket/deal creation;
+- verified manual broker submission in the current sprint;
 - order/position reconciliation after submission;
-- automatic retry;
+- authorization of retry after an unknown result;
 - complete position lifecycle management;
 - continuous runtime supervisor;
-- autonomous execution policy;
-- autonomous position management;
+- autonomous execution policy and position management;
 - live-account production promotion.
 
 ## Areas that should not be expanded now unless they block execution work
@@ -221,13 +204,11 @@ The architecture should eventually support both through an explicit account-envi
 - embeddings and Qdrant tuning;
 - RAG content expansion;
 - evidence dashboard expansion;
-- agent evaluation dashboards;
-- UI theme/polish;
-- broad strategy optimization;
-- broad refactoring of all old execution boundaries.
+- broad UI redesign;
+- another execution approval layer;
+- generic execution framework work.
 
 ---
-
 # 4. RUNTIME ARCHITECTURE
 
 ## 4.1 Current runtime split
@@ -1054,43 +1035,27 @@ Rule:
 
 ```text
 Real MT5 Market Data
-→ Feature / Regime / Calendar
-→ Knowledge / Method / Score
-→ Trade Readiness
-→ Human Review Artifact
-→ Dry-Run Gate
-→ Execution Journal
-→ Proposal Boundary
-→ Non-Executable Proposal Draft
-→ Simulated Adapter Contract
-→ MT5 Hard-Block Skeleton
-→ Live Execution Design Spec
-→ Preflight Harness
-→ Human-Confirmed Live Permission Gate
-→ Live Order Intent
-→ Live Order Contract Skeleton
-→ Live Order Parameter Policy Validator
-→ Live Order Parameter Source Boundary
-→ Human-Reviewed Live Parameter Draft
-→ Controlled Live Parameter Value Proposal
-→ Human Value Approval and Lock Boundary
-→ Immutable Approved Semantic Execution Parameters
-→ Live Order Contract Parameterization Boundary
-→ Contract Parameter Validation and Final Human Review
-→ Pre-MT5 Order Request Mapping Boundary
-→ MT5 Order Request Dry-Run Payload Validator
-→ MT5 Request Draft Boundary
-→ MT5 Request Draft Final Approval Boundary
-→ MT5 Request Dict Dry-Run Builder Boundary
-→ MT5 Request Dict Final Validation
-→ MT5 Bridge Write Endpoint Skeleton
-→ MT5 Live Adapter Disabled + Pre-Submit Gate
+-> Feature / Regime / Calendar
+-> Knowledge / Method / Score
+-> Trade Readiness
+-> Human Review Artifact
+-> Dry-Run Gate and Execution Journal
+-> Proposal and Simulated Contract Boundaries
+-> Live Permission, Intent, Contract, Parameter, Approval, and Final Review
+-> Pre-MT5 Mapping and Dry-Run Request Boundaries
+-> MT5 Request Dict Final Validation
+-> MT5 Bridge Write Skeleton and Disabled Pre-Submit Gate
+-> Protected Controlled Execution Request
+-> Authenticated Host Bridge Validation
+-> Account Context Revalidation
+-> Atomic Execution Idempotency Reservation
+-> Isolated One-Shot MT5 Submission Function
+-> Protected Result Classification and Journal
 ```
 
-No real submission stage is present after this point in the current verified snapshot.
+The controlled submission path is implemented but disabled by default. Automated verification used fake MT5; no manual broker submission was run.
 
 ---
-
 # 15. IMPLEMENTATION MILESTONE HISTORY
 
 The project has progressed through the following engineering milestones:
@@ -1129,11 +1094,13 @@ The project has progressed through the following engineering milestones:
 32. MT5 Request Dict Final Validation and Bridge Write Endpoint Skeleton
 33. MT5 Live Adapter Disabled and Pre-Submit Gate
 34A. Immutable Approved Semantic Execution Parameters
+34B. Controlled MT5 Execution Integration
 
 Current milestone:
 
 ```text
-34A complete
+34B implemented and focused-verified
+manual broker submission not run
 ```
 
 ---
@@ -1180,63 +1147,20 @@ Validation expectations:
 
 ## 16.3 `mt5_live_adapter_pre_submit/`
 
-Verified files:
+The existing package remains the single app-side adapter boundary. Sprint 34B extended it rather than creating Demo/Real adapters.
 
-```text
-adapter.py
-errors.py
-formatter.py
-gate.py
-idempotency.py
-kill_switch.py
-models.py
-policy.py
-service.py
-store.py
-validator.py
-```
+Core responsibilities now include:
 
-Core responsibilities:
+- existing disabled adapter, bridge skeleton check, kill switch, check-only pre-submit idempotency, gate, journal, and safe summary;
+- protected controlled execution request construction from the approved semantic contract and final/pre-submit validation;
+- account-context capture before confirmation and recheck before bridge submission;
+- authenticated HTTP call to the controlled bridge endpoint;
+- redacted accepted, rejected, blocked, or unknown receipt;
+- transport failure classified as unknown, with no automatic retry.
 
-- disabled app-side adapter;
-- bridge-skeleton health/check;
-- kill-switch evaluation;
-- check-only idempotency;
-- pre-submit gate;
-- journal;
-- safe summary.
-
-Reported core classes include:
-
-```text
-MT5KillSwitchCheck
-MT5IdempotencyCheck
-MT5LiveAdapterDisabledReceipt
-MT5PreSubmitGateReport
-MT5PreSubmitJournalRecord
-MT5PreSubmitSummary
-MT5LiveAdapterPreSubmitConfig
-MT5LiveAdapterDisabled
-MT5KillSwitchService
-MT5PreSubmitIdempotencyGuard
-MT5PreSubmitGate
-MT5LiveAdapterPreSubmitValidator
-MT5LiveAdapterPreSubmitFormatter
-MT5PreSubmitJournalStore
-MT5LiveAdapterPreSubmitService
-```
-
-Current behavior:
-
-- adapter disabled;
-- kill switch engaged;
-- idempotency is check-only;
-- bridge must be reachable and blocked;
-- controlled-demo integration workflow may be marked ready;
-- live submission remains false.
+Current default behavior remains disabled, hard-blocked, and kill-switch engaged.
 
 ---
-
 # 17. CURRENT MT5 BRIDGE
 
 ## 17.1 Verified read endpoints
@@ -1277,9 +1201,26 @@ Expected result:
 }
 ```
 
-## 17.3 Current bridge restrictions
+## 17.3 Controlled execution endpoint
 
-No verified active endpoint for:
+```text
+POST /execution/controlled-submit
+```
+
+Current properties:
+
+- shared across whichever account is intentionally logged into the host terminal;
+- authenticated with an environment secret and constant-time comparison;
+- independently validates protected semantics, references, freshness, confirmation, permissions, and terminal/account context;
+- rechecks the account fingerprint immediately before submission;
+- atomically reserves idempotency and records result states;
+- contains one isolated production `order_send` call-site;
+- returns redacted receipts with exact ticket/deal omitted;
+- disabled by default and not broker-verified during automated tests.
+
+## 17.4 Current bridge restrictions
+
+No broad or unprotected endpoint for:
 
 ```text
 /order
@@ -1290,10 +1231,9 @@ No verified active endpoint for:
 /position/open
 ```
 
-No verified real `order_send` call.
+Exactly one production `order_send` call-site exists in `tools/mt5_bridge/execution.py`. It is unreachable under default configuration.
 
 ---
-
 # 18. CONFIGURATION AND ENVIRONMENT
 
 ## 18.1 Verified MT5 market-data configuration
@@ -1318,40 +1258,31 @@ MT5_BRIDGE_ORDER_SEND_ENABLED=false
 MT5_BRIDGE_LIVE_EXECUTION_ENABLED=false
 ```
 
-## 18.3 Pre-submit controls
+## 18.3 Pre-submit and controlled execution controls
 
-Verified/reported configuration:
+Safe defaults:
 
 ```text
 TRADING_MT5_LIVE_ADAPTER_PRE_SUBMIT_ENABLED=true
 TRADING_MT5_LIVE_ADAPTER_ENABLED=false
 TRADING_MT5_LIVE_ADAPTER_HARD_BLOCK=true
-TRADING_MT5_PRE_SUBMIT_GATE_ENABLED=true
 TRADING_MT5_PRE_SUBMIT_ALLOW_LIVE_SUBMISSION=false
 TRADING_MT5_PRE_SUBMIT_ALLOW_ORDER_SEND=false
-TRADING_MT5_PRE_SUBMIT_REQUIRE_FINAL_VALIDATION=true
-TRADING_MT5_PRE_SUBMIT_REQUIRE_BRIDGE_SKELETON_CHECK=true
-TRADING_MT5_PRE_SUBMIT_REQUIRE_IDEMPOTENCY=true
-TRADING_MT5_PRE_SUBMIT_REQUIRE_KILL_SWITCH=true
 TRADING_MT5_KILL_SWITCH_ENGAGED=true
-TRADING_MT5_IDEMPOTENCY_CHECK_TTL_SECONDS=300
-TRADING_MT5_PRE_SUBMIT_JOURNAL_ENABLED=true
-TRADING_MT5_PRE_SUBMIT_JOURNAL_PATH=data/trading/execution_journal/mt5_pre_submit_checks.jsonl
-TRADING_MT5_PRE_SUBMIT_MAX_READ_RECORDS=100
+TRADING_MT5_CONTROLLED_EXECUTION_ENABLED=false
+TRADING_MT5_CONTROLLED_EXECUTION_HTTP_TIMEOUT_SECONDS=10
+MT5_BRIDGE_CONTROLLED_EXECUTION_ENABLED=false
+MT5_BRIDGE_CONTROLLED_EXECUTION_HARD_BLOCK=true
+MT5_BRIDGE_EXECUTION_KILL_SWITCH=true
+MT5_BRIDGE_ORDER_SEND_ENABLED=false
+MT5_BRIDGE_LIVE_EXECUTION_ENABLED=false
+MT5_BRIDGE_EXECUTION_TOKEN=
+MT5_BRIDGE_EXECUTION_TIMEOUT_SECONDS=5
 ```
 
-Meaning:
-
-- the pre-submit checker is enabled;
-- the live adapter is disabled;
-- the hard block is active;
-- live submission is disabled;
-- order send is disabled;
-- kill switch is engaged;
-- idempotency is check-only.
+Pre-submit idempotency remains check-only. Controlled execution uses a separate atomic reservation journal only after every bridge gate passes. The app HTTP timeout is longer than the isolated bridge submission timeout so timeout ownership remains on the bridge.
 
 ---
-
 # 19. JOURNALING
 
 Runtime journal root:
@@ -1497,6 +1428,23 @@ Run it for:
 
 # 22. REPORTED LATEST TEST STATE
 
+Latest controlled execution integration sprint:
+
+```text
+new focused tests: 16 passed
+direct neighboring execution/bridge tests: 130 passed
+changed-path compileall: passed
+docker-compose config: passed
+docker-compose restart app: passed
+Streamlit health: HTTP 200, ok
+static scan: 0 MetaTrader5 imports under src; 1 production order_send call under tools
+documentation fixture/credential scan: 0 matches
+automated broker submission: NOT RUN
+manual broker submission: NOT RUN
+full scripts regression: NOT RUN
+verification level: FOCUSED_PASS
+```
+
 Latest immutable approved semantic execution parameter sprint:
 
 ```powershell
@@ -1587,100 +1535,60 @@ Do not present the latest focused PASS as a latest full-regression PASS.
 
 # 23. STATIC SAFETY INVARIANTS
 
-Until the first controlled-demo execution sprint explicitly changes them:
+Current controlled execution invariants:
 
-- no real `order_send` call;
+- exactly one isolated production `order_send` call-site, under the host bridge only;
 - no `MetaTrader5` import under `src/`;
-- no real MT5 payload;
-- no broker-submittable request dictionary;
-- no real execution constants in an active submit path;
-- no broker submission object;
-- no executable order;
-- no ticket/deal id;
-- no live order submission;
-- no autonomous execution;
-- no broad uncontrolled bridge endpoint;
-- no raw account id;
-- no credentials;
+- no automatic retry after timeout or unknown result;
+- no autonomous execution or broad uncontrolled bridge endpoint;
+- no raw account id or credentials in app requests, responses, logs, or documentation;
 - runtime JSONL ignored by git;
-- bridge write skeleton returns `BLOCKED`;
-- disabled adapter returns blocked receipt;
-- kill switch engaged;
-- idempotency check-only;
-- all execution flags false;
+- bridge write skeleton continues to return `BLOCKED`;
+- the shared adapter and controlled endpoint remain disabled by default;
+- kill switch engaged by default;
+- pre-submit idempotency is check-only; controlled execution reservation is atomic and restart-safe;
+- default live submission, execution, and order-send flags remain false;
 - approved semantic values do not grant execution permission;
-- exact approved values remain redacted from general journals, formatters, and documentation.
+- exact values are absent from general logs and documentation;
+- exact ticket/deal identifiers, if returned by a manual run, are protected-journal-only;
+- automated verification must use fake MT5 and must not submit to a broker.
 
-Allowed harmless field/config names:
-
-```text
-order_send_allowed
-ORDER_SEND_ENABLED
-MT5_BRIDGE_ORDER_SEND_ENABLED
-```
-
-Scanner must distinguish fields from real function calls.
-
-Relevant forbidden call patterns:
-
-```text
-.order_send(
-MetaTrader5.order_send(
-mt5.order_send(
-order_send(
-```
+Scanner rules must distinguish harmless field/config names from the single isolated real call.
 
 ---
-
 # 24. WHAT THE SYSTEM CAN DO NOW
 
-The current system can:
+In addition to its market-data, intelligence, review, proposal, and dry-run boundaries, the current system can:
 
-1. access real MT5 market data through the host bridge;
-2. build features, regime, and calendar context;
-3. retrieve knowledge and build runtime context;
-4. select methods and score decisions;
-5. create trade-readiness and human-review artifacts;
-6. create non-executable proposal artifacts;
-7. create simulated execution artifacts;
-8. create live order intent and contract-preparation artifacts;
-9. validate parameter sources and proposal boundaries;
-10. create Pre-MT5 mapping;
-11. validate dry-run request fields;
-12. create request-draft and approval boundaries;
-13. create schema-only request-dict boundaries;
-14. final-validate the dry-run request-dict boundary;
-15. reach the bridge write-skeleton endpoint;
-16. verify that the bridge is blocked;
-17. run a disabled app-side live adapter;
-18. evaluate a kill switch;
-19. register check-only idempotency;
-20. run a disabled pre-submit gate;
-21. build and integrity-check one immutable approved semantic execution-parameter contract;
-22. propagate its canonical hash through parameterization, final review, dry-run request-dict, and final validation;
-23. append safe journal records.
+1. bind approved semantic execution values to one immutable canonical hash;
+2. build a protected controlled execution request from approved/final/pre-submit artifacts;
+3. authenticate a narrow host-bridge request;
+4. independently validate schema, hash, references, freshness, confirmation, permissions, and terminal capability;
+5. fingerprint the logged-in account without returning the raw login and recheck it immediately before submission;
+6. reserve idempotency atomically across restarts;
+7. deterministically map validated semantics after every gate passes;
+8. invoke one isolated host-side submission call only when every normally disabled control is deliberately enabled;
+9. classify accepted, rejected, blocked, and unknown outcomes;
+10. retain exact broker identifiers only in the protected journal;
+11. block duplicate or unknown requests without automatic retry.
+
+Automated tests verify this with fake MT5 only.
 
 ---
-
 # 25. WHAT THE SYSTEM CANNOT DO YET
 
-The current system cannot:
+The current system cannot yet:
 
-1. create a verified real broker-submittable MT5 request;
-2. call `order_send`;
-3. return a real order result;
-4. create a ticket/deal;
-5. determine whether a timed-out request was accepted by MT5;
-6. reconcile an order journal against MT5 state;
-7. safely retry or prevent a duplicate after unknown submission status;
-8. manage a complete open-position lifecycle;
-9. supervise the runtime continuously;
-10. execute autonomously;
-11. promote itself from demo to live;
-12. guarantee profitable outcomes.
+1. prove a real broker submission through automated verification;
+2. reconcile confirmed, rejected, or unknown execution records against MT5 orders and positions;
+3. determine whether a timed-out request was accepted by MT5;
+4. authorize any retry after an unknown outcome;
+5. manage a complete open-position lifecycle;
+6. supervise the runtime continuously;
+7. execute autonomously;
+8. promote execution to a live account without a separate explicit release gate.
 
 ---
-
 # 26. KNOWN CLEAN-CODE AND ARCHITECTURE ISSUES
 
 ## 26.1 Execution fragmentation
@@ -1767,68 +1675,27 @@ Verify whether:
 
 ---
 
-# 27. IMMEDIATE NEXT MILESTONE: CONTROLLED DEMO BRIDGE SUBMISSION PREREQUISITES
+# 27. IMMEDIATE NEXT MILESTONE: RECONCILIATION AND FAILURE RECOVERY
 
 The next engineering milestone is:
 
-`Controlled Demo Bridge Submission Prerequisites`
+`Sprint 35 - Order/Position Reconciliation and Failure Recovery`
 
-This milestone must complete the bridge-side trust and submission prerequisites before any real MT5 write call is introduced.
+Sprint 34B introduced the protected submit-once path. Sprint 35 must resolve broker state after confirmed, rejected, timeout, transport-loss, and unknown outcomes before any retry or autonomous workflow.
 
-## Required design properties
+Required properties:
 
-- demo/local account only;
-- protected semantic-value transport from the approved contract;
-- independent demo-account classification;
-- one-shot request schema and freshness checks;
-- explicit configuration;
-- no autonomous trigger;
-- narrow bridge endpoint design;
-- app-side kill switch;
-- bridge-side kill switch;
-- idempotency reservation, not only check;
-- exact artifact/provenance linkage;
-- independent bridge schema validation;
-- append pre-submit journal before calling MT5;
-- append result journal after return;
-- no automatic retry;
-- safe response redaction;
-- record unknown state when timeout makes outcome uncertain.
+- read-only lookup of relevant MT5 orders, deals, and positions through the host bridge;
+- correlation to protected request, idempotency, and broker-result records;
+- explicit reconciled, rejected, unresolved, and conflict states;
+- no blind retry;
+- restart-safe recovery journal;
+- fail closed when account context, broker state, or correlation is ambiguous;
+- no account switching, autonomous execution, or live-account promotion.
 
-This prerequisite milestone must keep `order_send` absent and all live-submission flags disabled.
-
-## The bridge must not trust the app
-
-Before calling MT5, the bridge must independently check:
-
-- endpoint enabled;
-- account environment allowed;
-- controlled-demo mode enabled;
-- write permission enabled;
-- bridge kill switch state;
-- request schema;
-- idempotency reservation;
-- artifact/provenance references;
-- required freshness constraints;
-- no duplicate/unknown previous state.
-
-## Mandatory validation before implementation
-
-Before adding the first real call:
-
-- focused pre-submit tests;
-- all adjacent MT5 boundary tests;
-- full scripts regression;
-- compileall;
-- Docker config;
-- app health;
-- bridge live data check;
-- pre-submit live check;
-- exact static scan;
-- confirmation that no secret/raw account data leaks.
+Controlled manual broker verification remains an operator-only action and was not run in Sprint 34B.
 
 ---
-
 # 28. ROADMAP TO THE AUTONOMOUS END-STATE
 
 The remaining work should be divided into release milestones.
@@ -1844,22 +1711,17 @@ Delivered:
 - downstream hash recognition without execution permission;
 - redacted general serialization and unchanged execution hard blocks.
 
-### Next prerequisite - Controlled Demo Bridge Submission Prerequisites
+### Sprint 34B - Controlled MT5 Execution Integration (implemented)
 
-Deliver bridge-side trust controls, protected value transport, demo-account policy, and idempotency reservation while keeping real submission disabled.
+Delivered:
 
-### Sprint 34 — Controlled Demo `order_send` Integration
-
-Deliver:
-
-- narrow bridge submit-once endpoint;
-- bridge-side independent gate;
-- one-shot demo submission;
-- idempotency reservation;
-- immediate result journal;
-- no automatic retry;
-- all autonomous paths disabled.
-
+- one shared account-agnostic protected execution path;
+- authenticated bridge endpoint and independent integrity/runtime validation;
+- account fingerprint capture and immediate revalidation;
+- atomic idempotency reservation and protected result journal;
+- one isolated submission call-site with no automatic retry;
+- disabled-by-default manual entry point;
+- fake-MT5 focused verification only; manual broker submission not run.
 ### Sprint 35 — Order/Position Reconciliation and Failure Recovery
 
 Deliver:
@@ -2320,4 +2182,4 @@ Inspect the repository, verify the current state, and cite exact files and symbo
 
 # 35. CURRENT ONE-PARAGRAPH SUMMARY
 
-`Trading_Advisory_Chatbot` is a large RAG, market-context, decision, and MT5 integration codebase whose execution side has progressed through Sprint 34A. The current system reads real MT5 market data through a host-side bridge, builds structured intelligence and execution-preparation artifacts, can bind exact approved semantic values to an immutable canonical hash, final-validates a non-submitting request boundary, reaches a blocked write-skeleton endpoint, and passes a disabled pre-submit check with kill switch and check-only idempotency. It cannot yet submit an order. The immediate objective is to complete controlled-demo bridge submission prerequisites, then introduce a separately approved one-shot demo submission followed by reconciliation and failure recovery. The long-term objective is an autonomous demo-first MT5 system in which prompts express operating intent, structured decision logic proposes actions, deterministic policy authorizes or blocks them, the bridge independently validates them, and a lifecycle supervisor reconciles and manages positions. Live-account operation is a separate explicit promotion after autonomous demo soak testing; no system component may promise guaranteed profit or bypass the policy chain.
+`Trading_Advisory_Chatbot` is a large RAG, market-context, decision, and MT5 integration codebase whose execution side has progressed through Sprint 34B. The system reads real MT5 market data through a host bridge, binds exact approved semantic values to an immutable hash, transports them through an authenticated protected request, independently validates them at the bridge, rechecks a redacted account fingerprint, reserves idempotency atomically, and owns one isolated submit-once call-site with protected result classification and no automatic retry. All execution defaults remain disabled and the kill switch remains engaged; automated tests used fake MT5, and no manual broker submission was run. The immediate objective is Sprint 35 reconciliation and failure recovery for confirmed, rejected, and unknown outcomes. The long-term objective remains an autonomous demo-first MT5 system governed by deterministic policy, reconciliation, lifecycle management, and runtime supervision, with live-account operation gated by a separate explicit promotion.

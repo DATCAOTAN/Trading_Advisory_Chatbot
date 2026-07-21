@@ -1,4 +1,8 @@
 from src.services.trading.execution.mt5_live_adapter_pre_submit.adapter import MT5LiveAdapterDisabled
+from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled import (
+    MT5ControlledExecutionReceipt,
+    MT5ControlledExecutionRequest,
+)
 from src.services.trading.execution.mt5_live_adapter_pre_submit.formatter import MT5LiveAdapterPreSubmitFormatter
 from src.services.trading.execution.mt5_live_adapter_pre_submit.gate import MT5PreSubmitGate
 from src.services.trading.execution.mt5_live_adapter_pre_submit.idempotency import MT5PreSubmitIdempotencyGuard
@@ -33,6 +37,8 @@ __all__ = [
     "MT5_LIVE_ADAPTER_DISABLED_STATUSES",
     "MT5_PRE_SUBMIT_BLOCK_REASONS",
     "MT5_PRE_SUBMIT_GATE_STATUSES",
+    "MT5ControlledExecutionReceipt",
+    "MT5ControlledExecutionRequest",
     "MT5IdempotencyCheck",
     "MT5KillSwitchCheck",
     "MT5KillSwitchService",

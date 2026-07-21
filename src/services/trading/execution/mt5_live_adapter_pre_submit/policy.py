@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -21,6 +21,12 @@ class MT5LiveAdapterPreSubmitConfig:
     journal_path: str = "data/trading/execution_journal/mt5_pre_submit_checks.jsonl"
     idempotency_path: str = "data/trading/execution_journal/mt5_pre_submit_idempotency.jsonl"
     max_read_records: int = 100
+    controlled_execution_enabled: bool = False
+    execution_auth_token: str = field(default="", repr=False)
+    execution_confirmation_phrase: str = "SUBMIT CONTROLLED MT5 ORDER"
+    bridge_url: str = "http://host.docker.internal:8765"
+    bridge_timeout_seconds: float = 3.0
+    controlled_execution_http_timeout_seconds: float = 10.0
 
     @classmethod
     def from_config(cls, config=None) -> "MT5LiveAdapterPreSubmitConfig":
@@ -48,5 +54,14 @@ class MT5LiveAdapterPreSubmitConfig:
             idempotency_ttl_seconds=getattr(config, "TRADING_MT5_IDEMPOTENCY_CHECK_TTL_SECONDS", 300),
             journal_enabled=getattr(config, "TRADING_MT5_PRE_SUBMIT_JOURNAL_ENABLED", True),
             journal_path=getattr(config, "TRADING_MT5_PRE_SUBMIT_JOURNAL_PATH", "data/trading/execution_journal/mt5_pre_submit_checks.jsonl"),
+            idempotency_path=getattr(config, "TRADING_MT5_PRE_SUBMIT_IDEMPOTENCY_PATH", "data/trading/execution_journal/mt5_pre_submit_idempotency.jsonl"),
             max_read_records=getattr(config, "TRADING_MT5_PRE_SUBMIT_MAX_READ_RECORDS", 100),
+            controlled_execution_enabled=getattr(config, "TRADING_MT5_CONTROLLED_EXECUTION_ENABLED", False),
+            execution_auth_token=getattr(config, "TRADING_MT5_CONTROLLED_EXECUTION_AUTH_TOKEN", ""),
+            execution_confirmation_phrase=getattr(config, "TRADING_MT5_CONTROLLED_EXECUTION_CONFIRMATION_PHRASE", "SUBMIT CONTROLLED MT5 ORDER"),
+            bridge_url=getattr(config, "MT5_BRIDGE_URL", "http://host.docker.internal:8765"),
+            bridge_timeout_seconds=getattr(config, "MT5_BRIDGE_TIMEOUT_SECONDS", 3.0),
+            controlled_execution_http_timeout_seconds=getattr(
+                config, "TRADING_MT5_CONTROLLED_EXECUTION_HTTP_TIMEOUT_SECONDS", 10.0
+            ),
         )

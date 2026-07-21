@@ -161,3 +161,37 @@ Commit: included in this commit
 - Next: Controlled Demo Bridge Submission Prerequisites.
 
 ---
+
+### Sprint 34B - Controlled MT5 Execution Integration
+
+Date: 2026-07-21
+Verification: `FOCUSED_PASS`
+Commit: included in this commit
+
+#### Implemented
+
+- Added one shared account-agnostic protected execution path to the existing adapter and host bridge.
+- Added authenticated bridge validation for semantic integrity, references, freshness, confirmation, permissions, terminal capability, and account fingerprint.
+- Added atomic restart-safe idempotency states and protected result classification with no automatic retry.
+- Added one isolated production `order_send` call-site and a disabled-by-default manual entry point.
+- Kept ticket/deal values out of responses and retained exact values only in the protected execution journal.
+
+#### Verification
+
+- New focused tests: 16 passed using fake MT5 only.
+- Direct neighboring execution/bridge tests: 130 passed.
+- Changed-path compileall, Docker Compose config, app restart, and Streamlit HTTP 200 `ok`: passed.
+- Static scan: 0 `MetaTrader5` imports under `src`; exactly 1 production `order_send` call-site.
+- Automated broker submission: NOT RUN. Manual broker submission: NOT RUN. Full regression: NOT RUN.
+
+#### Current state
+
+- Controlled execution exists but remains disabled by default; kill switch remains engaged.
+- Default live submission, execution, and order-send flags remain false; no order was sent during verification.
+
+#### Known limitations / next step
+
+- Broker-state reconciliation and recovery for unknown outcomes are not implemented.
+- Next: Sprint 35 - Order/Position Reconciliation and Failure Recovery.
+
+---

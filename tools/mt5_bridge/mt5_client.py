@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import queue
 import threading
@@ -76,6 +77,7 @@ class MT5Client:
         if info is None:
             return {"status": "UNAVAILABLE", "message": "MT5 account info unavailable"}
         data = info._asdict()
+        account_context_fingerprint = _account_context_fingerprint(data)
         return {
             "status": "OK",
             "account_id_hash": hash_identifier(data.get("login")),
@@ -86,6 +88,35 @@ class MT5Client:
             "margin": data.get("margin"),
             "free_margin": data.get("margin_free"),
             "leverage": data.get("leverage"),
+            "trade_mode": data.get("trade_mode"),
+            "trade_allowed": bool(data.get("trade_allowed", False)),
+            "account_context_fingerprint": account_context_fingerprint,
+            "redacted": True,
+        }
+
+    def execution_context(self) -> Dict[str, Any]:
+        ok, message = self.ensure_initialized()
+        if not ok:
+            return {"status": "UNAVAILABLE", "message": message, "redacted": True}
+        try:
+            account = _call_mt5(mt5.account_info)
+            terminal = _call_mt5(mt5.terminal_info)
+        except TimeoutError as exc:
+            return {"status": "UNAVAILABLE", "message": str(exc), "redacted": True}
+        if account is None or terminal is None:
+            return {"status": "UNAVAILABLE", "message": "MT5 execution context unavailable", "redacted": True}
+        account_data = account._asdict()
+        terminal_data = terminal._asdict()
+        return {
+            "status": "OK",
+            "terminal_connected": bool(terminal_data.get("connected", False)),
+            "terminal_trade_allowed": bool(terminal_data.get("trade_allowed", False)),
+            "account_trade_allowed": bool(account_data.get("trade_allowed", False)),
+            "account_context_fingerprint": _account_context_fingerprint(account_data),
+            "account_id_hash": hash_identifier(account_data.get("login")),
+            "server_redacted": redact_server(account_data.get("server")),
+            "currency": account_data.get("currency"),
+            "trade_mode": account_data.get("trade_mode"),
             "redacted": True,
         }
 
@@ -242,3 +273,13 @@ def _safe_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _account_context_fingerprint(account_data: Dict[str, Any]) -> str:
+    stable_context = {
+        "login": account_data.get("login"),
+        "server": account_data.get("server"),
+        "currency": account_data.get("currency"),
+        "trade_mode": account_data.get("trade_mode"),
+    }
+    return hash_identifier(json.dumps(stable_context, ensure_ascii=True, sort_keys=True, separators=(",", ":")))

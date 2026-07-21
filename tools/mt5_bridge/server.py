@@ -6,9 +6,13 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from dotenv import load_dotenv
+
+from tools.mt5_bridge.execution import ControlledMT5ExecutionService
 from tools.mt5_bridge.mt5_client import MT5Client
 
 
+load_dotenv()
 CLIENT = MT5Client()
 
 
@@ -43,6 +47,12 @@ class MT5BridgeHandler(BaseHTTPRequestHandler):
                 self._discard_request_body()
                 self._send(_blocked_write_skeleton_response())
                 return
+            if parsed.path == "/execution/controlled-submit":
+                payload = self._read_json_body()
+                token = self.headers.get("X-MT5-Bridge-Execution-Token", "")
+                response, status = ControlledMT5ExecutionService(CLIENT).handle(payload, token)
+                self._send(response, status=status)
+                return
             self._send({"status": "NOT_FOUND", "message": "unknown endpoint"}, status=404)
         except Exception as exc:
             self._send({"status": "UNAVAILABLE", "message": f"bridge error: {type(exc).__name__}"}, status=503)
@@ -69,6 +79,18 @@ class MT5BridgeHandler(BaseHTTPRequestHandler):
             length = 0
         if length > 0:
             self.rfile.read(length)
+
+    def _read_json_body(self, maximum_bytes: int = 65536):
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError as exc:
+            raise ValueError("invalid content length") from exc
+        if length <= 0 or length > maximum_bytes:
+            raise ValueError("invalid request size")
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("invalid request payload")
+        return payload
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -103,7 +125,14 @@ def _blocked_write_skeleton_response():
 
 def _redact_payload(payload):
     if isinstance(payload, dict):
-        return {key: ("[REDACTED]" if str(key).lower() in {"login", "password", "server"} else _redact_payload(value)) for key, value in payload.items()}
+        protected_keys = {
+            "login", "password", "server", "auth_token", "human_confirmation_phrase",
+            "approved_semantic_parameters", "raw_request", "protected_result",
+        }
+        return {
+            key: ("[REDACTED]" if str(key).lower() in protected_keys else _redact_payload(value))
+            for key, value in payload.items()
+        }
     if isinstance(payload, list):
         return [_redact_payload(item) for item in payload]
     return payload

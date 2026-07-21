@@ -72,6 +72,38 @@ class MT5BridgeWriteSkeletonClient:
                 latency_ms=(perf_counter() - started) * 1000,
             )
 
+    def account_context(self) -> dict:
+        req = request.Request(f"{self.bridge_url}/account", method="GET")
+        with request.urlopen(req, timeout=self.timeout_seconds) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("invalid bridge account context")
+        return payload
+
+    def submit_controlled(self, payload: dict, auth_token: str) -> dict:
+        if not auth_token:
+            raise ValueError("controlled execution authentication is missing")
+        body = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        req = request.Request(
+            f"{self.bridge_url}/execution/controlled-submit",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-MT5-Bridge-Execution-Token": auth_token,
+            },
+            method="POST",
+        )
+        try:
+            with request.urlopen(req, timeout=self.timeout_seconds) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            if hasattr(exc, "read"):
+                result = json.loads(exc.read().decode("utf-8"))
+            else:
+                raise
+        if not isinstance(result, dict):
+            raise ValueError("invalid controlled execution response")
+        return result
 
 def _check_id(url: str, created_at: str) -> str:
     return "mt5_bridge_write_skeleton_check_" + hashlib.sha256(f"{url}:{created_at}".encode("utf-8")).hexdigest()[:16]
