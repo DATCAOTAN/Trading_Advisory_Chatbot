@@ -11,6 +11,15 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.reconciliation i
 from src.services.trading.execution.mt5_live_adapter_pre_submit.gate import MT5PreSubmitGate
 from src.services.trading.execution.mt5_live_adapter_pre_submit.idempotency import MT5PreSubmitIdempotencyGuard
 from src.services.trading.execution.mt5_live_adapter_pre_submit.kill_switch import MT5KillSwitchService
+from src.services.trading.execution.mt5_live_adapter_pre_submit.lifecycle_supervisor import (
+    MT5LifecycleJournal,
+    MT5LifecycleJournalError,
+    MT5LifecycleObservation,
+    MT5LifecycleState,
+    MT5PositionLifecycleSupervisor,
+    MT5PositionSupervisorConfig,
+    MT5RuntimeSupervisorStatus,
+)
 from src.services.trading.execution.mt5_live_adapter_pre_submit.models import (
     MT5_IDEMPOTENCY_STATUSES,
     MT5_KILL_SWITCH_STATES,
@@ -48,6 +57,13 @@ __all__ = [
     "MT5IdempotencyCheck",
     "MT5KillSwitchCheck",
     "MT5KillSwitchService",
+    "MT5LifecycleJournal",
+    "MT5LifecycleJournalError",
+    "MT5LifecycleObservation",
+    "MT5LifecycleState",
+    "MT5PositionLifecycleSupervisor",
+    "MT5PositionSupervisorConfig",
+    "MT5RuntimeSupervisorStatus",
     "MT5LiveAdapterDisabled",
     "MT5LiveAdapterDisabledReceipt",
     "MT5LiveAdapterPreSubmitConfig",

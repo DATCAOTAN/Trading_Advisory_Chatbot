@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 
-from tools.mt5_bridge.execution import ControlledMT5ExecutionService
+from tools.mt5_bridge.execution import ControlledMT5ExecutionService, _authenticated
 from tools.mt5_bridge.reconciliation import ControlledMT5ReconciliationService
 from tools.mt5_bridge.mt5_client import MT5Client
 
@@ -58,6 +58,12 @@ class MT5BridgeHandler(BaseHTTPRequestHandler):
                 payload = self._read_json_body()
                 token = self.headers.get("X-MT5-Bridge-Execution-Token", "")
                 response, status = ControlledMT5ReconciliationService(CLIENT).handle(payload, token)
+                self._send(response, status=status)
+                return
+            if parsed.path == "/execution/lifecycle-snapshot":
+                payload = self._read_json_body()
+                token = self.headers.get("X-MT5-Bridge-Execution-Token", "")
+                response, status = _lifecycle_snapshot_response(payload, token)
                 self._send(response, status=status)
                 return
             self._send({"status": "NOT_FOUND", "message": "unknown endpoint"}, status=404)
@@ -129,6 +135,31 @@ def _blocked_write_skeleton_response():
         "metadata_redacted": True,
     }
 
+
+def _lifecycle_snapshot_response(payload, provided_token: str):
+    expected_token = os.getenv("MT5_BRIDGE_EXECUTION_TOKEN", "")
+    if not _authenticated(provided_token, expected_token):
+        return {"status": "BLOCKED", "reason": "AUTHENTICATION_FAILED", "metadata_redacted": True}, 401
+    if not _env_bool("MT5_BRIDGE_RECONCILIATION_ENABLED", True):
+        return {"status": "BLOCKED", "reason": "READ_ONLY_LIFECYCLE_DISABLED", "metadata_redacted": True}, 403
+    try:
+        window = int(payload.get("history_window_seconds", 0))
+    except (TypeError, ValueError):
+        window = 0
+    maximum = int(os.getenv("MT5_BRIDGE_RECONCILIATION_MAX_WINDOW_SECONDS", "86400"))
+    tags = payload.get("correlation_tags", [])
+    if (
+        window <= 0
+        or window > maximum
+        or not isinstance(tags, list)
+        or len(tags) > 100
+        or any(not isinstance(tag, str) or not tag or len(tag) > 31 for tag in tags)
+    ):
+        return {"status": "BLOCKED", "reason": "LIFECYCLE_SNAPSHOT_REQUEST_INVALID", "metadata_redacted": True}, 400
+    from datetime import datetime, timedelta, timezone
+
+    end = datetime.now(timezone.utc)
+    return CLIENT.lifecycle_snapshot(end - timedelta(seconds=window), end, tags), 200
 
 def _redact_payload(payload):
     if isinstance(payload, dict):

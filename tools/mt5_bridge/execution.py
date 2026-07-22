@@ -208,6 +208,41 @@ class ProtectedExecutionJournal:
             "state_created_at": latest.get("created_at"),
         }
 
+    def execution_records(self) -> list[dict[str, Any]]:
+        """Return validated latest records without weakening journal integrity."""
+        rows = self._read_rows()
+        records: list[dict[str, Any]] = []
+        for reservation in (
+            row for row in rows if row.get("state") == "RESERVED" and row.get("protected_execution")
+        ):
+            key_hash = reservation["idempotency_key_hash"]
+            state_rows = [
+                row
+                for row in rows
+                if row.get("idempotency_key_hash") == key_hash and row.get("state")
+            ]
+            latest = state_rows[-1]
+            correlation_identity = reservation["protected_execution"].get("correlation_identity", "")
+            reconciliations = [
+                row
+                for row in rows
+                if row.get("record_type") == "RECONCILIATION"
+                and row.get("correlation_identity") == correlation_identity
+                and row.get("reconciliation_status") != "PENDING"
+            ]
+            records.append(
+                {
+                    "idempotency_key_hash": key_hash,
+                    "account_context_fingerprint": reservation.get("account_context_fingerprint"),
+                    "protected_execution": dict(reservation.get("protected_execution", {})),
+                    "state": latest.get("state"),
+                    "state_created_at": latest.get("created_at"),
+                    "protected_result": dict(latest.get("protected_result", {})),
+                    "latest_reconciliation": dict(reconciliations[-1]) if reconciliations else None,
+                }
+            )
+        return records
+
     def begin_reconciliation(
         self,
         reconciliation_reference: str,

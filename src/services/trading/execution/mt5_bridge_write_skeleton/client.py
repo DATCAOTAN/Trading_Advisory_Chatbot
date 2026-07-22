@@ -83,6 +83,18 @@ class MT5BridgeWriteSkeletonClient:
     def reconcile(self, payload: dict, auth_token: str) -> dict:
         return self._post_protected("/execution/reconcile", payload, auth_token)
 
+    def lifecycle_snapshot(
+        self, history_window_seconds: int, correlation_tags: list[str], auth_token: str
+    ) -> dict:
+        return self._post_protected(
+            "/execution/lifecycle-snapshot",
+            {
+                "history_window_seconds": history_window_seconds,
+                "correlation_tags": list(correlation_tags),
+            },
+            auth_token,
+        )
+
     def submit_controlled(self, payload: dict, auth_token: str) -> dict:
         return self._post_protected(
             "/execution/controlled-submit", payload, auth_token

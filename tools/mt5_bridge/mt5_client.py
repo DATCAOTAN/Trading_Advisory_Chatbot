@@ -257,6 +257,38 @@ class MT5Client:
             "positions": [_normalize_reconciliation_row(item, "position") for item in positions or []],
         }
 
+    def lifecycle_snapshot(
+        self, start: datetime, end: datetime, correlation_tags: List[str] | None = None
+    ) -> Dict[str, Any]:
+        context = self.execution_context()
+        if context.get("status") != "OK" or context.get("terminal_connected") is not True:
+            return _unavailable_lifecycle_snapshot("MT5_CONTEXT_UNAVAILABLE")
+        try:
+            active_orders = _call_mt5(mt5.orders_get)
+            recent_orders = _call_mt5(mt5.history_orders_get, start, end)
+            recent_deals = _call_mt5(mt5.history_deals_get, start, end)
+            positions = _call_mt5(mt5.positions_get)
+            if any(rows is None for rows in (active_orders, recent_orders, recent_deals, positions)):
+                return _unavailable_lifecycle_snapshot("MT5_QUERY_RETURNED_NONE")
+        except Exception as exc:
+            return _unavailable_lifecycle_snapshot(type(exc).__name__)
+        tags = tuple(dict.fromkeys(str(tag) for tag in correlation_tags or [] if tag))
+        snapshot = {
+            "status": "OK",
+            "terminal_connected": True,
+            "terminal_trade_allowed": context.get("terminal_trade_allowed") is True,
+            "account_trade_allowed": context.get("account_trade_allowed") is True,
+            "account_context_fingerprint": context.get("account_context_fingerprint", ""),
+            "active_orders": [_normalize_lifecycle_row(item, "order", tags) for item in active_orders or []],
+            "recent_orders": [_normalize_lifecycle_row(item, "order", tags) for item in recent_orders or []],
+            "recent_deals": [_normalize_lifecycle_row(item, "deal", tags) for item in recent_deals or []],
+            "positions": [_normalize_lifecycle_row(item, "position", tags) for item in positions or []],
+            "metadata_redacted": True,
+        }
+        stable = json.dumps(snapshot, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        snapshot["snapshot_reference"] = "mt5_lifecycle_snapshot_" + hash_identifier(stable)[:24]
+        return snapshot
+
     def close(self) -> None:
         if mt5 is not None and self._initialized:
             try:
@@ -341,6 +373,52 @@ def _normalize_reconciliation_row(item: Any, kind: str) -> Dict[str, Any]:
         "comment": str(data.get("comment", ""))[:64],
     }
 
+
+def _normalize_lifecycle_row(item: Any, kind: str, correlation_tags: tuple[str, ...]) -> Dict[str, Any]:
+    row = _normalize_reconciliation_row(item, kind)
+    comment = str(row.pop("comment", ""))
+    ticket = row.pop("ticket", None)
+    order = row.pop("order", None)
+    position = row.pop("position_id", None)
+    data = item._asdict()
+    entry_value = data.get("entry")
+    entry = "UNKNOWN"
+    if kind == "deal":
+        if entry_value == getattr(mt5, "DEAL_ENTRY_IN", object()):
+            entry = "IN"
+        elif entry_value in {
+            getattr(mt5, "DEAL_ENTRY_OUT", object()),
+            getattr(mt5, "DEAL_ENTRY_OUT_BY", object()),
+        }:
+            entry = "OUT"
+        elif entry_value == getattr(mt5, "DEAL_ENTRY_INOUT", object()):
+            entry = "INOUT"
+    return {
+        **row,
+        "broker_reference_hash": hash_identifier(ticket) if ticket is not None else "",
+        "order_reference_hash": hash_identifier(order) if order is not None else "",
+        "position_reference_hash": hash_identifier(position) if position is not None else "",
+        "entry": entry,
+        "matched_correlation_tags": [tag for tag in correlation_tags if tag in comment],
+        "metadata_redacted": True,
+    }
+
+
+def _unavailable_lifecycle_snapshot(reason: str) -> Dict[str, Any]:
+    return {
+        "status": "UNAVAILABLE",
+        "reason": reason,
+        "terminal_connected": False,
+        "terminal_trade_allowed": False,
+        "account_trade_allowed": False,
+        "account_context_fingerprint": "",
+        "active_orders": [],
+        "recent_orders": [],
+        "recent_deals": [],
+        "positions": [],
+        "snapshot_reference": "",
+        "metadata_redacted": True,
+    }
 
 def _account_context_fingerprint(account_data: Dict[str, Any]) -> str:
     stable_context = {

@@ -297,3 +297,32 @@ Commit: included in this commit
 
 - All execution defaults remain blocked and the kill switch remains engaged.
 - Run one export-only acceptance with operator-approved semantic input and a testing-account terminal before any manual controlled submission.
+
+---
+
+### Phase 2 - Read-Only Position Lifecycle and Runtime Supervisor
+
+Date: 2026-07-22
+Verification: `FOCUSED_AND_READ_ONLY_RUNTIME_PASS`
+Commit: included in this commit
+
+#### Implemented
+
+- Added one read-only lifecycle supervisor inside the existing MT5 execution ownership and one operator CLI.
+- Reused the protected execution journal and bridge client; added bounded authenticated lifecycle snapshots with broker identifiers hashed host-side.
+- Added deterministic lifecycle states, redacted discrepancy reporting, append-only restart recovery, stable idempotency, overlap prevention, and single-instance locking.
+- Kept submission, reconciliation, order mutation, execution flags, and automatic retry outside this workflow.
+
+#### Verification
+
+- Focused supervisor tests: 25 passed; neighboring reconciliation, journal, and controlled-execution tests: 57 passed.
+- Changed-path compileall, static scans, `docker-compose config --quiet`, app restart, and Streamlit HTTP 200 health: passed.
+- Non-submitting terminal runtime cycle: `HEALTHY`, 0 protected records inspected, 0 discrepancies, 26.296 ms.
+- Static state: exactly 1 production `.order_send(` call-site; 0 `MetaTrader5` imports under `src`; 0 lifecycle submission, reconciliation, or mutation calls.
+- Full regression: NOT RUN for this task; prior post-confirmation-split regression remains 2612 tests and 156 subtests passed.
+
+#### Current state / limitations / next step
+
+- Live submission, execution, order-send, executable, and order-sent remain false; the kill switch remains engaged.
+- No broker submission or lifecycle reconciliation was performed; real-record lifecycle tracking and long-duration polling remain unverified.
+- Next: collect bounded read-only lifecycle evidence from future protected execution records and run a soak before changing architecture.
