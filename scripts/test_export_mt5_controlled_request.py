@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -22,6 +24,7 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.models import (
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.policy import MT5LiveAdapterPreSubmitConfig
 from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_export import (
+    EXPECTED_PROTECTED_REQUEST_EXPORT_PHRASE,
     ProtectedRequestExportError,
     export_protected_request,
 )
@@ -43,7 +46,8 @@ from src.services.trading.execution.mt5_request_dict_final_validation.policy imp
 
 
 ACCOUNT_FINGERPRINT = "a" * 64
-CONTROLLED_CONFIRMATION = MT5LiveAdapterPreSubmitConfig().execution_confirmation_phrase
+MANUAL_CONTROLLED_CONFIRMATION = MT5LiveAdapterPreSubmitConfig().execution_confirmation_phrase
+EXPORT_CONFIRMATION = EXPECTED_PROTECTED_REQUEST_EXPORT_PHRASE
 
 
 def _write(path: Path, payload: dict) -> Path:
@@ -163,7 +167,7 @@ def _artifact_files(tmp_path: Path) -> dict[str, Path]:
     confirmation = {
         "created_at": created_at.isoformat(),
         "expires_at": (created_at + timedelta(minutes=5)).isoformat(),
-        "phrase": CONTROLLED_CONFIRMATION,
+        "phrase": EXPORT_CONFIRMATION,
         "phrase_valid": True,
         "expected_account_context_fingerprint": ACCOUNT_FINGERPRINT,
         "metadata_redacted": True,
@@ -171,6 +175,8 @@ def _artifact_files(tmp_path: Path) -> dict[str, Path]:
         "approval_lock_reference": approval_lock.approval_lock_id,
         "final_validation_reference": final_validation.final_validation_id,
         "approved_semantic_values_hash": contract.canonical_values_hash,
+        "purpose": "export_only",
+        "non_executable": True,
     }
     return {
         "proposal_artifact": _write(tmp_path / "proposal.json", inputs["value_proposal"].as_dict()),
@@ -195,7 +201,7 @@ def _export(tmp_path: Path, files: dict[str, Path], *, name: str = "request.json
     return export_protected_request(
         **files,
         output=tmp_path / name,
-        expected_confirmation_phrase=CONTROLLED_CONFIRMATION,
+        expected_confirmation_phrase=EXPORT_CONFIRMATION,
     )
 
 
@@ -216,6 +222,10 @@ def test_valid_export_uses_genuine_compatible_artifacts(tmp_path):
     assert payload["canonical_semantic_hash"].startswith(result.semantic_hash_prefix)
     assert payload["expected_account_context_fingerprint"] == ACCOUNT_FINGERPRINT
     assert payload["pre_submit_validation_valid"] is True
+    assert payload["execution_permission_requested"] is False
+    assert payload["human_confirmation_phrase"] == EXPORT_CONFIRMATION
+    assert MANUAL_CONTROLLED_CONFIRMATION == "SUBMIT CONTROLLED MT5 ORDER"
+    assert EXPORT_CONFIRMATION != MANUAL_CONTROLLED_CONFIRMATION
 
 
 def test_modified_semantic_values_fail_closed(tmp_path):
@@ -235,6 +245,26 @@ def test_approval_and_lock_hash_mismatch_fail_closed(tmp_path):
     files = _artifact_files(tmp_path)
     _mutate(files["lock_artifact"], lambda payload: payload.__setitem__("lock_value_hash", "0" * 64))
     with pytest.raises(ProtectedRequestExportError):
+        _export(tmp_path, files)
+
+
+def test_export_confirmation_must_be_export_only_and_non_executable(tmp_path):
+    files = _artifact_files(tmp_path)
+    _mutate(
+        files["human_confirmation_artifact"],
+        lambda payload: payload.update({"purpose": "execution", "non_executable": False}),
+    )
+    with pytest.raises(ProtectedRequestExportError, match="export confirmation is invalid"):
+        _export(tmp_path, files)
+
+
+def test_manual_execution_confirmation_does_not_authorize_export(tmp_path):
+    files = _artifact_files(tmp_path)
+    _mutate(
+        files["human_confirmation_artifact"],
+        lambda payload: payload.__setitem__("phrase", MANUAL_CONTROLLED_CONFIRMATION),
+    )
+    with pytest.raises(ProtectedRequestExportError, match="export confirmation is invalid"):
         _export(tmp_path, files)
 
 
@@ -281,6 +311,19 @@ def test_schema_only_and_missing_artifacts_fail_closed(tmp_path):
         _export(missing_root, files)
 
 
+def test_export_cli_bootstraps_project_root():
+    project_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, str(project_root / "scripts/export_mt5_controlled_request.py"), "--help"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "usage:" in result.stdout.lower()
+
+
 def test_cli_prints_only_redacted_export_summary(tmp_path, capsys):
     files = _artifact_files(tmp_path)
     argv = []
@@ -303,7 +346,7 @@ def test_cli_prints_only_redacted_export_summary(tmp_path, capsys):
         semantic["symbol"],
         semantic["comment"],
         semantic["idempotency"],
-        CONTROLLED_CONFIRMATION,
+        EXPORT_CONFIRMATION,
         ACCOUNT_FINGERPRINT,
     ):
         assert value not in output

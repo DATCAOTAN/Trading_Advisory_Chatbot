@@ -52,6 +52,7 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.policy import (
     MT5LiveAdapterPreSubmitConfig,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_export import (
+    EXPECTED_PROTECTED_REQUEST_EXPORT_PHRASE,
     ProtectedRequestExportError,
     export_protected_request,
 )
@@ -177,7 +178,7 @@ class ProtectedAccountContextCapture:
 
 
 @dataclass(frozen=True)
-class ProtectedExecutionConfirmation:
+class ProtectedExportConfirmation:
     created_at: str
     expires_at: str
     phrase: str = field(repr=False)
@@ -188,6 +189,8 @@ class ProtectedExecutionConfirmation:
     approval_lock_reference: str = ""
     final_validation_reference: str = ""
     approved_semantic_values_hash: str = ""
+    purpose: str = "export_only"
+    non_executable: bool = True
 
     @classmethod
     def confirm(
@@ -199,19 +202,19 @@ class ProtectedExecutionConfirmation:
         final_validation,
         created_at: datetime,
         ttl_seconds: int,
-    ) -> "ProtectedExecutionConfirmation":
-        expected = MT5LiveAdapterPreSubmitConfig.from_config().execution_confirmation_phrase
+    ) -> "ProtectedExportConfirmation":
+        expected = EXPECTED_PROTECTED_REQUEST_EXPORT_PHRASE
         if not hmac.compare_digest(str(phrase or "").strip(), expected):
-            raise ProtectedArtifactCaptureError("execution confirmation is invalid")
+            raise ProtectedArtifactCaptureError("export confirmation is invalid")
         if not lock.approved_semantic_integrity_valid() or final_validation.artifact_hash != lock.artifact_hash:
-            raise ProtectedArtifactCaptureError("execution confirmation references are inconsistent")
+            raise ProtectedArtifactCaptureError("export confirmation references are inconsistent")
         references = (
             str(proposal.proposal_id),
             str(lock.approval_lock_id),
             str(final_validation.final_validation_id),
         )
         if not all(references):
-            raise ProtectedArtifactCaptureError("execution confirmation references are missing")
+            raise ProtectedArtifactCaptureError("export confirmation references are missing")
         return cls(
             created_at=created_at.isoformat(),
             expires_at=(created_at + timedelta(seconds=ttl_seconds)).isoformat(),
@@ -235,6 +238,8 @@ class ProtectedExecutionConfirmation:
             "approval_lock_reference": self.approval_lock_reference,
             "final_validation_reference": self.final_validation_reference,
             "approved_semantic_values_hash": self.approved_semantic_values_hash,
+            "purpose": self.purpose,
+            "non_executable": self.non_executable,
         }
 
 
@@ -275,7 +280,7 @@ class OperatorProtectedArtifactCaptureService:
         semantic_input: str | Path,
         output_dir: str | Path,
         approval_confirmation_phrase: str,
-        execution_confirmation_phrase: str,
+        export_confirmation_phrase: str,
         bridge_url: str | None = None,
         mode: str = "REVIEW_ONLY",
         max_age_seconds: int = 300,
@@ -288,11 +293,11 @@ class OperatorProtectedArtifactCaptureService:
             raise ProtectedArtifactCaptureError("max artifact age must be positive")
         semantics = load_approved_semantic_input(semantic_input, now)
         expected_approval = EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE
-        expected_execution = MT5LiveAdapterPreSubmitConfig.from_config().execution_confirmation_phrase
+        expected_export = EXPECTED_PROTECTED_REQUEST_EXPORT_PHRASE
         if not hmac.compare_digest(str(approval_confirmation_phrase or "").strip(), expected_approval):
             raise ProtectedArtifactCaptureError("approval confirmation is invalid")
-        if not hmac.compare_digest(str(execution_confirmation_phrase or "").strip(), expected_execution):
-            raise ProtectedArtifactCaptureError("execution confirmation is invalid")
+        if not hmac.compare_digest(str(export_confirmation_phrase or "").strip(), expected_export):
+            raise ProtectedArtifactCaptureError("export confirmation is invalid")
 
         resolved_bridge_url = bridge_url or Config.MT5_BRIDGE_URL
         if "host.docker.internal" in resolved_bridge_url:
@@ -306,7 +311,7 @@ class OperatorProtectedArtifactCaptureService:
                     upstream=upstream,
                     semantics=semantics,
                     approval_phrase=expected_approval,
-                    execution_phrase=expected_execution,
+                    export_phrase=expected_export,
                     bridge_url=resolved_bridge_url,
                     current_time=now,
                     max_age_seconds=max_age_seconds,
@@ -315,7 +320,7 @@ class OperatorProtectedArtifactCaptureService:
             _verify_export_compatibility(
                 paths,
                 bundle,
-                expected_execution,
+                expected_export,
                 max_age_seconds=max_age_seconds,
                 current_time=now,
             )
@@ -343,7 +348,7 @@ class OperatorProtectedArtifactCaptureService:
         upstream: ProtectedCaptureUpstreamArtifacts,
         semantics: Mapping[str, Any],
         approval_phrase: str,
-        execution_phrase: str,
+        export_phrase: str,
         bridge_url: str,
         current_time: datetime,
         max_age_seconds: int,
@@ -430,8 +435,8 @@ class OperatorProtectedArtifactCaptureService:
             raise ProtectedArtifactCaptureError("account context changed between captures")
         _validate_capture_freshness(first, current_time, max_age_seconds)
         _validate_capture_freshness(second, current_time, max_age_seconds)
-        confirmation = ProtectedExecutionConfirmation.confirm(
-            execution_phrase,
+        confirmation = ProtectedExportConfirmation.confirm(
+            export_phrase,
             first_fingerprint,
             approval_lock,
             proposal,

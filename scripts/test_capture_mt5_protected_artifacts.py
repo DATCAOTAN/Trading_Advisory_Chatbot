@@ -35,6 +35,7 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_artifa
     verify_protected_artifact_bundle,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_export import (
+    EXPECTED_PROTECTED_REQUEST_EXPORT_PHRASE,
     export_protected_request,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.service import (
@@ -44,7 +45,7 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.service import (
 
 ACCOUNT_FINGERPRINT = "a" * 64
 OTHER_ACCOUNT_FINGERPRINT = "b" * 64
-EXECUTION_CONFIRMATION = MT5LiveAdapterPreSubmitConfig().execution_confirmation_phrase
+EXPORT_CONFIRMATION = EXPECTED_PROTECTED_REQUEST_EXPORT_PHRASE
 
 
 class _FakeBridgeService:
@@ -177,7 +178,7 @@ def _capture(tmp_path: Path, *, fingerprints=None, output_name="capture-one"):
         semantic_input=_write_semantics(tmp_path),
         output_dir=Path("data/trading/protected_requests") / output_name,
         approval_confirmation_phrase=EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE,
-        execution_confirmation_phrase=EXECUTION_CONFIRMATION,
+        export_confirmation_phrase=EXPORT_CONFIRMATION,
     )
     return result, client
 
@@ -194,7 +195,10 @@ def test_complete_genuine_artifact_chain_and_protected_lock(tmp_path):
     try:
         paths = verify_protected_artifact_bundle(result.bundle_path)
         lock = json.loads(paths["lock_artifact"].read_text(encoding="utf-8"))
+        confirmation = json.loads(paths["human_confirmation_artifact"].read_text(encoding="utf-8"))
         assert result.artifact_count == 9
+        assert confirmation["purpose"] == "export_only"
+        assert confirmation["non_executable"] is True
         assert set(paths) == set(PROTECTED_ARTIFACT_FILENAMES)
         assert lock["approved_semantic_parameters"]["symbol"] == _semantic_values()["symbol"]
         assert lock["approved_semantic_values_hash"] == (
@@ -255,8 +259,49 @@ def test_unknown_missing_and_schema_only_semantics_fail_closed(tmp_path, mutate)
             semantic_input=semantic_path,
             output_dir=Path("data/trading/protected_requests") / f"invalid-{id(mutate)}",
             approval_confirmation_phrase=EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE,
-            execution_confirmation_phrase=EXECUTION_CONFIRMATION,
+            export_confirmation_phrase=EXPORT_CONFIRMATION,
         )
+
+
+def test_confirmation_whitespace_is_stripped_and_accepted(tmp_path):
+    service, _ = _service(tmp_path)
+    result = service.capture(
+        semantic_input=_write_semantics(tmp_path),
+        output_dir=Path("data/trading/protected_requests/whitespace-confirmations"),
+        approval_confirmation_phrase=f"  {EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE}  ",
+        export_confirmation_phrase=f"  {EXPORT_CONFIRMATION}  ",
+    )
+    _cleanup_bundle(result)
+
+
+@pytest.mark.parametrize("approval_phrase", ["", "wrong approval phrase"])
+def test_empty_or_wrong_approval_confirmation_fails_without_partial_bundle(tmp_path, approval_phrase):
+    service, _ = _service(tmp_path)
+    output = Path("data/trading/protected_requests/invalid-approval-confirmation")
+    with pytest.raises(ProtectedArtifactCaptureError, match="approval confirmation is invalid"):
+        service.capture(
+            semantic_input=_write_semantics(tmp_path),
+            output_dir=output,
+            approval_confirmation_phrase=approval_phrase,
+            export_confirmation_phrase=EXPORT_CONFIRMATION,
+        )
+    assert not output.exists()
+    assert not (output / "manifest.json").exists()
+
+
+@pytest.mark.parametrize("export_phrase", ["", "wrong export phrase"])
+def test_empty_or_wrong_export_confirmation_fails_without_partial_bundle(tmp_path, export_phrase):
+    service, _ = _service(tmp_path)
+    output = Path("data/trading/protected_requests/invalid-export-confirmation")
+    with pytest.raises(ProtectedArtifactCaptureError, match="export confirmation is invalid"):
+        service.capture(
+            semantic_input=_write_semantics(tmp_path),
+            output_dir=output,
+            approval_confirmation_phrase=EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE,
+            export_confirmation_phrase=export_phrase,
+        )
+    assert not output.exists()
+    assert not (output / "manifest.json").exists()
 
 
 def test_approval_lock_hash_mismatch_fails_closed(tmp_path, monkeypatch):
@@ -276,7 +321,7 @@ def test_approval_lock_hash_mismatch_fails_closed(tmp_path, monkeypatch):
             semantic_input=_write_semantics(tmp_path),
             output_dir=Path("data/trading/protected_requests") / "hash-mismatch",
             approval_confirmation_phrase=EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE,
-            execution_confirmation_phrase=EXECUTION_CONFIRMATION,
+            export_confirmation_phrase=EXPORT_CONFIRMATION,
         )
 
 
@@ -289,7 +334,7 @@ def test_two_account_fingerprints_match_and_change_fails(tmp_path):
             semantic_input=_write_semantics(tmp_path),
             output_dir=Path("data/trading/protected_requests") / "changed-account",
             approval_confirmation_phrase=EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE,
-            execution_confirmation_phrase=EXECUTION_CONFIRMATION,
+            export_confirmation_phrase=EXPORT_CONFIRMATION,
         )
 
 
@@ -308,11 +353,11 @@ def test_stale_account_capture_and_human_confirmation_fail(tmp_path, monkeypatch
             semantic_input=_write_semantics(tmp_path),
             output_dir=Path("data/trading/protected_requests") / "stale-account",
             approval_confirmation_phrase=EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE,
-            execution_confirmation_phrase=EXECUTION_CONFIRMATION,
+            export_confirmation_phrase=EXPORT_CONFIRMATION,
         )
 
     monkeypatch.setattr(capture, "_capture_account_context", original_capture)
-    original_confirmation = capture.ProtectedExecutionConfirmation.confirm
+    original_confirmation = capture.ProtectedExportConfirmation.confirm
 
     def stale_confirmation(*args, **kwargs):
         confirmation = original_confirmation(*args, **kwargs)
@@ -324,7 +369,7 @@ def test_stale_account_capture_and_human_confirmation_fail(tmp_path, monkeypatch
         )
 
     monkeypatch.setattr(
-        capture.ProtectedExecutionConfirmation,
+        capture.ProtectedExportConfirmation,
         "confirm",
         staticmethod(stale_confirmation),
     )
@@ -333,7 +378,7 @@ def test_stale_account_capture_and_human_confirmation_fail(tmp_path, monkeypatch
             semantic_input=_write_semantics(tmp_path),
             output_dir=Path("data/trading/protected_requests") / "stale-confirmation",
             approval_confirmation_phrase=EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE,
-            execution_confirmation_phrase=EXECUTION_CONFIRMATION,
+            export_confirmation_phrase=EXPORT_CONFIRMATION,
         )
 
 
@@ -349,7 +394,7 @@ def test_existing_directory_is_not_overwritten_and_partial_bundle_is_rejected(tm
                 semantic_input=_write_semantics(tmp_path),
                 output_dir=existing,
                 approval_confirmation_phrase=EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE,
-                execution_confirmation_phrase=EXECUTION_CONFIRMATION,
+                export_confirmation_phrase=EXPORT_CONFIRMATION,
             )
         assert marker.read_text(encoding="utf-8") == "preserve"
         with pytest.raises(ProtectedArtifactCaptureError, match="incomplete"):
@@ -367,7 +412,7 @@ def test_completed_bundle_is_accepted_by_existing_exporter(tmp_path):
         export_result = export_protected_request(
             **paths,
             output=output,
-            expected_confirmation_phrase=EXECUTION_CONFIRMATION,
+            expected_confirmation_phrase=EXPORT_CONFIRMATION,
         )
         assert export_result.validation_status == "VALID"
     finally:
@@ -412,6 +457,66 @@ def test_no_submission_reconciliation_or_execution_flag_changes(tmp_path, monkey
         _cleanup_bundle(result)
 
 
+def test_export_confirmation_is_distinct_from_manual_execution_confirmation():
+    assert EXPORT_CONFIRMATION == "EXPORT PROTECTED MT5 REQUEST WITHOUT SUBMISSION"
+    assert MT5LiveAdapterPreSubmitConfig().execution_confirmation_phrase == "SUBMIT CONTROLLED MT5 ORDER"
+    assert EXPORT_CONFIRMATION != MT5LiveAdapterPreSubmitConfig().execution_confirmation_phrase
+
+
+def test_manual_execution_confirmation_does_not_authorize_capture(tmp_path):
+    service, _ = _service(tmp_path)
+    with pytest.raises(ProtectedArtifactCaptureError, match="export confirmation is invalid"):
+        service.capture(
+            semantic_input=_write_semantics(tmp_path),
+            output_dir=Path("data/trading/protected_requests/manual-phrase-rejected"),
+            approval_confirmation_phrase=EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE,
+            export_confirmation_phrase=MT5LiveAdapterPreSubmitConfig().execution_confirmation_phrase,
+        )
+
+
+def test_cli_uses_visible_input_and_strips_whitespace(monkeypatch, tmp_path):
+    result = ProtectedArtifactCaptureResult(
+        capture_reference_redacted="capture-ref...",
+        semantic_hash_prefix="123456789abc",
+        account_fingerprint_redacted="abcdef123456...",
+        artifact_count=9,
+        bundle_path=str(tmp_path / "bundle"),
+    )
+    captured_kwargs = {}
+
+    def capture(self, **kwargs):
+        captured_kwargs.update(kwargs)
+        return result
+
+    responses = iter([
+        f"  {EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE}  ",
+        f"  {EXPORT_CONFIRMATION}  ",
+    ])
+    monkeypatch.setattr(OperatorProtectedArtifactCaptureService, "capture", capture)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(responses))
+    assert cli_main([
+        "--semantic-input", "protected-input.json",
+        "--output-dir", str(tmp_path / "bundle"),
+    ]) == 0
+    assert captured_kwargs["approval_confirmation_phrase"] == EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE
+    assert captured_kwargs["export_confirmation_phrase"] == EXPORT_CONFIRMATION
+
+
+def test_cli_reports_redacted_domain_block_reason(monkeypatch, tmp_path, capsys):
+    def blocked(self, **kwargs):
+        raise ProtectedArtifactCaptureError("disabled pre-submit validation failed")
+
+    monkeypatch.setattr(OperatorProtectedArtifactCaptureService, "capture", blocked)
+    confirmations = iter([EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE, EXPORT_CONFIRMATION])
+    assert cli_main(
+        ["--semantic-input", "protected-input.json", "--output-dir", str(tmp_path / "bundle")],
+        confirmation_reader=lambda _prompt: next(confirmations),
+    ) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.strip() == "status=BLOCKED:DISABLED_PRE_SUBMIT_VALIDATION_FAILED"
+
+
 def test_cli_output_is_redacted(monkeypatch, tmp_path, capsys):
     result = ProtectedArtifactCaptureResult(
         capture_reference_redacted="capture-ref...",
@@ -425,7 +530,7 @@ def test_cli_output_is_redacted(monkeypatch, tmp_path, capsys):
         "capture",
         lambda self, **kwargs: result,
     )
-    confirmations = iter([EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE, EXECUTION_CONFIRMATION])
+    confirmations = iter([EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE, EXPORT_CONFIRMATION])
     assert (
         cli_main(
             ["--semantic-input", "protected-input.json", "--output-dir", str(tmp_path / "bundle")],
@@ -444,4 +549,4 @@ def test_cli_output_is_redacted(monkeypatch, tmp_path, capsys):
     }
     for name in ("symbol", "comment", "idempotency", "audit"):
         assert str(_semantic_values()[name]) not in output
-    assert EXECUTION_CONFIRMATION not in output
+    assert EXPORT_CONFIRMATION not in output

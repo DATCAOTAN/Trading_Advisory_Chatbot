@@ -34,6 +34,7 @@ from src.services.trading.execution.mt5_request_dict_final_validation.models imp
 _HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _MAX_ARTIFACT_BYTES = 1_000_000
 _SYNTHETIC_MODES = {"SYNTHETIC", "TEST_ONLY", "FIXTURE_ONLY", "SCHEMA_ONLY"}
+EXPECTED_PROTECTED_REQUEST_EXPORT_PHRASE = "EXPORT PROTECTED MT5 REQUEST WITHOUT SUBMISSION"
 _UNSAFE_TRUE_FLAGS = (
     "live_execution_allowed",
     "order_send_allowed",
@@ -217,7 +218,7 @@ def export_protected_request(
     )
     if not hmac.compare_digest(fingerprint, submit_fingerprint):
         raise ProtectedRequestExportError("account fingerprint mismatch")
-    phrase = _validate_execution_confirmation(
+    phrase = _validate_export_confirmation(
         confirmation_payload,
         fingerprint,
         expected_confirmation_phrase,
@@ -237,6 +238,7 @@ def export_protected_request(
             pre_submit_report,
             expected_account_context_fingerprint=fingerprint,
             human_confirmation_phrase=phrase,
+            execution_permission_requested=False,
         )
     except ValueError as exc:
         raise ProtectedRequestExportError("controlled request artifact validation failed") from exc
@@ -373,7 +375,7 @@ def _validate_account_artifact(payload, now, max_age_seconds: int, label: str) -
     return fingerprint
 
 
-def _validate_execution_confirmation(
+def _validate_export_confirmation(
     payload,
     fingerprint,
     expected_phrase,
@@ -396,19 +398,23 @@ def _validate_execution_confirmation(
         "approval_lock_reference",
         "final_validation_reference",
         "approved_semantic_values_hash",
+        "purpose",
+        "non_executable",
     }
     if set(payload) != allowed:
-        raise ProtectedRequestExportError("execution confirmation fields do not match the contract")
+        raise ProtectedRequestExportError("export confirmation fields do not match the contract")
     _validate_freshness(
         payload.get("created_at"),
         payload.get("expires_at"),
         now,
         max_age_seconds,
-        "execution confirmation",
+        "export confirmation",
     )
     phrase = str(payload.get("phrase", "")).strip()
     if (
         payload.get("phrase_valid") is not True
+        or payload.get("purpose") != "export_only"
+        or payload.get("non_executable") is not True
         or payload.get("metadata_redacted") is not True
         or not hmac.compare_digest(phrase, str(expected_phrase or ""))
         or not hmac.compare_digest(
@@ -425,7 +431,7 @@ def _validate_execution_confirmation(
             str(payload.get("approved_semantic_values_hash", "")), semantic_hash
         )
     ):
-        raise ProtectedRequestExportError("execution confirmation is invalid")
+        raise ProtectedRequestExportError("export confirmation is invalid")
     return phrase
 
 

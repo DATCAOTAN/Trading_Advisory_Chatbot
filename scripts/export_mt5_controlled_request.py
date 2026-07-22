@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
 
-from src.services.trading.execution.mt5_live_adapter_pre_submit.policy import MT5LiveAdapterPreSubmitConfig
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_export import (
+    EXPECTED_PROTECTED_REQUEST_EXPORT_PHRASE,
     ProtectedRequestExportError,
     export_protected_request,
 )
@@ -41,9 +47,7 @@ def main(argv=None) -> int:
             account_fingerprint_submit_artifact=args.account_fingerprint_submit_artifact,
             human_confirmation_artifact=args.human_confirmation_artifact,
             output=args.output,
-            expected_confirmation_phrase=(
-                MT5LiveAdapterPreSubmitConfig.from_config().execution_confirmation_phrase
-            ),
+            expected_confirmation_phrase=EXPECTED_PROTECTED_REQUEST_EXPORT_PHRASE,
             max_age_seconds=args.max_age_seconds,
         )
     except ProtectedRequestExportError:

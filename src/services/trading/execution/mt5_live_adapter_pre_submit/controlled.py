@@ -36,6 +36,7 @@ class MT5ControlledExecutionRequest:
         *,
         expected_account_context_fingerprint: str,
         human_confirmation_phrase: str,
+        execution_permission_requested: bool = True,
     ) -> "MT5ControlledExecutionRequest":
         parameters = getattr(approval_lock, "approved_semantic_parameters", None)
         integrity_check = getattr(approval_lock, "approved_semantic_integrity_valid", None)
@@ -56,6 +57,8 @@ class MT5ControlledExecutionRequest:
         fingerprint = str(expected_account_context_fingerprint or "").strip()
         phrase = str(human_confirmation_phrase or "").strip()
         idempotency_key = str(parameters.idempotency or "").strip()
+        if not isinstance(execution_permission_requested, bool):
+            raise ValueError("execution permission request flag must be boolean")
         if not fingerprint or not phrase or not idempotency_key:
             raise ValueError("controlled execution request references are incomplete")
         confirmation_reference = hash_text(f"{phrase}|{idempotency_key}|{fingerprint}")
@@ -76,7 +79,7 @@ class MT5ControlledExecutionRequest:
             pre_submit_validation_valid=True,
             idempotency_key=idempotency_key,
             expected_account_context_fingerprint=fingerprint,
-            execution_permission_requested=True,
+            execution_permission_requested=execution_permission_requested,
         )
 
     def as_protected_dict(self) -> Dict[str, Any]:
