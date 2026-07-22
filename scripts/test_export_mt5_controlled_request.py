@@ -167,6 +167,10 @@ def _artifact_files(tmp_path: Path) -> dict[str, Path]:
         "phrase_valid": True,
         "expected_account_context_fingerprint": ACCOUNT_FINGERPRINT,
         "metadata_redacted": True,
+        "proposal_reference": inputs["value_proposal"].proposal_id,
+        "approval_lock_reference": approval_lock.approval_lock_id,
+        "final_validation_reference": final_validation.final_validation_id,
+        "approved_semantic_values_hash": contract.canonical_values_hash,
     }
     return {
         "proposal_artifact": _write(tmp_path / "proposal.json", inputs["value_proposal"].as_dict()),

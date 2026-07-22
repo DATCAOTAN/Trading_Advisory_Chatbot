@@ -223,6 +223,10 @@ def export_protected_request(
         expected_confirmation_phrase,
         now,
         max_age_seconds,
+        proposal_reference=proposal.proposal_id,
+        approval_lock_reference=approval_lock.approval_lock_id,
+        final_validation_reference=final_validation.final_validation_id,
+        semantic_hash=semantic_hash,
     )
 
     try:
@@ -369,7 +373,18 @@ def _validate_account_artifact(payload, now, max_age_seconds: int, label: str) -
     return fingerprint
 
 
-def _validate_execution_confirmation(payload, fingerprint, expected_phrase, now, max_age_seconds) -> str:
+def _validate_execution_confirmation(
+    payload,
+    fingerprint,
+    expected_phrase,
+    now,
+    max_age_seconds,
+    *,
+    proposal_reference,
+    approval_lock_reference,
+    final_validation_reference,
+    semantic_hash,
+) -> str:
     allowed = {
         "created_at",
         "expires_at",
@@ -377,6 +392,10 @@ def _validate_execution_confirmation(payload, fingerprint, expected_phrase, now,
         "phrase_valid",
         "expected_account_context_fingerprint",
         "metadata_redacted",
+        "proposal_reference",
+        "approval_lock_reference",
+        "final_validation_reference",
+        "approved_semantic_values_hash",
     }
     if set(payload) != allowed:
         raise ProtectedRequestExportError("execution confirmation fields do not match the contract")
@@ -394,6 +413,16 @@ def _validate_execution_confirmation(payload, fingerprint, expected_phrase, now,
         or not hmac.compare_digest(phrase, str(expected_phrase or ""))
         or not hmac.compare_digest(
             str(payload.get("expected_account_context_fingerprint", "")).lower(), fingerprint
+        )
+        or not hmac.compare_digest(str(payload.get("proposal_reference", "")), proposal_reference)
+        or not hmac.compare_digest(
+            str(payload.get("approval_lock_reference", "")), approval_lock_reference
+        )
+        or not hmac.compare_digest(
+            str(payload.get("final_validation_reference", "")), final_validation_reference
+        )
+        or not hmac.compare_digest(
+            str(payload.get("approved_semantic_values_hash", "")), semantic_hash
         )
     ):
         raise ProtectedRequestExportError("execution confirmation is invalid")

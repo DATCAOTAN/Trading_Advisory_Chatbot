@@ -269,3 +269,31 @@ Commit: included in this commit
 #### Next step
 
 - Operator decision on separately authorized manual demo-account submission and terminal-backed reconciliation; do not infer execution authority from MVP completion.
+
+---
+
+### Post-MVP Operator Tooling - Protected Artifact Capture
+
+Date: 2026-07-22
+Verification: `PROTECTED_ARTIFACT_CAPTURE_PASS`
+Commit: included in this commit
+
+#### Implemented
+
+- Added one CLI and one orchestration module that create the nine protected artifacts required by the existing controlled-request exporter.
+- Reused the existing proposal, approval-lock, final-validation, disabled pre-submit, and read-only account-context services.
+- Added typed account-context and standalone confirmation artifacts bound to proposal, lock, final-validation, semantic-hash, and account-fingerprint references.
+- Added exclusive protected persistence, final-manifest integrity verification, exporter compatibility checking, and failed-bundle cleanup.
+- Kept runtime journals isolated and temporary; no controlled submission or reconciliation path is called.
+
+#### Verification
+
+- New focused capture tests: 13 passed.
+- Focused plus neighboring approval-lock, exporter, final-validation, pre-submit, and controlled-execution tests: 135 passed.
+- Changed-path compileall and static execution-boundary scans: passed.
+- Real terminal artifact capture and export-only operator acceptance: NOT RUN.
+
+#### Current state / next step
+
+- All execution defaults remain blocked and the kill switch remains engaged.
+- Run one export-only acceptance with operator-approved semantic input and a testing-account terminal before any manual controlled submission.
