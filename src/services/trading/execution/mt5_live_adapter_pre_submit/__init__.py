@@ -3,6 +3,14 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled impor
     MT5ControlledExecutionReceipt,
     MT5ControlledExecutionRequest,
 )
+from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled_management import (
+    MANAGEMENT_CONFIRMATION_PHRASES,
+    MT5ControlledManagementReceipt,
+    MT5ControlledManagementRequest,
+    MT5ManagementIntent,
+    MT5ManagementProposal,
+    management_confirmation_phrase,
+)
 from src.services.trading.execution.mt5_live_adapter_pre_submit.formatter import MT5LiveAdapterPreSubmitFormatter
 from src.services.trading.execution.mt5_live_adapter_pre_submit.reconciliation import (
     MT5ReconciliationReceipt,
@@ -52,6 +60,12 @@ __all__ = [
     "MT5_PRE_SUBMIT_GATE_STATUSES",
     "MT5ControlledExecutionReceipt",
     "MT5ControlledExecutionRequest",
+    "MANAGEMENT_CONFIRMATION_PHRASES",
+    "MT5ControlledManagementReceipt",
+    "MT5ControlledManagementRequest",
+    "MT5ManagementIntent",
+    "MT5ManagementProposal",
+    "management_confirmation_phrase",
     "MT5ReconciliationReceipt",
     "MT5ReconciliationRequest",
     "MT5IdempotencyCheck",

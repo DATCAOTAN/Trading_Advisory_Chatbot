@@ -29,6 +29,13 @@ class MT5LiveAdapterPreSubmitConfig:
     controlled_execution_http_timeout_seconds: float = 10.0
     reconciliation_enabled: bool = True
     reconciliation_confirmation_phrase: str = "RECONCILE CONTROLLED MT5 EXECUTION"
+    controlled_management_enabled: bool = False
+    management_hard_block: bool = True
+    management_kill_switch_engaged: bool = True
+    management_cancel_allowed: bool = False
+    management_protection_modification_allowed: bool = False
+    management_position_close_allowed: bool = False
+    management_max_request_age_seconds: int = 300
 
     @classmethod
     def from_config(cls, config=None) -> "MT5LiveAdapterPreSubmitConfig":
@@ -71,5 +78,26 @@ class MT5LiveAdapterPreSubmitConfig:
                 config,
                 "TRADING_MT5_RECONCILIATION_CONFIRMATION_PHRASE",
                 "RECONCILE CONTROLLED MT5 EXECUTION",
+            ),
+            controlled_management_enabled=getattr(
+                config, "TRADING_MT5_CONTROLLED_MANAGEMENT_ENABLED", False
+            ),
+            management_hard_block=getattr(
+                config, "TRADING_MT5_CONTROLLED_MANAGEMENT_HARD_BLOCK", True
+            ),
+            management_kill_switch_engaged=getattr(
+                config, "TRADING_MT5_MANAGEMENT_KILL_SWITCH_ENGAGED", True
+            ),
+            management_cancel_allowed=getattr(
+                config, "TRADING_MT5_MANAGEMENT_CANCEL_ALLOWED", False
+            ),
+            management_protection_modification_allowed=getattr(
+                config, "TRADING_MT5_MANAGEMENT_PROTECTION_MODIFICATION_ALLOWED", False
+            ),
+            management_position_close_allowed=getattr(
+                config, "TRADING_MT5_MANAGEMENT_POSITION_CLOSE_ALLOWED", False
+            ),
+            management_max_request_age_seconds=getattr(
+                config, "TRADING_MT5_MANAGEMENT_MAX_REQUEST_AGE_SECONDS", 300
             ),
         )

@@ -76,52 +76,52 @@ The immediate development focus is no longer broad RAG tuning, UI polish, or add
 
 The latest completed engineering task is:
 
-`Phase 2 - Read-Only Position Lifecycle and Runtime Supervisor`
+`Sprint 38 - Controlled MT5 Position Management`
 
 Current verified state:
 
 ```text
-verification_level=FOCUSED_AND_READ_ONLY_RUNTIME_PASS
-focused_supervisor_tests=25 passed
-neighboring_reconciliation_journal_execution_tests=57 passed
+verification_level=FOCUSED_AND_BLOCKED_RUNTIME_PASS
+focused_management_tests=33 passed
+neighboring_lifecycle_reconciliation_idempotency_execution_tests=94 passed
 prior_full_regression_after_confirmation_split=2612 passed
 prior_full_regression_subtests=156 passed
-read_only_runtime_cycle=HEALTHY
-runtime_records_inspected=0
-runtime_discrepancy_count=0
-runtime_cycle_duration_ms=26.296
-bridge_available=true
-account_context_match=true
-docker_compose_config=PASS
-docker_restart=PASS
-streamlit_health=PASS_HTTP_200_OK
+bridge_health=OK
+bridge_terminal_connected=true
+management_endpoint=/execution/controlled-manage
+management_missing_auth=REJECTED_401
+management_invalid_auth=REJECTED_401
+cancel_pending_order_default=BLOCKED_MANAGEMENT_DISABLED
+modify_position_protection_default=BLOCKED_MANAGEMENT_DISABLED
+close_position_default=BLOCKED_MANAGEMENT_DISABLED
 production_order_send_call_sites=1
 src_metatrader5_imports=0
 automatic_retry_allowed=false
-live_submission_allowed=false
-live_execution_allowed=false
-order_send_allowed=false
-execution_allowed=false
-executable=false
+controlled_management_enabled=false
+cancel_allowed=false
+protection_modification_allowed=false
+position_close_allowed=false
+management_hard_block=true
+management_kill_switch_engaged=true
 order_sent=false
-kill_switch_engaged=true
-manual_broker_submission=NOT_RUN
+manual_broker_mutation=NOT_RUN
+full_regression=NOT_RUN_FOR_SPRINT_38
 ```
 
 Meaning:
 
-- one focused supervisor derives lifecycle state from the validated protected execution journal and bounded authenticated MT5 snapshots;
-- broker references are hashed before leaving the host bridge, and public status exposes only a fingerprint prefix, counts, health, and timing;
-- lifecycle observations are append-only, restart-safe, idempotent, and fail closed on malformed execution or lifecycle persistence;
-- account changes, absent confirmed evidence, unmatched positions, duplicate matches, volume/direction conflicts, missing closing deals, stale submission state, and bridge/persistence failures are redacted discrepancies;
-- polling prevents overlapping cycles and enforces one active supervisor per lifecycle journal path;
-- focused/neighboring tests, changed-path compileall, Docker config/restart/health, static scans, and one non-submitting runtime cycle passed;
-- no controlled submission, reconciliation, `order_send`, or broker order occurred.
+- one immutable protected management contract supports canceling one pending order, modifying protection on one existing position, or closing all/part of one existing position;
+- deterministic app and bridge policy binds the request to one fresh lifecycle observation, account fingerprint, hashed broker target, explicit intent-specific confirmation, mutation hash, and idempotency key;
+- the host bridge independently resolves exactly one current target, revalidates account and capability state, and routes every mutation through the existing isolated `order_send` call-site;
+- management records reuse the protected execution journal with restart-safe `RESERVED`, `MANAGEMENT_STARTED`, `RESULT_CONFIRMED`, `RESULT_REJECTED`, and `RESULT_UNKNOWN` states;
+- accepted or unknown results use bounded lifecycle snapshots for evidence; inconclusive evidence remains unknown and is never retried automatically;
+- focused and neighboring tests, changed-path compileall, Docker config/restart/health, static scans, and a blocked non-mutating terminal runtime check passed;
+- no manual CLI execution, broker mutation, controlled submission, or full regression occurred.
 ## 2.2 Immediate goal
 
-Operate the read-only supervisor against protected execution records as they become available and collect lifecycle/discrepancy evidence without expanding execution authority. The controlled MT5 execution MVP and export-only acceptance remain complete; actual broker submission is still a separate operator action.
+Sprint 39 may add an Autonomous Decision Orchestrator that produces structured management decisions, but it must not grant execution authority, auto-answer confirmations, call the management endpoint, or bypass the controlled management policy. Controlled execution and management remain operator-authorized and disabled by default.
 
-Do not add another adapter, approval boundary, or scheduler framework. Future changes must be driven by observed runtime evidence, while live submission, automatic retry, autonomous execution, and live-account promotion remain disabled.
+Do not add another adapter, approval boundary, or scheduler framework. Reuse lifecycle state, protected journals, deterministic policy, account fingerprinting, idempotency, reconciliation, and the existing bridge trust boundary.
 ## 2.3 Long-term end-state
 
 The long-term product goal is an **autonomous MT5 decision and execution system** that can:
@@ -2169,4 +2169,4 @@ Inspect the repository, verify the current state, and cite exact files and symbo
 
 # 35. CURRENT ONE-PARAGRAPH SUMMARY
 
-`Trading_Advisory_Chatbot` has completed the controlled MT5 execution MVP, protected artifact capture, export-only acceptance, and the first Phase 2 read-only lifecycle supervisor. MetaTrader5 remains confined to the host bridge; production still owns exactly one isolated `order_send` call-site, while `src/` has no MetaTrader5 import. The supervisor reads validated protected execution records, requests bounded authenticated terminal snapshots, receives only hashed broker references, derives lifecycle states deterministically, detects redacted discrepancies, and appends restart-safe observations without submitting, modifying, cancelling, closing, or retrying anything. Phase 2 focused tests passed 25 cases and neighboring reconciliation/journal/controlled-execution tests passed 57 cases; changed-path compileall, Docker Compose config, app restart, Streamlit HTTP 200 health, static scans, and one non-submitting terminal runtime cycle also passed. That cycle was healthy with zero current protected execution records, so real-record lifecycle tracking and long-duration supervision remain unverified. The prior post-confirmation-split full scripts regression passed 2612 tests and 156 subtests; no full regression was run for this task. Actual broker submission was not performed, all execution defaults remain disabled, and the kill switch remains engaged.
+`Trading_Advisory_Chatbot` has completed the controlled MT5 execution MVP, export-only operator acceptance, the read-only lifecycle supervisor, and Sprint 38 controlled position management. A single shared adapter now carries three explicitly confirmed intents: cancel one active pending order, modify protection on one uniquely matched open position, or close all/part of one uniquely matched position. Requests are immutable and integrity-bound to a fresh lifecycle observation, account fingerprint, protected broker-reference hash, mutation hash, intent-specific phrase, and idempotency key. The host bridge independently revalidates journals, lifecycle eligibility, account context, current broker target, volume/protection constraints, permissions, and terminal capability, then reuses the sole isolated `order_send` call-site; exact identifiers remain in protected journals. Results are persisted as `RESERVED`, `MANAGEMENT_STARTED`, `RESULT_CONFIRMED`, `RESULT_REJECTED`, or `RESULT_UNKNOWN`, and bounded lifecycle evidence is checked without automatic retry. Sprint 38 focused tests passed 33 cases and neighboring lifecycle/reconciliation/idempotency/controlled-execution tests passed 94 cases; changed-path compileall, Docker config/restart/HTTP health, static scans, and a terminal-backed default-block runtime check passed. That runtime check returned HTTP 401 for missing/invalid auth and `MANAGEMENT_DISABLED` for all three intents without creating journals or invoking broker mutation. Full regression and manual management were not run. All management permissions remain disabled, hard block and kill switches remain engaged, `src/` has no MetaTrader5 import, and production still has exactly one `.order_send(` call-site.

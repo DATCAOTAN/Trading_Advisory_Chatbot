@@ -99,6 +99,12 @@ class MT5BridgeWriteSkeletonClient:
         return self._post_protected(
             "/execution/controlled-submit", payload, auth_token
         )
+
+    def manage_controlled(self, payload: dict, auth_token: str) -> dict:
+        return self._post_protected(
+            "/execution/controlled-manage", payload, auth_token
+        )
+
     def _post_protected(self, endpoint: str, payload: dict, auth_token: str) -> dict:
         if not auth_token:
             raise ValueError("bridge authentication is missing")

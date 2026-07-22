@@ -326,3 +326,32 @@ Commit: included in this commit
 - Live submission, execution, order-send, executable, and order-sent remain false; the kill switch remains engaged.
 - No broker submission or lifecycle reconciliation was performed; real-record lifecycle tracking and long-duration polling remain unverified.
 - Next: collect bounded read-only lifecycle evidence from future protected execution records and run a soak before changing architecture.
+---
+
+### Sprint 38 - Controlled MT5 Position Management
+
+Date: 2026-07-22
+Verification: `FOCUSED_AND_BLOCKED_RUNTIME_PASS`
+Commit: included in this commit
+
+#### Implemented
+
+- Added immutable proposal/request/receipt contracts for cancel, protection modification, and full/partial close of one existing MT5 target.
+- Bound each request to a fresh lifecycle observation, account fingerprint, protected broker-reference hash, intent-specific confirmation, mutation hash, and idempotency key.
+- Reused the shared adapter, protected execution/lifecycle journals, bridge authentication, account context, lifecycle snapshots, and isolated submission function.
+- Added independent host-bridge target resolution, policy/capability checks, management idempotency states, redacted receipts, and one manual operator CLI.
+- Preserved unrequested protection fields and prohibited volume increase, unrelated position creation, automatic retry, and autonomous mutation.
+
+#### Verification
+
+- Focused controlled-management tests: 33 passed; neighboring lifecycle, reconciliation, idempotency/pre-submit, controlled-execution, and MVP tests: 94 passed.
+- Changed-path compileall, `docker-compose config --quiet`, app restart, and Streamlit HTTP 200 health: passed.
+- Blocked runtime: bridge `OK`; missing/invalid auth returned HTTP 401; all three valid intents returned `MANAGEMENT_DISABLED`; no runtime journal was created.
+- Static scan: exactly 1 production `.order_send(` call-site, 0 `MetaTrader5` imports under `src`, and 0 management retry markers.
+- Full regression and manual broker mutation: NOT RUN.
+
+#### Current state / limitations / next step
+
+- Controlled management, all intent permissions, live execution, and order-send remain disabled; hard block and kill switches remain engaged.
+- Fake-MT5 mutation/reconciliation paths are verified, but no real pending order or position was changed.
+- Next: Sprint 39 - Autonomous Decision Orchestrator; it must produce decisions only and must not grant execution authority.

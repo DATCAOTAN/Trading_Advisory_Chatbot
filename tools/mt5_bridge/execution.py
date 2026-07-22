@@ -30,6 +30,14 @@ IDEMPOTENCY_TRANSITIONS = {
     "SUBMISSION_STARTED": {"RESULT_CONFIRMED", "RESULT_REJECTED", "RESULT_UNKNOWN"},
     "RESULT_UNKNOWN": {"RESULT_CONFIRMED"},
 }
+MANAGEMENT_STATES = {
+    "RESERVED", "MANAGEMENT_STARTED", "RESULT_CONFIRMED", "RESULT_REJECTED", "RESULT_UNKNOWN",
+}
+MANAGEMENT_TRANSITIONS = {
+    "RESERVED": {"MANAGEMENT_STARTED", "RESULT_REJECTED"},
+    "MANAGEMENT_STARTED": {"RESULT_CONFIRMED", "RESULT_REJECTED", "RESULT_UNKNOWN"},
+    "RESULT_UNKNOWN": {"RESULT_CONFIRMED"},
+}
 
 
 class ProtectedExecutionJournalError(RuntimeError):
@@ -157,6 +165,31 @@ class ProtectedExecutionJournal:
             self._append_unlocked(row)
             return True
 
+    def reserve_management(
+        self,
+        idempotency_key: str,
+        request_hash: str,
+        account_fingerprint: str,
+        protected_management: Mapping[str, Any],
+    ) -> bool:
+        key_hash = _sha256(idempotency_key)
+        with self._exclusive_lock():
+            if any(row.get("idempotency_key_hash") == key_hash for row in self._read_rows()):
+                return False
+            self._append_unlocked(
+                {
+                    "record_type": "MANAGEMENT",
+                    "state": "RESERVED",
+                    "created_at": _now(),
+                    "idempotency_key_hash": key_hash,
+                    "request_hash": request_hash,
+                    "account_context_fingerprint": account_fingerprint,
+                    "protected_management": dict(protected_management),
+                    "metadata_redacted": True,
+                }
+            )
+            return True
+
     def transition(self, idempotency_key: str, state: str, **protected_result: Any) -> None:
         if state not in IDEMPOTENCY_STATES:
             raise ValueError("invalid idempotency state")
@@ -171,6 +204,33 @@ class ProtectedExecutionJournal:
             if state not in IDEMPOTENCY_TRANSITIONS.get(previous_state, set()):
                 raise RuntimeError("invalid idempotency state transition")
             row = {
+                "state": state,
+                "created_at": _now(),
+                "idempotency_key_hash": key_hash,
+                "metadata_redacted": True,
+            }
+            if protected_result:
+                row["protected_result"] = protected_result
+            self._append_unlocked(row)
+
+    def transition_management(
+        self, idempotency_key: str, state: str, **protected_result: Any
+    ) -> None:
+        if state not in MANAGEMENT_STATES:
+            raise ValueError("invalid management idempotency state")
+        key_hash = _sha256(idempotency_key)
+        with self._exclusive_lock():
+            previous_states = [
+                row.get("state")
+                for row in self._read_rows()
+                if row.get("record_type") == "MANAGEMENT"
+                and row.get("idempotency_key_hash") == key_hash
+            ]
+            previous_state = previous_states[-1] if previous_states else None
+            if state not in MANAGEMENT_TRANSITIONS.get(previous_state, set()):
+                raise RuntimeError("invalid management idempotency state transition")
+            row = {
+                "record_type": "MANAGEMENT",
                 "state": state,
                 "created_at": _now(),
                 "idempotency_key_hash": key_hash,
@@ -206,6 +266,36 @@ class ProtectedExecutionJournal:
             "protected_execution": dict(reservation.get("protected_execution", {})),
             "state": latest.get("state"),
             "state_created_at": latest.get("created_at"),
+        }
+
+    def execution_record_by_reference(self, protected_execution_reference: str) -> dict[str, Any] | None:
+        for record in self.execution_records():
+            if hmac.compare_digest(
+                str(record.get("protected_execution", {}).get("protected_execution_reference", "")),
+                str(protected_execution_reference),
+            ):
+                return record
+        return None
+
+    def management_record(self, idempotency_key: str) -> dict[str, Any] | None:
+        key_hash = _sha256(idempotency_key)
+        rows = [
+            row
+            for row in self._read_rows()
+            if row.get("record_type") == "MANAGEMENT"
+            and row.get("idempotency_key_hash") == key_hash
+        ]
+        if not rows:
+            return None
+        reservation = rows[0]
+        latest = rows[-1]
+        return {
+            "idempotency_key_hash": key_hash,
+            "account_context_fingerprint": reservation.get("account_context_fingerprint"),
+            "protected_management": dict(reservation.get("protected_management", {})),
+            "state": latest.get("state"),
+            "state_created_at": latest.get("created_at"),
+            "protected_result": dict(latest.get("protected_result", {})),
         }
 
     def execution_records(self) -> list[dict[str, Any]]:
@@ -416,10 +506,29 @@ class ProtectedExecutionJournal:
     @staticmethod
     def _validate_rows(rows: list[dict[str, Any]]) -> None:
         states_by_key: dict[str, list[str]] = {}
+        management_states_by_key: dict[str, list[str]] = {}
         for row in rows:
             if row.get("record_type") == "RECONCILIATION":
                 if not row.get("reconciliation_reference") or not row.get("reconciliation_status"):
                     raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_CORRUPT")
+                continue
+            if row.get("record_type") == "MANAGEMENT":
+                state = row.get("state")
+                key_hash = row.get("idempotency_key_hash")
+                if (
+                    state not in MANAGEMENT_STATES
+                    or not isinstance(key_hash, str)
+                    or len(key_hash) != 64
+                    or row.get("metadata_redacted") is not True
+                ):
+                    raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_CORRUPT")
+                previous = management_states_by_key.setdefault(key_hash, [])
+                if not previous:
+                    if state != "RESERVED" or not row.get("protected_management"):
+                        raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_CORRUPT")
+                elif state not in MANAGEMENT_TRANSITIONS.get(previous[-1], set()):
+                    raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_CORRUPT")
+                previous.append(state)
                 continue
             state = row.get("state")
             key_hash = row.get("idempotency_key_hash")

@@ -9,6 +9,11 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled impor
     MT5ControlledExecutionReceipt,
     MT5ControlledExecutionRequest,
 )
+from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled_management import (
+    MT5ControlledManagementReceipt,
+    MT5ControlledManagementRequest,
+    management_confirmation_phrase,
+)
 from src.services.trading.execution.mt5_live_adapter_pre_submit.reconciliation import (
     MT5ReconciliationReceipt,
     MT5ReconciliationRequest,
@@ -135,6 +140,44 @@ class MT5LiveAdapterDisabled:
             )
         return MT5ControlledExecutionReceipt.from_payload(payload)
 
+    def manage_prepared_request(
+        self,
+        request: MT5ControlledManagementRequest,
+        *,
+        typed_confirmation: str,
+    ) -> MT5ControlledManagementReceipt:
+        blocker = self._management_blocker(request.management_intent, typed_confirmation)
+        if blocker:
+            return _blocked_management_receipt(request.management_intent, blocker)
+        try:
+            request.validate()
+        except ValueError as exc:
+            return _blocked_management_receipt(request.management_intent, str(exc))
+        if not hmac.compare_digest(
+            request.human_confirmation_phrase, str(typed_confirmation or "").strip()
+        ):
+            return _blocked_management_receipt(
+                request.management_intent, "MANAGEMENT_CONFIRMATION_INVALID"
+            )
+        current_context = self.capture_account_context()
+        if not hmac.compare_digest(
+            current_context["account_context_fingerprint"],
+            request.expected_account_context_fingerprint,
+        ):
+            return _blocked_management_receipt(
+                request.management_intent, "ACCOUNT_CONTEXT_CHANGED"
+            )
+        try:
+            payload = self.execution_client.manage_controlled(
+                request.as_protected_dict(), self.config.execution_auth_token
+            )
+        except Exception:
+            return MT5ControlledManagementReceipt(
+                "UNKNOWN", request.management_intent, "RESULT_UNKNOWN", False,
+                True, True, False, False, False, False, "BRIDGE_RESULT_UNKNOWN"
+            )
+        return MT5ControlledManagementReceipt.from_payload(payload)
+
     def reconcile_controlled(
         self,
         request: MT5ReconciliationRequest,
@@ -186,6 +229,34 @@ class MT5LiveAdapterDisabled:
             return "HUMAN_CONFIRMATION_INVALID"
         return ""
 
+    def _management_blocker(self, intent: str, typed_confirmation: str) -> str:
+        allowed = {
+            "CANCEL_PENDING_ORDER": self.config.management_cancel_allowed,
+            "MODIFY_POSITION_PROTECTION": self.config.management_protection_modification_allowed,
+            "CLOSE_POSITION": self.config.management_position_close_allowed,
+        }.get(intent, False)
+        if (
+            not self.config.controlled_management_enabled
+            or self.config.management_hard_block
+            or self.config.management_kill_switch_engaged
+            or self.config.kill_switch_engaged
+            or not self.config.live_adapter_enabled
+            or self.config.live_adapter_hard_block
+            or not self.config.allow_live_submission
+            or not self.config.allow_order_send
+            or not allowed
+        ):
+            return "CONTROLLED_MANAGEMENT_DISABLED"
+        if not self.config.execution_auth_token:
+            return "CONTROLLED_MANAGEMENT_AUTHENTICATION_MISSING"
+        try:
+            expected = management_confirmation_phrase(intent)
+        except ValueError:
+            return "MANAGEMENT_INTENT_INVALID"
+        if not hmac.compare_digest(str(typed_confirmation or "").strip(), expected):
+            return "MANAGEMENT_CONFIRMATION_INVALID"
+        return ""
+
     def pre_submit_check(self) -> MT5LiveAdapterDisabledReceipt:
         bridge_result = self.check_bridge_write_skeleton()
         return self.submit_disabled(bridge_result.check)
@@ -215,3 +286,10 @@ class MT5LiveAdapterDisabled:
 
     def close(self) -> None:
         return None
+
+
+def _blocked_management_receipt(intent: str, reason: str) -> MT5ControlledManagementReceipt:
+    return MT5ControlledManagementReceipt(
+        "BLOCKED", intent, "NOT_RESERVED", False, False, False,
+        False, False, False, False, reason
+    )

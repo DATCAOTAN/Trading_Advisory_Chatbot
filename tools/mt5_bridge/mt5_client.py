@@ -5,6 +5,7 @@ import os
 import queue
 import threading
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Callable, Dict, List
 
 from tools.mt5_bridge.redaction import hash_identifier, redact_server
@@ -289,6 +290,65 @@ class MT5Client:
         snapshot["snapshot_reference"] = "mt5_lifecycle_snapshot_" + hash_identifier(stable)[:24]
         return snapshot
 
+    def resolve_management_target(
+        self, target_kind: str, protected_reference: str, symbol: str
+    ) -> Dict[str, Any]:
+        ok, message = self.ensure_initialized()
+        if not ok:
+            return {"status": "UNAVAILABLE", "reason": message, "match_count": 0}
+        if target_kind not in {"order", "position"}:
+            return {"status": "INVALID", "reason": "TARGET_KIND_INVALID", "match_count": 0}
+        try:
+            rows = _call_mt5(mt5.orders_get) if target_kind == "order" else _call_mt5(mt5.positions_get)
+            if rows is None:
+                return {"status": "UNAVAILABLE", "reason": "MT5_QUERY_RETURNED_NONE", "match_count": 0}
+            matches = [
+                item
+                for item in rows
+                if str(item._asdict().get("symbol", "")) == symbol
+                and hash_identifier(item._asdict().get("ticket")) == protected_reference
+            ]
+            if len(matches) != 1:
+                return {"status": "NOT_UNIQUE", "match_count": len(matches)}
+            data = matches[0]._asdict()
+            type_names = (
+                ("ORDER_TYPE_BUY", "ORDER_TYPE_SELL")
+                if target_kind == "order"
+                else ("POSITION_TYPE_BUY", "POSITION_TYPE_SELL")
+            )
+            if data.get("type") == getattr(mt5, type_names[0], object()):
+                direction = "BUY"
+            elif data.get("type") == getattr(mt5, type_names[1], object()):
+                direction = "SELL"
+            else:
+                direction = "UNKNOWN"
+            tick = _call_mt5(mt5.symbol_info_tick, symbol) if target_kind == "position" else None
+            info = _call_mt5(mt5.symbol_info, symbol) if target_kind == "position" else None
+            tick_data = tick._asdict() if tick is not None else {}
+            info_data = info._asdict() if info is not None else {}
+            point = Decimal(str(info_data.get("point") or "0"))
+            stops = Decimal(str(info_data.get("trade_stops_level") or "0"))
+            volume = data.get("volume_initial") if target_kind == "order" else data.get("volume")
+            return {
+                "status": "OK",
+                "match_count": 1,
+                "target_kind": target_kind,
+                "ticket": data.get("ticket"),
+                "broker_reference_hash": hash_identifier(data.get("ticket")),
+                "symbol": symbol,
+                "direction": direction,
+                "volume": volume,
+                "stop_loss": data.get("sl") or 0,
+                "take_profit": data.get("tp") or 0,
+                "bid": tick_data.get("bid"),
+                "ask": tick_data.get("ask"),
+                "minimum_stop_distance": str(point * stops),
+                "volume_min": info_data.get("volume_min") or 0,
+                "volume_step": info_data.get("volume_step") or 0,
+            }
+        except Exception as exc:
+            return {"status": "UNAVAILABLE", "reason": type(exc).__name__, "match_count": 0}
+
     def close(self) -> None:
         if mt5 is not None and self._initialized:
             try:
@@ -393,7 +453,7 @@ def _normalize_lifecycle_row(item: Any, kind: str, correlation_tags: tuple[str, 
             entry = "OUT"
         elif entry_value == getattr(mt5, "DEAL_ENTRY_INOUT", object()):
             entry = "INOUT"
-    return {
+    normalized = {
         **row,
         "broker_reference_hash": hash_identifier(ticket) if ticket is not None else "",
         "order_reference_hash": hash_identifier(order) if order is not None else "",
@@ -402,6 +462,28 @@ def _normalize_lifecycle_row(item: Any, kind: str, correlation_tags: tuple[str, 
         "matched_correlation_tags": [tag for tag in correlation_tags if tag in comment],
         "metadata_redacted": True,
     }
+    if kind == "position":
+        normalized["protection_reference_hash"] = protection_reference_hash(
+            str(data.get("symbol", "")), data.get("sl") or 0, data.get("tp") or 0
+        )
+    return normalized
+
+
+def protection_reference_hash(symbol: str, stop_loss: Any, take_profit: Any) -> str:
+    payload = {
+        "symbol": str(symbol),
+        "stop_loss": _normalized_number(stop_loss),
+        "take_profit": _normalized_number(take_profit),
+    }
+    return hash_identifier(json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
+
+
+def _normalized_number(value: Any) -> str:
+    number = Decimal(str(value))
+    text = format(number, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return "0" if text in {"", "-0"} else text
 
 
 def _unavailable_lifecycle_snapshot(reason: str) -> Dict[str, Any]:
