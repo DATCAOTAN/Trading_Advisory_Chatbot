@@ -81,6 +81,7 @@ tmp_debug_mt5_dry/
 # =============================================================================
 data/ingestion_state.json
 data/trading/execution_journal/*.jsonl
+data/trading/protected_requests/
 
 # =============================================================================
 # JUPYTER (nếu dùng notebook để thử nghiệm)

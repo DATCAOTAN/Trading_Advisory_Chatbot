@@ -473,6 +473,14 @@ class HumanValueApprovalLock:
             "payload_size_chars": int(self.payload_size_chars),
         }
 
+    def as_protected_dict(self) -> Dict[str, Any]:
+        """Serialize the lock with its approved values for protected local workflows."""
+        if self.approved_semantic_parameters is None:
+            raise ValueError("approved semantic parameters are missing")
+        payload = self.as_dict()
+        payload["approved_semantic_parameters"] = self.approved_semantic_parameters.to_protected_dict()
+        return payload
+
 
     def approved_semantic_integrity_valid(self) -> bool:
         parameters = self.approved_semantic_parameters
