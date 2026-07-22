@@ -1,8 +1,8 @@
 # TRADING_ADVISORY_CHATBOT — FULL CODEBASE, RUNTIME, ROADMAP, AND AGENT HANDOFF
 
-**Handoff version:** 4.0
+**Handoff version:** 4.1
 **Prepared from:** the uploaded `Trading_Advisory_Chatbot.zip`, the current Codex handoff snapshot, and the reported runtime/test results.
-**Snapshot period:** 2026-07-20 to 2026-07-21
+**Snapshot period:** 2026-07-20 to 2026-07-22
 **Primary workspace:** repository root
 
 ---
@@ -76,24 +76,25 @@ The immediate development focus is no longer broad RAG tuning, UI polish, or add
 
 The latest completed sprint is:
 
-`Sprint 35 - MT5 Reconciliation and Failure Recovery`
+`Sprint 36 - End-to-End Verification, Hardening and MVP Closure`
 
-Current validated state reported by the workspace:
+Current verified state:
 
 ```text
-reconciliation_pipeline=FOCUSED_VERIFIED
-result_unknown_reconciliation_verified=true
-stale_reserved_recovery_verified=true
-stale_submission_started_recovery_verified=true
-restart_persistence_verified=true
-reconciliation_idempotency_verified=true
-exact_broker_identifiers_protected=true
-automatic_retry_allowed=false
+verification_level=FULL_REGRESSION_AND_RUNTIME_PASS
+fake_mt5_end_to_end_tests=21 passed
+full_regression=2577 passed
+full_regression_subtests=156 passed
+bridge_health=OK
+write_skeleton_status=BLOCKED
+reconciliation_missing_auth=REJECTED_401
+reconciliation_invalid_auth=REJECTED_401
+docker_compose_config=PASS
+docker_restart=PASS
+streamlit_health=PASS_HTTP_200_OK
 production_order_send_call_sites=1
-automated_broker_submission=NOT_RUN
-manual_broker_submission=NOT_RUN
-manual_reconciliation=NOT_RUN
-full_regression=NOT_RUN
+src_metatrader5_imports=0
+automatic_retry_allowed=false
 live_submission_allowed=false
 live_execution_allowed=false
 order_send_allowed=false
@@ -101,39 +102,27 @@ execution_allowed=false
 executable=false
 order_sent=false
 kill_switch_engaged=true
+manual_broker_submission=NOT_RUN
 ```
 
 Meaning:
 
-- the protected execution journal now preserves stable correlation metadata and restart-safe reconciliation records;
-- stale `RESERVED` records become `RESERVATION_ABANDONED`, remain unusable, and require a new request;
-- stale `SUBMISSION_STARTED` records become `RESULT_UNKNOWN` before read-only reconciliation;
-- the authenticated host bridge performs bounded read-only order, deal, and position queries and independently revalidates request integrity and account context;
-- only a unique symbol, direction, volume, and broker-relationship match can confirm an unknown result;
-- ambiguous, absent, or failed broker evidence never proves rejection and never permits automatic retry;
-- exact broker identifiers remain only in the protected execution journal and are reduced to presence flags in public receipts;
-- automated verification used fake MT5 only; the manual reconciliation script, terminal-backed reconciliation, and broker submission were not run;
-- all execution defaults remain disabled, the kill switch remains engaged, and the single isolated production `order_send` call-site remains unchanged.
-
+- the fake-MT5 milestone suite covers blocked defaults, one-call controlled execution, duplicate prevention across restart, account-context change, unknown outcomes, reconciliation outcomes, restart recovery, corrupt persistence, authentication, integrity, and redaction;
+- protected journal corruption now fails closed instead of silently discarding malformed or conflicting state;
+- the legacy preflight scanner now enforces the current trust boundary: one call-site in the host execution module, none under `src/`, none in reconciliation, and no generic order endpoints;
+- one duplicated app-side controlled POST implementation was removed by reusing the existing protected POST helper;
+- the complete scripts regression passed;
+- host bridge health and non-submitting endpoint checks passed against the connected MT5 terminal;
+- the write skeleton remained blocked, reconciliation rejected missing and invalid authorization, and no protected execution journal was created;
+- Docker Compose configuration, app restart, and Streamlit HTTP 200 health check passed;
+- no automated or manual broker submission was performed.
 ## 2.2 Immediate goal
 
-Run Sprint 36 end-to-end runtime testing and targeted simplification without broad architectural consolidation.
+The controlled MT5 execution MVP is closed with full-regression and non-submitting runtime verification.
 
-The immediate target is:
+The next operator decision is whether to perform a separately authorized manual controlled submission and terminal-backed reconciliation on a selected demo account. That action remains outside automated verification and must not be inferred from MVP completion.
 
-```text
-protected controlled request
--> submit-once bridge boundary under explicit manual controls
--> restart and transport-loss scenarios
--> read-only reconciliation
--> journal corruption and duplicate scenarios
--> measured runtime evidence
--> targeted simplification
--> milestone full regression
-```
-
-Controlled manual broker verification and manual reconciliation remain separate operator actions. Neither was run during Sprint 35.
-
+No additional approval boundary or execution framework is required before that operator decision.
 ## 2.3 Long-term end-state
 
 The long-term product goal is an **autonomous MT5 decision and execution system** that can:
@@ -195,14 +184,13 @@ The architecture should eventually support both through an explicit account-envi
 
 ## Not currently implemented
 
-- verified manual broker submission in the current sprint;
-- order/position reconciliation after submission;
+- operator-verified controlled submission on a selected demo account;
+- terminal-backed reconciliation of an actual broker result;
 - authorization of retry after an unknown result;
 - complete position lifecycle management;
 - continuous runtime supervisor;
 - autonomous execution policy and position management;
 - live-account production promotion.
-
 ## Areas that should not be expanded now unless they block execution work
 
 - parser/MinerU improvements;
@@ -1680,29 +1668,24 @@ Verify whether:
 
 ---
 
-# 27. IMMEDIATE NEXT MILESTONE: END-TO-END RUNTIME TESTING
+# 27. CONTROLLED EXECUTION MVP CLOSURE
 
-The next engineering milestone is:
+`Sprint 36 - End-to-End Verification, Hardening and MVP Closure` is implemented and verified at `FULL_REGRESSION_AND_RUNTIME_PASS`.
 
-`Sprint 36 - End-to-End Runtime Testing and Simplification`
+Completed evidence:
 
-Sprint 35 added restart-safe, read-only reconciliation for stale and unknown protected execution records. Sprint 36 must exercise the complete controlled runtime path, including process restarts, transport loss, duplicate requests, stale records, and damaged journals, before any autonomous workflow or promotion toward live-account operation.
+- full fake-MT5 submit-once and reconciliation lifecycle coverage;
+- restart, duplicate, account-change, transport-loss, stale-state, and corrupt-journal coverage;
+- strict no-retry behavior for unknown, ambiguous, absent, and failed evidence;
+- exact one-call host bridge submission invariant and zero app/reconciliation call-sites;
+- full scripts regression, compileall, Docker Compose config, latency sampling, and static safety scans;
+- live bridge health, blocked write skeleton, and missing/invalid reconciliation authorization checks;
+- no automated or manual broker submission.
 
-Required properties:
 
-- test the full protected submit-once and reconciliation flow under explicit disabled-by-default controls;
-- test app and bridge restarts, disconnects, timeouts, stale records, duplicates, and corrupt or missing journals;
-- verify absence of broker evidence never authorizes retry;
-- measure stage latency and operational recovery behavior;
-- preserve one account-agnostic adapter and one isolated host-bridge submission call-site;
-- perform only targeted simplification justified by runtime evidence;
-- run the milestone full regression;
-- keep autonomous execution and live-account promotion disabled.
+The controlled execution MVP is complete for automated fake-MT5 and non-submitting bridge verification. Manual broker submission and terminal-backed reconciliation remain explicit operator actions.
 
-Controlled manual broker verification remains operator-only and was not run in Sprint 35.
-
----
-# 28. ROADMAP TO THE AUTONOMOUS END-STATE
+---# 28. ROADMAP TO THE AUTONOMOUS END-STATE
 
 The remaining work should be divided into release milestones.
 
@@ -1741,20 +1724,18 @@ Delivered:
 - no automatic retry and no additional submission call-site;
 - fake-MT5 focused verification only; manual reconciliation and broker submission not run.
 
-### Sprint 36 - End-to-End Runtime Testing and Simplification
+### Sprint 36 - End-to-End Verification, Hardening and MVP Closure (completed)
 
-Deliver:
+Delivered:
 
-- test full flow;
-- test bridge/app restarts;
-- test stale/missing data;
-- test duplicate input;
-- test corrupt/missing journal;
-- test disconnect and timeout;
-- measure stage latency;
-- identify redundant boundaries from runtime evidence;
-- perform targeted simplification;
-- milestone full regression.
+- one focused 21-test fake-MT5 lifecycle suite;
+- restart-safe duplicate, timeout, unknown-result, and reconciliation verification;
+- fail-closed protected journal handling for missing, truncated, malformed, and conflicting persistence;
+- current-architecture preflight enforcement without weakening default execution locks;
+- targeted reuse of the existing protected HTTP helper;
+- full regression: 2577 passed and 156 subtests passed;
+- non-submitting live bridge checks passed;
+- Docker app restart and Streamlit HTTP 200 health check passed.
 
 ## Release B — Autonomous Demo System
 
@@ -2189,4 +2170,4 @@ Inspect the repository, verify the current state, and cite exact files and symbo
 
 # 35. CURRENT ONE-PARAGRAPH SUMMARY
 
-`Trading_Advisory_Chatbot` is a large RAG, market-context, decision, and MT5 integration codebase whose execution side has progressed through Sprint 35. The system reads real MT5 market data through a host bridge, binds approved semantic values to an immutable protected request, owns one isolated submit-once call-site, and now records stable correlation metadata for restart-safe read-only reconciliation. Stale reservations are abandoned without key reuse, stale submission starts become unknown, and only unique bounded broker evidence can confirm an unknown result; ambiguous, absent, or failed evidence never authorizes retry. Exact broker identifiers remain in the protected journal, public receipts are redacted, all execution defaults remain disabled, and the kill switch remains engaged. Automated verification used fake MT5; no manual reconciliation or broker submission was run. The immediate objective is Sprint 36 end-to-end runtime testing and targeted simplification, while the long-term objective remains an autonomous demo-first MT5 system governed by deterministic policy, reconciliation, lifecycle management, and runtime supervision, with live-account operation gated by a separate explicit promotion.
+`Trading_Advisory_Chatbot` has completed the controlled MT5 execution MVP through Sprint 36. The system keeps MetaTrader5 inside the host bridge, binds approved semantic values to protected requests, owns exactly one isolated submit-once call-site, prevents duplicate submission across restart, and reconciles unknown results from bounded read-only broker evidence without automatic retry. Sprint 36 added full fake-MT5 lifecycle coverage, fail-closed corrupt-journal handling, current-boundary preflight scans, and one targeted HTTP-client simplification. The full scripts regression passed with 2577 tests and 156 subtests; compileall, Docker Compose config, static scans, bridge health, blocked write-skeleton, and reconciliation authorization checks also passed. Docker app restart and Streamlit HTTP 200 health check passed. No controlled submission endpoint was called, no broker order was submitted, all execution defaults remain disabled, and the kill switch remains engaged. Manual demo-account submission, terminal-backed reconciliation of a real result, position lifecycle management, runtime supervision, autonomous operation, and live-account promotion remain outside the verified MVP.

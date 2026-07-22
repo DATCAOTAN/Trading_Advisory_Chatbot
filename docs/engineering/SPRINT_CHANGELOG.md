@@ -232,3 +232,40 @@ Commit: included in this commit
 - Next: Sprint 36 - End-to-End Runtime Testing and Simplification.
 
 ---
+
+### Sprint 36 - End-to-End Verification, Hardening and MVP Closure
+
+Date: 2026-07-22
+Verification: `FULL_REGRESSION_AND_RUNTIME_PASS`
+Commit: included in this commit
+
+#### Implemented
+
+- Added one 21-test fake-MT5 milestone suite for blocked, submit-once, duplicate, account-change, unknown-result, reconciliation, restart, corruption, auth, integrity, and redaction paths.
+- Made protected execution-journal corruption and conflicting transitions fail closed.
+- Updated legacy preflight scans to enforce one host-bridge call-site and zero app/reconciliation call-sites.
+- Reused the existing protected POST helper in the bridge client; no new boundary or framework was added.
+
+#### Verification
+
+- Milestone tests: 21 passed; neighboring controlled/reconciliation tests: 72 passed.
+- Preflight and permission regression: 205 passed.
+- Full scripts regression: 2577 passed, 156 subtests passed, 3 dependency warnings.
+- Compileall, `docker-compose config --quiet`, app restart, and Streamlit HTTP 200 health: passed.
+- Static scan: 1 production `.order_send(` in `tools/mt5_bridge/execution.py`; 0 under `src/` and reconciliation; 0 MetaTrader5 imports under `src/`.
+- Bridge runtime: health OK; write skeleton BLOCKED; missing/invalid reconciliation auth rejected with HTTP 401; no execution journal created.
+- Fake latency, 20 samples: controlled median 58.546 ms, p95 63.871 ms; reconciliation median 55.941 ms, p95 60.812 ms; controlled execution was slowest.
+
+#### Current state
+
+- Live submission, execution, order-send, executable, order-sent, and automatic-retry flags remain false; kill switch remains engaged.
+- Controlled MT5 execution MVP is complete for automated fake-MT5 and non-submitting bridge verification.
+
+#### Not verified / known limitations
+
+- No controlled-submit request, manual broker submission, or terminal-backed reconciliation of an actual order was performed.
+- Position lifecycle management, runtime supervision, autonomous operation, and live-account promotion remain unimplemented.
+
+#### Next step
+
+- Operator decision on separately authorized manual demo-account submission and terminal-backed reconciliation; do not infer execution authority from MVP completion.

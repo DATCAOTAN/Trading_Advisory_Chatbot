@@ -219,9 +219,9 @@ class MarketRegimeCalendarContextTests(unittest.TestCase):
     def test_no_order_send_oanda_rest_qdrant_reset_or_rag_imports(self):
         files = list((PROJECT_ROOT / "src" / "services" / "trading").rglob("*.py"))
         text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in files)
-        text = text.replace("mt5_order_send_available", "mt5_order_submission_available")
-        text = text.replace("order_send_allowed", "order_submission_allowed")
-        self.assertNotIn("order" + "_send", text)
+        self.assertNotIn(".order" + "_send(", text)
+        self.assertNotIn("import MetaTrader5", text)
+        self.assertNotIn("from MetaTrader5", text)
         self.assertNotIn("api-fxtrade" + ".oanda.com", text)
         self.assertNotIn("delete" + "_collection", text)
         self.assertNotIn("recreate" + "_collection", text)

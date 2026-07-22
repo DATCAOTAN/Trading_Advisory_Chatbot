@@ -13,6 +13,7 @@ class LiveExecutionPreflightPolicy:
     require_blocked_receipt: bool = True
     require_hard_block: bool = True
     require_order_submission_absent: bool = True
+    require_controlled_order_send_boundary: bool = True
     require_no_bridge_order_endpoints: bool = True
     require_no_docker_mt5_import: bool = True
     require_journal_writable: bool = True

@@ -401,16 +401,23 @@ def test_no_order_endpoints_added_to_mt5_bridge_server():
     assert not any(path in text for path in forbidden_paths)
 
 
-def test_no_named_order_endpoint_exists():
+def test_only_approved_controlled_execution_endpoints_exist():
     text = Path("tools/mt5_bridge/server.py").read_text(encoding="utf-8")
-    assert "do_POST" not in text
-    assert "order" + "_send" not in text
+    assert "def do_POST" in text
+    for endpoint in ["/execution/write-skeleton/check", "/execution/controlled-submit", "/execution/reconcile"]:
+        assert endpoint in text
 
 
-def test_no_order_send_implementation():
-    for root in [Path("src"), Path("tools")]:
-        for item in root.rglob("*.py"):
-            assert "order" + "_send(" not in item.read_text(encoding="utf-8", errors="ignore")
+def test_exactly_one_order_send_call_exists_in_host_execution_boundary():
+    src_text = "\n".join(item.read_text(encoding="utf-8", errors="ignore") for item in Path("src").rglob("*.py"))
+    execution_text = Path("tools/mt5_bridge/execution.py").read_text(encoding="utf-8", errors="ignore")
+    reconciliation_text = Path("tools/mt5_bridge/reconciliation.py").read_text(encoding="utf-8", errors="ignore")
+    tools_text = "\n".join(item.read_text(encoding="utf-8", errors="ignore") for item in Path("tools").rglob("*.py"))
+    marker = ".order" + "_send("
+    assert marker not in src_text
+    assert execution_text.count(marker) == 1
+    assert marker not in reconciliation_text
+    assert tools_text.count(marker) == 1
 
 
 def test_no_qdrant_reset_delete_recreate():

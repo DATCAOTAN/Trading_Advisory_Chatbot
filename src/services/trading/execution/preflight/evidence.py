@@ -90,44 +90,80 @@ class PreflightEvidenceCollector:
     def _bridge_endpoint_summary(self) -> dict[str, Any]:
         server_path = self.project_root / "tools" / "mt5_bridge" / "server.py"
         text = _safe_read(server_path)
-        endpoint_markers = ["/order", "/execute", "/send" + "_order", "/order" + "_send", "/trade", "/position/open"]
-        found = [marker for marker in endpoint_markers if marker in text]
+        forbidden_endpoints = ["/order", "/execute", "/send" + "_order", "/order" + "_send", "/trade", "/position/open"]
+        controlled_endpoints = [
+            "/execution/write-skeleton/check",
+            "/execution/controlled-submit",
+            "/execution/reconcile",
+        ]
+        forbidden_found = [marker for marker in forbidden_endpoints if marker in text]
+        controlled_found = [marker for marker in controlled_endpoints if marker in text]
         do_post_present = bool(re.search(r"def\s+do_POST\b", text))
         return {
             "server_file_present": server_path.exists(),
-            "execution_endpoint_count": len(found),
-            "execution_endpoint_present": bool(found),
+            "execution_endpoint_count": len(forbidden_found),
+            "execution_endpoint_present": bool(forbidden_found),
+            "forbidden_endpoint_count": len(forbidden_found),
+            "forbidden_endpoint_present": bool(forbidden_found),
+            "controlled_endpoint_count": len(controlled_found),
+            "controlled_endpoints_complete": len(controlled_found) == len(controlled_endpoints),
             "do_post_handler_present": do_post_present,
-            "do_post_execution_handler_present": bool(do_post_present and any(marker in text for marker in found)),
+            "do_post_execution_handler_present": bool(do_post_present and controlled_found),
         }
 
     def _code_scan_summary(self) -> dict[str, Any]:
         source_paths = list((self.project_root / "src").rglob("*.py")) + list((self.project_root / "tools").rglob("*.py"))
         source_paths = [path for path in source_paths if "__pycache__" not in path.parts]
-        call_pattern = re.compile(r"\border" + r"_send\s*\(")
+        call_pattern = re.compile(r"\.\s*order" + r"_send\s*\(")
         live_method_pattern = re.compile(r"\bdef\s+(submit_live_order|send_order|place_order|execute_trade)\b")
         mt5_import_pattern = re.compile(r"\b(import|from)\s+Meta" + r"Trader5\b")
         ticket_pattern = re.compile(r"\b(mt5_ticket|deal_id)\s*=")
         counts = {
             "order_submission_call_count": 0,
+            "app_order_submission_call_count": 0,
+            "bridge_execution_order_submission_call_count": 0,
+            "reconciliation_order_submission_call_count": 0,
             "live_method_definition_count": 0,
             "docker_side_mt5_import_count": 0,
             "mt5_ticket_or_deal_marker_count": 0,
+            "protected_reconciliation_ticket_or_deal_marker_count": 0,
+            "unprotected_ticket_or_deal_marker_count": 0,
         }
         for path in source_paths:
             text = _safe_read(path)
-            counts["order_submission_call_count"] += len(call_pattern.findall(text))
+            call_count = len(call_pattern.findall(text))
+            counts["order_submission_call_count"] += call_count
+            if "src" in path.parts:
+                counts["app_order_submission_call_count"] += call_count
+            if path.as_posix().endswith("tools/mt5_bridge/execution.py"):
+                counts["bridge_execution_order_submission_call_count"] += call_count
+            if path.as_posix().endswith("tools/mt5_bridge/reconciliation.py"):
+                counts["reconciliation_order_submission_call_count"] += call_count
             counts["live_method_definition_count"] += len(live_method_pattern.findall(text))
             if "src" in path.parts:
                 counts["docker_side_mt5_import_count"] += len(mt5_import_pattern.findall(text))
-            counts["mt5_ticket_or_deal_marker_count"] += len(ticket_pattern.findall(text))
+            ticket_or_deal_count = len(ticket_pattern.findall(text))
+            counts["mt5_ticket_or_deal_marker_count"] += ticket_or_deal_count
+            if path.as_posix().endswith("tools/mt5_bridge/reconciliation.py"):
+                counts["protected_reconciliation_ticket_or_deal_marker_count"] += ticket_or_deal_count
+            else:
+                counts["unprotected_ticket_or_deal_marker_count"] += ticket_or_deal_count
         return {
             "files_scanned": len(source_paths),
             **counts,
             "order_submission_absent": counts["order_submission_call_count"] == 0,
+            "controlled_order_submission_call_site_valid": (
+                counts["order_submission_call_count"] == 1
+                and counts["bridge_execution_order_submission_call_count"] == 1
+                and counts["app_order_submission_call_count"] == 0
+                and counts["reconciliation_order_submission_call_count"] == 0
+            ),
+            "app_order_submission_absent": counts["app_order_submission_call_count"] == 0,
+            "reconciliation_order_submission_absent": counts["reconciliation_order_submission_call_count"] == 0,
             "live_methods_absent": counts["live_method_definition_count"] == 0,
             "docker_side_mt5_import_absent": counts["docker_side_mt5_import_count"] == 0,
             "mt5_ticket_or_deal_absent": counts["mt5_ticket_or_deal_marker_count"] == 0,
+            "unprotected_ticket_or_deal_absent": counts["unprotected_ticket_or_deal_marker_count"] == 0,
         }
 
     def _ui_scan_summary(self) -> dict[str, Any]:
@@ -280,8 +316,8 @@ def _summary_warnings(payload: dict[str, Any]) -> list[str]:
     warnings: list[str] = []
     if not payload.get("journal_summary", {}).get("journal_parent_writable", False):
         warnings.append("preflight_journal_parent_not_writable")
-    if payload.get("mt5_bridge_endpoint_summary", {}).get("execution_endpoint_present", False):
-        warnings.append("mt5_bridge_execution_endpoint_detected")
+    if payload.get("mt5_bridge_endpoint_summary", {}).get("forbidden_endpoint_present", False):
+        warnings.append("mt5_bridge_forbidden_endpoint_detected")
     if payload.get("ui_scan_summary", {}).get("unsafe_button_present", False):
         warnings.append("unsafe_dashboard_button_detected")
     return warnings

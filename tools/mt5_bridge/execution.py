@@ -32,6 +32,10 @@ IDEMPOTENCY_TRANSITIONS = {
 }
 
 
+class ProtectedExecutionJournalError(RuntimeError):
+    """Fail-closed protected persistence error with a public-safe reason."""
+
+
 @dataclass(frozen=True)
 class ControlledExecutionConfig:
     enabled: bool = False
@@ -357,14 +361,42 @@ class ProtectedExecutionJournal:
         if not self.path.exists():
             return []
         rows: list[dict[str, Any]] = []
-        for line in self.path.read_text(encoding="utf-8").splitlines():
+        try:
+            lines = self.path.read_text(encoding="utf-8").splitlines()
+        except OSError as exc:
+            raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_UNAVAILABLE") from exc
+        for line in lines:
+            if not line.strip():
+                continue
             try:
                 row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(row, dict):
-                rows.append(row)
+            except json.JSONDecodeError as exc:
+                raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_CORRUPT") from exc
+            if not isinstance(row, dict):
+                raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_CORRUPT")
+            rows.append(row)
+        self._validate_rows(rows)
         return rows
+
+    @staticmethod
+    def _validate_rows(rows: list[dict[str, Any]]) -> None:
+        states_by_key: dict[str, list[str]] = {}
+        for row in rows:
+            if row.get("record_type") == "RECONCILIATION":
+                if not row.get("reconciliation_reference") or not row.get("reconciliation_status"):
+                    raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_CORRUPT")
+                continue
+            state = row.get("state")
+            key_hash = row.get("idempotency_key_hash")
+            if state not in IDEMPOTENCY_STATES or not isinstance(key_hash, str) or len(key_hash) != 64:
+                raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_CORRUPT")
+            previous = states_by_key.setdefault(key_hash, [])
+            if not previous:
+                if state != "RESERVED":
+                    raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_CORRUPT")
+            elif state not in IDEMPOTENCY_TRANSITIONS.get(previous[-1], set()):
+                raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_CORRUPT")
+            previous.append(state)
 
     def _append_unlocked(self, row: Mapping[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -772,7 +804,8 @@ def _safe_reason(exc: Exception) -> str:
         "IDEMPOTENCY_MISMATCH", "PRE_SUBMIT_VALIDATION_REQUIRED", "HUMAN_CONFIRMATION_INVALID",
         "LOCK_TIMESTAMP_INVALID", "APPROVAL_EXPIRED", "MT5_TRADING_CAPABILITY_UNAVAILABLE",
         "ACCOUNT_CONTEXT_MISMATCH", "ACCOUNT_CONTEXT_CHANGED", "UNSUPPORTED_SEMANTIC_MAPPING",
-        "MT5_PACKAGE_UNAVAILABLE",
+        "MT5_PACKAGE_UNAVAILABLE", "EXECUTION_JOURNAL_CORRUPT",
+        "EXECUTION_JOURNAL_UNAVAILABLE",
     }
     return value if value in allowed else "INVALID_REQUEST"
 

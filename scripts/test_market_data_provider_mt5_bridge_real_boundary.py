@@ -193,7 +193,9 @@ class MT5BridgeMarketDataBoundaryTests(unittest.TestCase):
         bridge_server = (PROJECT_ROOT / "tools" / "mt5_bridge" / "server.py").read_text(encoding="utf-8")
         provider_text = (PROJECT_ROOT / "src" / "services" / "trading" / "market" / "mt5_bridge_provider.py").read_text(encoding="utf-8")
 
-        self.assertNotIn("order_send", bridge_server)
+        self.assertNotIn(".order" + "_send(", bridge_server)
+        for marker in ["/order", "/execute", "/send" + "_order", "/order" + "_send", "/trade", "/position/open"]:
+            self.assertNotIn(marker, bridge_server)
         self.assertNotIn("api-fxtrade.oanda.com", provider_text)
 
 

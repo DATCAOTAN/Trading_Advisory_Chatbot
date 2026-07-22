@@ -429,9 +429,8 @@ def test_mt5_bridge_has_no_order_endpoints():
         assert marker not in text
 
 
-def test_no_order_submission_implementation_in_execution_modules():
+def test_no_order_submission_call_in_application_execution_modules():
     text = "\n".join(path.read_text(encoding="utf-8") for path in Path("src/services/trading/execution").rglob("*.py"))
-    text = text.replace("mt5_order_send_available", "mt5_order_submission_available")
-    text = text.replace("order_send_allowed", "order_submission_allowed")
-    text = text.replace('"order" + "_send"', '"order_submission"')
-    assert "order" + "_send" not in text
+    assert ".order" + "_send(" not in text
+    assert "import MetaTrader5" not in text
+    assert "from MetaTrader5" not in text

@@ -84,30 +84,9 @@ class MT5BridgeWriteSkeletonClient:
         return self._post_protected("/execution/reconcile", payload, auth_token)
 
     def submit_controlled(self, payload: dict, auth_token: str) -> dict:
-        if not auth_token:
-            raise ValueError("controlled execution authentication is missing")
-        body = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("utf-8")
-        req = request.Request(
-            f"{self.bridge_url}/execution/controlled-submit",
-            data=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-MT5-Bridge-Execution-Token": auth_token,
-            },
-            method="POST",
+        return self._post_protected(
+            "/execution/controlled-submit", payload, auth_token
         )
-        try:
-            with request.urlopen(req, timeout=self.timeout_seconds) as response:
-                result = json.loads(response.read().decode("utf-8"))
-        except Exception as exc:
-            if hasattr(exc, "read"):
-                result = json.loads(exc.read().decode("utf-8"))
-            else:
-                raise
-        if not isinstance(result, dict):
-            raise ValueError("invalid controlled execution response")
-        return result
-
     def _post_protected(self, endpoint: str, payload: dict, auth_token: str) -> dict:
         if not auth_token:
             raise ValueError("bridge authentication is missing")

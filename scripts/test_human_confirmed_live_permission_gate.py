@@ -487,7 +487,9 @@ def test_no_order_endpoints_added_to_mt5_bridge_server():
     text = Path("tools/mt5_bridge/server.py").read_text(encoding="utf-8", errors="ignore")
     for marker in ["/order", "/execute", "/send" + "_order", "/order" + "_send", "/trade", "/position/open"]:
         assert marker not in text
-    assert "do_POST" not in text
+    for endpoint in ["/execution/write-skeleton/check", "/execution/controlled-submit", "/execution/reconcile"]:
+        assert endpoint in text
+    assert "def do_POST" in text
 
 
 def test_unit_fixtures_do_not_call_live_external_services():

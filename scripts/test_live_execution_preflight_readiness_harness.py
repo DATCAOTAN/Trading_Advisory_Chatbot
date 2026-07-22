@@ -262,6 +262,7 @@ def test_policy_defaults_preflight_enabled():
         "require_blocked_receipt",
         "require_hard_block",
         "require_order_submission_absent",
+        "require_controlled_order_send_boundary",
         "require_no_bridge_order_endpoints",
         "require_no_docker_mt5_import",
         "require_journal_writable",
@@ -291,13 +292,17 @@ def test_evidence_collector_summarizes_adapter_registry_safely(tmp_path):
 
 def test_evidence_collector_summarizes_mt5_bridge_endpoints_safely(tmp_path):
     summary = _evidence(tmp_path).mt5_bridge_endpoint_summary
-    assert summary["execution_endpoint_present"] is False
-    assert summary["do_post_execution_handler_present"] is False
+    assert summary["forbidden_endpoint_present"] is False
+    assert summary["controlled_endpoints_complete"] is True
+    assert summary["do_post_execution_handler_present"] is True
 
 
 def test_evidence_collector_summarizes_code_scan_safely(tmp_path):
     summary = _evidence(tmp_path).code_scan_summary
-    assert summary["order_submission_absent"] is True
+    assert summary["order_submission_absent"] is False
+    assert summary["controlled_order_submission_call_site_valid"] is True
+    assert summary["app_order_submission_absent"] is True
+    assert summary["reconciliation_order_submission_absent"] is True
     assert summary["live_methods_absent"] is True
     assert summary["docker_side_mt5_import_absent"] is True
 
@@ -338,9 +343,12 @@ def test_runner_creates_at_least_40_checks(tmp_path):
         "config_live_disabled",
         "config_hard_block_enabled",
         "config_order_submission_disabled",
-        "bridge_no_execution_endpoints",
-        "bridge_no_post_execution_handler",
-        "code_no_order_submission_call",
+        "bridge_no_forbidden_execution_endpoints",
+        "bridge_controlled_execution_endpoints_complete",
+        "bridge_post_handler_controlled",
+        "code_controlled_order_submission_call_site",
+        "code_no_app_order_submission_call",
+        "code_no_reconciliation_order_submission_call",
         "code_no_live_method_names",
         "code_no_docker_side_mt5_import",
         "dashboard_no_confirm_trade_button",
@@ -488,7 +496,9 @@ def test_no_order_endpoints_added_to_mt5_bridge_server():
     text = Path("tools/mt5_bridge/server.py").read_text(encoding="utf-8", errors="ignore")
     for marker in ["/order", "/execute", "/send" + "_order", "/order" + "_send", "/trade", "/position/open"]:
         assert marker not in text
-    assert "do_POST" not in text
+    for endpoint in ["/execution/write-skeleton/check", "/execution/controlled-submit", "/execution/reconcile"]:
+        assert endpoint in text
+    assert "def do_POST" in text
 
 
 def test_unit_fixtures_do_not_call_live_external_services():

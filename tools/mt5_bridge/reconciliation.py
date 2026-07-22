@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hmac
 import json
@@ -8,7 +8,12 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
-from tools.mt5_bridge.execution import ProtectedExecutionJournal, _authenticated, _sha256
+from tools.mt5_bridge.execution import (
+    ProtectedExecutionJournal,
+    ProtectedExecutionJournalError,
+    _authenticated,
+    _sha256,
+)
 
 
 RECONCILIATION_REQUEST_VERSION = "mt5-execution-reconciliation/v1"
@@ -236,6 +241,8 @@ class ControlledMT5ReconciliationService:
         except ValueError as exc:
             reason = str(exc) if str(exc).isupper() else "RECONCILIATION_INVALID"
             return _blocked(reason), 403
+        except ProtectedExecutionJournalError as exc:
+            return _blocked(str(exc)), 409
         except RuntimeError:
             return _blocked("RECONCILIATION_STATE_CONFLICT"), 409
 
