@@ -443,3 +443,31 @@ Commit: included in this commit
 - All execution, management, retry, and autonomous policy permissions remain blocked by default; broker mutation was NOT RUN.
 - Three regression warnings are upstream dependency deprecations; actual broker submission and position mutation remain operator-only and unverified in this closure.
 - The planned sprint roadmap is complete. No Sprint 42 is planned; future work is operational acceptance or evidence-driven maintenance only.
+
+---
+
+### Post-release Maintenance - Structured Market and Pending Order Intent Candidate
+
+Date: 2026-07-23
+Verification: `FOCUSED_AND_RUNTIME_PASS`
+Commit: NOT COMMITTED
+
+#### Implemented
+
+- Extended the existing autonomous candidate and structured-input parser for BUY, SELL, LIMIT, STOP, and STOP_LIMIT proposals; no parallel candidate or execution boundary was added.
+- Added deterministic action resolution, Bid/Ask and optional symbol-metadata checks, separate stop-limit trigger/limit fields, integrity hashing, and redacted public output.
+- Preserved legacy decision/management behavior and all non-executable safety flags.
+
+#### Verification
+
+- Focused structured-order candidate tests: 29 passed.
+- Neighboring orchestrator and autonomous policy tests: 67 passed.
+- Changed-path compileall and static scans passed: 0 `MetaTrader5` imports under `src/`, exactly 1 existing production `.order_send(` call-site.
+- Docker Compose config, app restart/healthy status, Streamlit HTTP 200 (`ok`), and a valid non-broker candidate v2 smoke passed.
+- Full regression, bridge runtime, controlled endpoints, and broker mutation: NOT RUN.
+
+#### Current state / limitations
+
+- Structured proposals remain advisory and non-executable; LLM-supplied action cannot override deterministic resolution.
+- Symbol metadata is consumed only when supplied by the structured snapshot; no universal distance constant is assumed.
+- This is post-release maintenance, not Sprint 42.

@@ -5,8 +5,9 @@ import hmac
 import json
 import os
 import threading
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -25,7 +26,8 @@ from src.services.trading.reasoning.models import MethodCandidateAssessment, Met
 from src.services.trading.scoring.models import SignalScoreReport
 
 
-AUTONOMOUS_DECISION_SCHEMA_VERSION = "autonomous-decision-candidate/v1"
+AUTONOMOUS_DECISION_SCHEMA_VERSION = "autonomous-decision-candidate/v2"
+AUTONOMOUS_DECISION_LEGACY_SCHEMA_VERSION = "autonomous-decision-candidate/v1"
 
 
 class AutonomousDecisionIntent(str, Enum):
@@ -41,6 +43,34 @@ class AutonomousDecisionEligibility(str, Enum):
     ELIGIBLE_CANDIDATE = "ELIGIBLE_CANDIDATE"
     NOT_ELIGIBLE = "NOT_ELIGIBLE"
     HUMAN_REVIEW_REQUIRED = "HUMAN_REVIEW_REQUIRED"
+
+
+class AutonomousOrderSide(str, Enum):
+    BUY = "BUY"
+    SELL = "SELL"
+
+
+class AutonomousEntryIntent(str, Enum):
+    IMMEDIATE = "IMMEDIATE"
+    PULLBACK = "PULLBACK"
+    BREAKOUT = "BREAKOUT"
+    STOP_LIMIT = "STOP_LIMIT"
+
+
+class AutonomousOrderType(str, Enum):
+    BUY = "BUY"
+    SELL = "SELL"
+    BUY_LIMIT = "BUY_LIMIT"
+    SELL_LIMIT = "SELL_LIMIT"
+    BUY_STOP = "BUY_STOP"
+    SELL_STOP = "SELL_STOP"
+    BUY_STOP_LIMIT = "BUY_STOP_LIMIT"
+    SELL_STOP_LIMIT = "SELL_STOP_LIMIT"
+
+
+class AutonomousOrderAction(str, Enum):
+    MARKET = "MARKET"
+    PENDING = "PENDING"
 
 
 class AutonomousDecisionJournalError(RuntimeError):
@@ -77,6 +107,38 @@ class AutonomousDecisionConfig:
 
 
 @dataclass(frozen=True)
+class AutonomousOrderIntentProposal:
+    symbol: str
+    side: str
+    entry_intent: str
+    order_type: str
+    proposed_action: str = ""
+    entry_price: Any = field(default=None, repr=False)
+    trigger_price: Any = field(default=None, repr=False)
+    limit_price: Any = field(default=None, repr=False)
+    stop_loss: Any = field(default=None, repr=False)
+    take_profit: Any = field(default=None, repr=False)
+    proposed_volume: Any = field(default=None, repr=False)
+    risk_policy_reference: str = ""
+    structured_reasoning: tuple[str, ...] = field(default=(), repr=False)
+
+
+@dataclass(frozen=True)
+class AutonomousOrderMarketSnapshot:
+    snapshot_reference: str
+    observed_at: str
+    symbol: str
+    bid: Any = field(repr=False)
+    ask: Any = field(repr=False)
+    provider_name: str = "mt5_bridge"
+    point: Any = field(default=None, repr=False)
+    tick_size: Any = field(default=None, repr=False)
+    digits: int | None = None
+    minimum_distance_points: Any = field(default=None, repr=False)
+    source_refs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class AutonomousDecisionInputs:
     runtime_context: RuntimeContextPack
     method_selection: MethodSelectionResult
@@ -89,6 +151,8 @@ class AutonomousDecisionInputs:
     direction: str = ""
     semantic_parameter_references: tuple[str, ...] = ()
     exposure_effect: str = "NONE"
+    order_proposal: AutonomousOrderIntentProposal | None = None
+    order_market_snapshot: AutonomousOrderMarketSnapshot | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +179,23 @@ class AutonomousDecisionCandidate:
     blocked_reason_codes: tuple[str, ...]
     provenance_hash: str
     decision_idempotency_key: str
+    side: str = ""
+    entry_intent: str = ""
+    order_type: str = ""
+    action: str = ""
+    advisory_action: str = ""
+    entry_price: str = field(default="", repr=False)
+    trigger_price: str = field(default="", repr=False)
+    limit_price: str = field(default="", repr=False)
+    stop_loss: str = field(default="", repr=False)
+    take_profit: str = field(default="", repr=False)
+    proposed_volume: str = field(default="", repr=False)
+    risk_policy_reference: str = ""
+    structured_reasoning: tuple[str, ...] = field(default=(), repr=False)
+    market_snapshot_reference: str = ""
+    market_snapshot_provenance_hash: str = ""
+    market_recommendation: str = ""
+    structured_order_hash: str = ""
     execution_authority: bool = False
     human_confirmation_present: bool = False
     execution_permission_requested: bool = False
@@ -136,6 +217,23 @@ class AutonomousDecisionCandidate:
             "symbol_reference": self.symbol_reference,
             "intent": self.intent,
             "direction_present": bool(self.direction),
+            "side_present": bool(self.side),
+            "entry_intent": self.entry_intent,
+            "order_type": self.order_type,
+            "action": self.action,
+            "advisory_action_present": bool(self.advisory_action),
+            "entry_price_present": bool(self.entry_price),
+            "trigger_price_present": bool(self.trigger_price),
+            "limit_price_present": bool(self.limit_price),
+            "stop_loss_present": bool(self.stop_loss),
+            "take_profit_present": bool(self.take_profit),
+            "proposed_volume_present": bool(self.proposed_volume),
+            "risk_policy_reference": self.risk_policy_reference,
+            "structured_reasoning_count": len(self.structured_reasoning),
+            "market_snapshot_reference": self.market_snapshot_reference,
+            "market_snapshot_provenance_hash": self.market_snapshot_provenance_hash,
+            "market_recommendation": self.market_recommendation,
+            "structured_order_hash": self.structured_order_hash,
             "semantic_parameter_reference_count": len(self.proposed_semantic_parameter_references),
             "market_context_reference": self.market_context_reference,
             "knowledge_evidence_reference_count": len(self.knowledge_evidence_references),
@@ -316,7 +414,11 @@ class AutonomousDecisionOrchestrator:
         forced_blockers: Sequence[str] = (),
     ) -> AutonomousDecisionCandidate:
         evaluated_at = _utc(now)
+        structured_order = _resolve_order_proposal(
+            inputs, evaluated_at, self.config.input_max_age_seconds
+        )
         blockers = _input_blockers(inputs, evaluated_at, self.config)
+        blockers.extend(structured_order["blockers"])
         blockers.extend(str(item) for item in forced_blockers if item)
         intent, eligibility = _classify(inputs, blockers)
         blockers = sorted(set(blockers))
@@ -336,10 +438,11 @@ class AutonomousDecisionOrchestrator:
             lifecycle_reference=lifecycle_reference,
             lifecycle_state=lifecycle_state,
             reconciliation_reference=reconciliation_reference,
+            structured_order=structured_order,
         )
         provenance_hash = _sha256(_canonical_json(canonical))
         candidate_reference = "autonomous_decision_" + provenance_hash[:24]
-        idempotency_key = _sha256("autonomous-decision/v1|" + provenance_hash)
+        idempotency_key = _sha256("autonomous-decision/v2|" + provenance_hash)
         generated_at = evaluated_at.isoformat()
         expires_at = (evaluated_at + timedelta(seconds=self.config.ttl_seconds)).isoformat()
         return AutonomousDecisionCandidate(
@@ -371,13 +474,35 @@ class AutonomousDecisionOrchestrator:
             blocked_reason_codes=tuple(blockers),
             provenance_hash=provenance_hash,
             decision_idempotency_key=idempotency_key,
+            side=structured_order["side"],
+            entry_intent=structured_order["entry_intent"],
+            order_type=structured_order["order_type"],
+            action=structured_order["action"],
+            advisory_action=structured_order["advisory_action"],
+            entry_price=structured_order["entry_price"],
+            trigger_price=structured_order["trigger_price"],
+            limit_price=structured_order["limit_price"],
+            stop_loss=structured_order["stop_loss"],
+            take_profit=structured_order["take_profit"],
+            proposed_volume=structured_order["proposed_volume"],
+            risk_policy_reference=structured_order["risk_policy_reference"],
+            structured_reasoning=structured_order["structured_reasoning"],
+            market_snapshot_reference=structured_order["market_snapshot_reference"],
+            market_snapshot_provenance_hash=structured_order[
+                "market_snapshot_provenance_hash"
+            ],
+            market_recommendation=structured_order["market_recommendation"],
+            structured_order_hash=structured_order["structured_order_hash"],
         )
 
     def validate_candidate(
         self, candidate: AutonomousDecisionCandidate, *, now: datetime | None = None
     ) -> AutonomousDecisionValidationResult:
         issues: list[str] = []
-        if candidate.schema_version != AUTONOMOUS_DECISION_SCHEMA_VERSION:
+        if candidate.schema_version not in {
+            AUTONOMOUS_DECISION_SCHEMA_VERSION,
+            AUTONOMOUS_DECISION_LEGACY_SCHEMA_VERSION,
+        }:
             issues.append("INVALID_SCHEMA_VERSION")
         if candidate.intent not in {item.value for item in AutonomousDecisionIntent}:
             issues.append("UNSUPPORTED_INTENT")
@@ -421,6 +546,31 @@ class AutonomousDecisionOrchestrator:
             issues.append("MISSING_DIRECTION")
         if candidate.direction and candidate.direction not in {"BUY", "SELL"}:
             issues.append("UNSUPPORTED_DIRECTION")
+        if candidate.side and candidate.side not in {item.value for item in AutonomousOrderSide}:
+            issues.append("UNSUPPORTED_ORDER_SIDE")
+        if candidate.entry_intent and candidate.entry_intent not in {
+            item.value for item in AutonomousEntryIntent
+        }:
+            issues.append("UNSUPPORTED_ENTRY_INTENT")
+        if candidate.order_type and candidate.order_type not in {
+            item.value for item in AutonomousOrderType
+        }:
+            issues.append("UNSUPPORTED_ORDER_TYPE")
+        if candidate.action and candidate.action not in {
+            item.value for item in AutonomousOrderAction
+        }:
+            issues.append("UNSUPPORTED_ORDER_ACTION")
+        if candidate.order_type:
+            expected_action = _action_for_order_type(candidate.order_type)
+            if candidate.action != expected_action:
+                issues.append("ORDER_ACTION_NOT_DETERMINISTIC")
+            expected_hash = _candidate_structured_order_hash(candidate)
+            if not candidate.structured_order_hash or not hmac.compare_digest(
+                candidate.structured_order_hash, expected_hash
+            ):
+                issues.append("STRUCTURED_ORDER_HASH_INVALID")
+        elif candidate.structured_order_hash:
+            issues.append("STRUCTURED_ORDER_WITHOUT_ORDER_TYPE")
         if _expired(candidate.expires_at, _utc(now)):
             issues.append("CANDIDATE_EXPIRED")
         safety = (
@@ -530,6 +680,26 @@ def autonomous_inputs_from_mapping(payload: Mapping[str, Any]) -> AutonomousDeci
     refs = payload.get("semantic_parameter_references", ())
     if not isinstance(refs, (list, tuple)):
         raise ValueError("semantic_parameter_references must be a list")
+    proposal_data = payload.get("order_proposal")
+    proposal = None
+    if isinstance(proposal_data, Mapping):
+        proposal_values = dict(proposal_data)
+        reasoning = proposal_values.get("structured_reasoning", ())
+        if not isinstance(reasoning, (list, tuple)):
+            raise ValueError("structured_reasoning must be a list")
+        proposal_values["structured_reasoning"] = tuple(str(item) for item in reasoning)
+        if "proposed_action" not in proposal_values and "action" in proposal_values:
+            proposal_values["proposed_action"] = proposal_values.pop("action")
+        proposal = _construct(AutonomousOrderIntentProposal, proposal_values)
+    snapshot_data = payload.get("order_market_snapshot")
+    snapshot = None
+    if isinstance(snapshot_data, Mapping):
+        snapshot_values = dict(snapshot_data)
+        snapshot_refs = snapshot_values.get("source_refs", ())
+        if not isinstance(snapshot_refs, (list, tuple)):
+            raise ValueError("order market source_refs must be a list")
+        snapshot_values["source_refs"] = tuple(str(item) for item in snapshot_refs)
+        snapshot = _construct(AutonomousOrderMarketSnapshot, snapshot_values)
     return AutonomousDecisionInputs(
         runtime_context=context,
         method_selection=method,
@@ -542,8 +712,412 @@ def autonomous_inputs_from_mapping(payload: Mapping[str, Any]) -> AutonomousDeci
         direction=str(payload.get("direction", "")),
         semantic_parameter_references=tuple(str(item) for item in refs),
         exposure_effect=str(payload.get("exposure_effect", "NONE")),
+        order_proposal=proposal,
+        order_market_snapshot=snapshot,
     )
 
+
+
+_ORDER_TYPE_SEMANTICS = {
+    AutonomousOrderType.BUY.value: (
+        AutonomousOrderSide.BUY.value,
+        AutonomousEntryIntent.IMMEDIATE.value,
+        AutonomousOrderAction.MARKET.value,
+    ),
+    AutonomousOrderType.SELL.value: (
+        AutonomousOrderSide.SELL.value,
+        AutonomousEntryIntent.IMMEDIATE.value,
+        AutonomousOrderAction.MARKET.value,
+    ),
+    AutonomousOrderType.BUY_LIMIT.value: (
+        AutonomousOrderSide.BUY.value,
+        AutonomousEntryIntent.PULLBACK.value,
+        AutonomousOrderAction.PENDING.value,
+    ),
+    AutonomousOrderType.SELL_LIMIT.value: (
+        AutonomousOrderSide.SELL.value,
+        AutonomousEntryIntent.PULLBACK.value,
+        AutonomousOrderAction.PENDING.value,
+    ),
+    AutonomousOrderType.BUY_STOP.value: (
+        AutonomousOrderSide.BUY.value,
+        AutonomousEntryIntent.BREAKOUT.value,
+        AutonomousOrderAction.PENDING.value,
+    ),
+    AutonomousOrderType.SELL_STOP.value: (
+        AutonomousOrderSide.SELL.value,
+        AutonomousEntryIntent.BREAKOUT.value,
+        AutonomousOrderAction.PENDING.value,
+    ),
+    AutonomousOrderType.BUY_STOP_LIMIT.value: (
+        AutonomousOrderSide.BUY.value,
+        AutonomousEntryIntent.STOP_LIMIT.value,
+        AutonomousOrderAction.PENDING.value,
+    ),
+    AutonomousOrderType.SELL_STOP_LIMIT.value: (
+        AutonomousOrderSide.SELL.value,
+        AutonomousEntryIntent.STOP_LIMIT.value,
+        AutonomousOrderAction.PENDING.value,
+    ),
+}
+
+
+def resolve_autonomous_order_action(order_type: str) -> str:
+    normalized = str(order_type or "").strip().upper()
+    semantics = _ORDER_TYPE_SEMANTICS.get(normalized)
+    if semantics is None:
+        raise ValueError("unsupported autonomous order type")
+    return semantics[2]
+
+
+def _empty_structured_order() -> dict[str, Any]:
+    return {
+        "side": "",
+        "entry_intent": "",
+        "order_type": "",
+        "action": "",
+        "advisory_action": "",
+        "entry_price": "",
+        "trigger_price": "",
+        "limit_price": "",
+        "stop_loss": "",
+        "take_profit": "",
+        "proposed_volume": "",
+        "risk_policy_reference": "",
+        "structured_reasoning": (),
+        "market_snapshot_reference": "",
+        "market_snapshot_provenance_hash": "",
+        "market_recommendation": "",
+        "structured_order_hash": "",
+        "blockers": [],
+    }
+
+
+def _resolve_order_proposal(
+    inputs: AutonomousDecisionInputs,
+    now: datetime,
+    maximum_age_seconds: int,
+) -> dict[str, Any]:
+    resolved = _empty_structured_order()
+    proposal = inputs.order_proposal
+    if proposal is None:
+        return resolved
+
+    blockers: list[str] = resolved["blockers"]
+    resolved.update(
+        {
+            "side": str(proposal.side or "").strip().upper(),
+            "entry_intent": str(proposal.entry_intent or "").strip().upper(),
+            "order_type": str(proposal.order_type or "").strip().upper(),
+            "advisory_action": str(proposal.proposed_action or "").strip().upper(),
+            "risk_policy_reference": _safe_or_empty(proposal.risk_policy_reference),
+            "structured_reasoning": tuple(
+                str(item).strip() for item in proposal.structured_reasoning if str(item).strip()
+            ),
+        }
+    )
+    for name in (
+        "entry_price",
+        "trigger_price",
+        "limit_price",
+        "stop_loss",
+        "take_profit",
+        "proposed_volume",
+    ):
+        text, _, valid = _canonical_decimal(getattr(proposal, name))
+        resolved[name] = text
+        if text and not valid:
+            blockers.append("INVALID_" + name.upper())
+
+    if proposal.symbol != inputs.runtime_context.symbol:
+        blockers.append("ORDER_PROPOSAL_SYMBOL_MISMATCH")
+    semantics = _ORDER_TYPE_SEMANTICS.get(resolved["order_type"])
+    if semantics is None:
+        blockers.append("UNSUPPORTED_ORDER_TYPE")
+    else:
+        expected_side, expected_entry_intent, action = semantics
+        resolved["action"] = action
+        if resolved["side"] != expected_side:
+            blockers.append("ORDER_SIDE_MISMATCH")
+        if resolved["entry_intent"] != expected_entry_intent:
+            blockers.append("ENTRY_INTENT_MISMATCH")
+        if inputs.direction.strip().upper() != expected_side:
+            blockers.append("ORDER_DIRECTION_MISMATCH")
+        if resolved["advisory_action"] and resolved["advisory_action"] != action:
+            blockers.append("ADVISORY_ACTION_CONTRADICTS_RESOLVED_ACTION")
+    if resolved["advisory_action"] and resolved["advisory_action"] not in {
+        item.value for item in AutonomousOrderAction
+    }:
+        blockers.append("UNSUPPORTED_ADVISORY_ACTION")
+    if not resolved["risk_policy_reference"]:
+        blockers.append("RISK_POLICY_REFERENCE_MISSING")
+    if not resolved["structured_reasoning"]:
+        blockers.append("STRUCTURED_REASONING_MISSING")
+    volume = _decimal_or_none(resolved["proposed_volume"])
+    if volume is not None and volume <= 0:
+        blockers.append("INVALID_PROPOSED_VOLUME")
+
+    snapshot = inputs.order_market_snapshot
+    bid = ask = None
+    minimum_distance = Decimal("0")
+    tick_size = None
+    if snapshot is None:
+        blockers.append("ORDER_MARKET_SNAPSHOT_MISSING")
+    else:
+        resolved["market_snapshot_reference"] = _safe_or_empty(snapshot.snapshot_reference)
+        market_material = _market_snapshot_material(snapshot)
+        resolved["market_snapshot_provenance_hash"] = _sha256(
+            _canonical_json(market_material)
+        )
+        if not resolved["market_snapshot_reference"] or not snapshot.source_refs:
+            blockers.append("MARKET_SNAPSHOT_PROVENANCE_MISSING")
+        if any(not _safe_reference(item) for item in snapshot.source_refs):
+            blockers.append("SENSITIVE_REFERENCE_NOT_ALLOWED")
+        if snapshot.symbol != inputs.runtime_context.symbol:
+            blockers.append("MARKET_SNAPSHOT_SYMBOL_MISMATCH")
+        if not _fresh(snapshot.observed_at, now, maximum_age_seconds):
+            blockers.append("MARKET_SNAPSHOT_STALE")
+        bid = _decimal_or_none(market_material["bid"])
+        ask = _decimal_or_none(market_material["ask"])
+        if bid is None or ask is None or bid <= 0 or ask <= 0 or ask < bid:
+            blockers.append("MARKET_BID_ASK_INVALID")
+        point = _positive_decimal_or_none(market_material["point"])
+        tick_size = _positive_decimal_or_none(market_material["tick_size"])
+        distance_points = _positive_decimal_or_none(
+            market_material["minimum_distance_points"], allow_zero=True
+        )
+        if snapshot.point not in (None, "") and point is None:
+            blockers.append("MARKET_POINT_INVALID")
+        if snapshot.tick_size not in (None, "") and tick_size is None:
+            blockers.append("MARKET_TICK_SIZE_INVALID")
+        if (
+            snapshot.minimum_distance_points not in (None, "")
+            and distance_points is None
+        ):
+            blockers.append("MARKET_MINIMUM_DISTANCE_INVALID")
+        if snapshot.digits is not None and (
+            not isinstance(snapshot.digits, int) or isinstance(snapshot.digits, bool)
+            or snapshot.digits < 0
+        ):
+            blockers.append("MARKET_DIGITS_INVALID")
+        if point is not None and distance_points is not None:
+            minimum_distance = point * distance_points
+
+    if semantics is not None:
+        _validate_order_prices(
+            resolved,
+            bid=bid,
+            ask=ask,
+            minimum_distance=minimum_distance,
+            tick_size=tick_size,
+            digits=(snapshot.digits if snapshot else None),
+            blockers=blockers,
+        )
+    hash_material = {key: value for key, value in resolved.items() if key not in {
+        "blockers", "structured_order_hash"
+    }}
+    resolved["structured_order_hash"] = _sha256(_canonical_json(hash_material))
+    return resolved
+
+
+def _validate_order_prices(
+    resolved: Mapping[str, Any],
+    *,
+    bid: Decimal | None,
+    ask: Decimal | None,
+    minimum_distance: Decimal,
+    tick_size: Decimal | None,
+    digits: int | None,
+    blockers: list[str],
+) -> None:
+    order_type = str(resolved["order_type"])
+    entry = _decimal_or_none(resolved["entry_price"])
+    trigger = _decimal_or_none(resolved["trigger_price"])
+    limit = _decimal_or_none(resolved["limit_price"])
+    stop_loss = _decimal_or_none(resolved["stop_loss"])
+    take_profit = _decimal_or_none(resolved["take_profit"])
+    action = str(resolved["action"])
+
+    if action == AutonomousOrderAction.MARKET.value:
+        if entry is not None or trigger is not None or limit is not None:
+            blockers.append("MARKET_PRICE_FIELDS_NOT_ALLOWED")
+    elif order_type in {
+        AutonomousOrderType.BUY_STOP_LIMIT.value,
+        AutonomousOrderType.SELL_STOP_LIMIT.value,
+    }:
+        if trigger is None:
+            blockers.append("REQUIRED_TRIGGER_PRICE_MISSING")
+        if limit is None:
+            blockers.append("REQUIRED_LIMIT_PRICE_MISSING")
+        if entry is not None:
+            blockers.append("STOP_LIMIT_ENTRY_PRICE_NOT_ALLOWED")
+    else:
+        if entry is None:
+            blockers.append("REQUIRED_ENTRY_PRICE_MISSING")
+        if trigger is not None or limit is not None:
+            blockers.append("UNEXPECTED_TRIGGER_OR_LIMIT_PRICE")
+
+    price_fields = {
+        "ENTRY_PRICE": entry,
+        "TRIGGER_PRICE": trigger,
+        "LIMIT_PRICE": limit,
+        "STOP_LOSS": stop_loss,
+        "TAKE_PROFIT": take_profit,
+    }
+    for name, value in price_fields.items():
+        if value is None:
+            continue
+        if value <= 0:
+            blockers.append("INVALID_" + name)
+        if tick_size is not None and value % tick_size != 0:
+            blockers.append(name + "_NOT_ON_TICK_SIZE")
+        if isinstance(digits, int) and digits >= 0 and -value.as_tuple().exponent > digits:
+            blockers.append(name + "_EXCEEDS_DIGITS")
+
+    recommendation = ""
+    if bid is not None and ask is not None:
+        if order_type == AutonomousOrderType.BUY_LIMIT.value and entry is not None:
+            recommendation = _validate_pending_relation(
+                ask - entry, minimum_distance, "BUY_LIMIT_PRICE_NOT_BELOW_ASK", blockers
+            )
+        elif order_type == AutonomousOrderType.SELL_LIMIT.value and entry is not None:
+            recommendation = _validate_pending_relation(
+                entry - bid, minimum_distance, "SELL_LIMIT_PRICE_NOT_ABOVE_BID", blockers
+            )
+        elif order_type == AutonomousOrderType.BUY_STOP.value and entry is not None:
+            recommendation = _validate_pending_relation(
+                entry - ask, minimum_distance, "BUY_STOP_PRICE_NOT_ABOVE_ASK", blockers
+            )
+        elif order_type == AutonomousOrderType.SELL_STOP.value and entry is not None:
+            recommendation = _validate_pending_relation(
+                bid - entry, minimum_distance, "SELL_STOP_PRICE_NOT_BELOW_BID", blockers
+            )
+        elif order_type == AutonomousOrderType.BUY_STOP_LIMIT.value and trigger is not None:
+            recommendation = _validate_pending_relation(
+                trigger - ask, minimum_distance, "BUY_STOP_LIMIT_TRIGGER_NOT_ABOVE_ASK", blockers
+            )
+            if limit is not None and limit >= trigger:
+                blockers.append("BUY_STOP_LIMIT_LIMIT_NOT_BELOW_TRIGGER")
+        elif order_type == AutonomousOrderType.SELL_STOP_LIMIT.value and trigger is not None:
+            recommendation = _validate_pending_relation(
+                bid - trigger, minimum_distance, "SELL_STOP_LIMIT_TRIGGER_NOT_BELOW_BID", blockers
+            )
+            if limit is not None and limit <= trigger:
+                blockers.append("SELL_STOP_LIMIT_LIMIT_NOT_ABOVE_TRIGGER")
+    if recommendation:
+        resolved["market_recommendation"] = recommendation
+
+    reference_price = (
+        ask if order_type == AutonomousOrderType.BUY.value else
+        bid if order_type == AutonomousOrderType.SELL.value else
+        limit if "STOP_LIMIT" in order_type else entry
+    )
+    side = str(resolved["side"])
+    if reference_price is not None:
+        if side == AutonomousOrderSide.BUY.value:
+            if stop_loss is not None and stop_loss >= reference_price:
+                blockers.append("BUY_STOP_LOSS_NOT_BELOW_REFERENCE")
+            if take_profit is not None and take_profit <= reference_price:
+                blockers.append("BUY_TAKE_PROFIT_NOT_ABOVE_REFERENCE")
+        elif side == AutonomousOrderSide.SELL.value:
+            if stop_loss is not None and stop_loss <= reference_price:
+                blockers.append("SELL_STOP_LOSS_NOT_ABOVE_REFERENCE")
+            if take_profit is not None and take_profit >= reference_price:
+                blockers.append("SELL_TAKE_PROFIT_NOT_BELOW_REFERENCE")
+
+
+def _validate_pending_relation(
+    distance: Decimal,
+    minimum_distance: Decimal,
+    wrong_side_reason: str,
+    blockers: list[str],
+) -> str:
+    if distance <= 0:
+        blockers.append(wrong_side_reason)
+        return "MARKET_ORDER_REVIEW_RECOMMENDED"
+    if minimum_distance > 0 and distance <= minimum_distance:
+        blockers.append("PENDING_PRICE_INSIDE_MINIMUM_DISTANCE")
+        return "MARKET_ORDER_REVIEW_RECOMMENDED"
+    return "PENDING_PRICE_RELATION_VALID"
+
+
+def _market_snapshot_material(snapshot: AutonomousOrderMarketSnapshot) -> dict[str, Any]:
+    values = {}
+    for name in ("bid", "ask", "point", "tick_size", "minimum_distance_points"):
+        text, _, _ = _canonical_decimal(getattr(snapshot, name))
+        values[name] = text
+    return {
+        "snapshot_reference": snapshot.snapshot_reference,
+        "observed_at": snapshot.observed_at,
+        "symbol": snapshot.symbol,
+        "provider_name": snapshot.provider_name,
+        "bid": values["bid"],
+        "ask": values["ask"],
+        "point": values["point"],
+        "tick_size": values["tick_size"],
+        "digits": snapshot.digits,
+        "minimum_distance_points": values["minimum_distance_points"],
+        "source_refs": sorted(set(snapshot.source_refs)),
+    }
+
+
+def _canonical_decimal(value: Any) -> tuple[str, Decimal | None, bool]:
+    if value is None or value == "":
+        return "", None, True
+    if isinstance(value, bool):
+        return str(value), None, False
+    raw = str(value).strip()
+    try:
+        parsed = Decimal(raw)
+    except (InvalidOperation, ValueError):
+        return raw, None, False
+    if not parsed.is_finite():
+        return raw, None, False
+    canonical = format(parsed, "f")
+    if "." in canonical:
+        canonical = canonical.rstrip("0").rstrip(".")
+    return canonical or "0", parsed, True
+
+
+def _decimal_or_none(value: Any) -> Decimal | None:
+    _, parsed, valid = _canonical_decimal(value)
+    return parsed if valid else None
+
+
+def _positive_decimal_or_none(value: Any, *, allow_zero: bool = False) -> Decimal | None:
+    parsed = _decimal_or_none(value)
+    if parsed is None or parsed < 0 or (parsed == 0 and not allow_zero):
+        return None
+    return parsed
+
+
+def _candidate_structured_order_hash(candidate: AutonomousDecisionCandidate) -> str:
+    material = {
+        "side": candidate.side,
+        "entry_intent": candidate.entry_intent,
+        "order_type": candidate.order_type,
+        "action": candidate.action,
+        "advisory_action": candidate.advisory_action,
+        "entry_price": candidate.entry_price,
+        "trigger_price": candidate.trigger_price,
+        "limit_price": candidate.limit_price,
+        "stop_loss": candidate.stop_loss,
+        "take_profit": candidate.take_profit,
+        "proposed_volume": candidate.proposed_volume,
+        "risk_policy_reference": candidate.risk_policy_reference,
+        "structured_reasoning": candidate.structured_reasoning,
+        "market_snapshot_reference": candidate.market_snapshot_reference,
+        "market_snapshot_provenance_hash": candidate.market_snapshot_provenance_hash,
+        "market_recommendation": candidate.market_recommendation,
+    }
+    return _sha256(_canonical_json(material))
+
+
+def _action_for_order_type(order_type: str) -> str:
+    try:
+        return resolve_autonomous_order_action(order_type)
+    except ValueError:
+        return ""
 
 def _input_blockers(
     inputs: AutonomousDecisionInputs,
@@ -816,6 +1390,7 @@ def _canonical_provenance(
     lifecycle_reference: str,
     lifecycle_state: str,
     reconciliation_reference: str,
+    structured_order: Mapping[str, Any],
 ) -> dict[str, Any]:
     risk = inputs.risk_result
     return {
@@ -852,6 +1427,28 @@ def _canonical_provenance(
             if inputs.reconciliation_result
             else ""
         ),
+        "structured_order": {
+            key: structured_order[key]
+            for key in (
+                "side",
+                "entry_intent",
+                "order_type",
+                "action",
+                "advisory_action",
+                "entry_price",
+                "trigger_price",
+                "limit_price",
+                "stop_loss",
+                "take_profit",
+                "proposed_volume",
+                "risk_policy_reference",
+                "structured_reasoning",
+                "market_snapshot_reference",
+                "market_snapshot_provenance_hash",
+                "market_recommendation",
+                "structured_order_hash",
+            )
+        },
         "intent": intent.value,
         "eligibility": eligibility.value,
         "blocked_reason_codes": sorted(set(blockers)),

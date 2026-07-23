@@ -1778,6 +1778,10 @@ Delivered one focused release-closure suite plus complete regression and bounded
 
 Full regression passed 2,744 tests and 156 subtests with 3 dependency deprecation warnings in 132.69 seconds. Static state remains exactly one production `.order_send(` call-site and zero `MetaTrader5` imports under `src/`.
 
+### Post-release maintenance - Structured Market and Pending Order Intent Candidate
+
+The existing Sprint 39 candidate now optionally carries a typed, non-executable market or pending-order proposal for all eight supported order types. A deterministic resolver derives `MARKET` or `PENDING` from `order_type`; it validates required prices, stop-limit trigger/limit separation, Bid/Ask relationships, optional symbol distance metadata, source freshness, and structured-order integrity. Exact prices, volume, side, and reasoning remain absent from public serialization and decision journals. Legacy `NO_ACTION`, review, management, and OPEN candidates without the optional proposal remain valid. Verification is `FOCUSED_AND_RUNTIME_PASS`: 29 new tests and 67 neighboring orchestrator/policy tests passed; changed-path compileall and static safety scans passed; Docker Compose config, app restart, healthy Streamlit HTTP 200, and one non-broker candidate v2 smoke passed. Full regression, bridge runtime, controlled endpoints, and broker mutation were not run for this maintenance task.
+
 ## Operational live-account promotion gate (outside the completed sprint roadmap)
 
 Any later live-account promotion requires a separate explicit operator decision; it is not Sprint 42 and is not implied by release closure.

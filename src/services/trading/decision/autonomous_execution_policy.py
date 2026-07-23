@@ -19,6 +19,7 @@ from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionEligibility,
     AutonomousDecisionIntent,
     AutonomousDecisionOrchestrator,
+    _candidate_structured_order_hash,
 )
 from src.services.trading.decision.models import DecisionBlocker, TradeReadinessDecision
 from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled_management import (
@@ -768,9 +769,24 @@ def _lifecycle_reasons(
 def _candidate_integrity_valid(candidate: AutonomousDecisionCandidate) -> bool:
     if not _valid_hash(candidate.provenance_hash):
         return False
+    if candidate.order_type:
+        if not _valid_hash(candidate.structured_order_hash):
+            return False
+        if not hmac.compare_digest(
+            candidate.structured_order_hash,
+            _candidate_structured_order_hash(candidate),
+        ):
+            return False
+    elif candidate.structured_order_hash:
+        return False
     if candidate.candidate_reference != "autonomous_decision_" + candidate.provenance_hash[:24]:
         return False
-    expected = _sha256("autonomous-decision/v1|" + candidate.provenance_hash)
+    idempotency_version = (
+        "autonomous-decision/v1"
+        if candidate.schema_version == "autonomous-decision-candidate/v1"
+        else "autonomous-decision/v2"
+    )
+    expected = _sha256(idempotency_version + "|" + candidate.provenance_hash)
     return hmac.compare_digest(candidate.decision_idempotency_key, expected)
 
 
