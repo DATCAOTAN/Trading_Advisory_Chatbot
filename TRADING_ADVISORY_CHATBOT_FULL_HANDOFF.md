@@ -76,46 +76,50 @@ The immediate development focus is no longer broad RAG tuning, UI polish, or add
 
 The latest completed engineering task is:
 
-`Sprint 39 - Autonomous Decision Orchestrator`
+`Sprint 40 - Autonomous Execution Policy Gate`
 
 Current verified state:
 
 ```text
-verification_level=FOCUSED_AND_NON_EXECUTING_RUNTIME_PASS
-focused_orchestrator_tests=33 passed
-neighboring_decision_scoring_lifecycle_reconciliation_tests=93 passed
-runtime_candidate_intent=NO_ACTION
-runtime_candidate_validation=VALID
-runtime_journal_records=1
+verification_level=FOCUSED_AND_POLICY_BLOCKED_RUNTIME_PASS
+focused_policy_tests=34 passed
+neighboring_orchestrator_decision_lifecycle_reconciliation_management_tests=133 passed
+controlled_execution_integration_tests=16 passed
+runtime_policy_decision=BLOCK
+runtime_target_boundary=NONE
+runtime_policy_validation=VALID
+runtime_journal_appended=true
 runtime_execution_authority=false
-runtime_latency_ms=973.165
 production_order_send_call_sites=1
 src_metatrader5_imports=0
-orchestrator_mutation_calls=0
-autonomous_execution_enabled=false
+policy_mutation_calls=0
+autonomous_policy_gate_enabled=false
+autonomous_open_eligibility_enabled=false
+autonomous_management_eligibility_enabled=false
+autonomous_policy_hard_block=true
 live_execution_allowed=false
 order_send_allowed=false
 execution_allowed=false
 executable=false
 order_sent=false
-broker_execution=NOT_RUN
-full_regression=NOT_RUN_FOR_SPRINT_39
+broker_mutation=NOT_RUN
+full_regression=NOT_RUN_FOR_SPRINT_40
 ```
 
 Meaning:
 
-- one frozen, versioned candidate contract supports `NO_ACTION`, `OPEN_POSITION`, `CANCEL_PENDING_ORDER`, `MODIFY_POSITION_PROTECTION`, `CLOSE_POSITION`, and `REQUIRE_HUMAN_REVIEW`;
-- the orchestrator consumes existing structured context, method-selection, score, deterministic readiness/risk, lifecycle, and reconciliation artifacts without parsing free-form assistant output;
-- identical canonical decision inputs produce the same intent, eligibility, blocker codes, provenance hash, and decision idempotency key;
-- stale, incomplete, conflicting, risk-blocked, account-mismatched, ambiguous lifecycle, unresolved reconciliation, or unsafe persistence state fails closed;
-- the append-only decision journal is restart-safe and idempotent, and malformed/conflicting records prevent an eligible candidate;
-- the one-shot CLI emits a redacted summary and never requests confirmation or calls execution/management paths;
-- focused and neighboring tests, changed-path compileall, Docker config/restart/health, static scans, and one non-executing runtime run passed;
-- no broker execution, management mutation, scheduler, continuous autonomous loop, or full regression occurred.
+- one frozen, versioned policy result maps a validated Sprint 39 candidate only to `BLOCK`, `REQUIRE_HUMAN_REVIEW`, or `ELIGIBLE_FOR_CONTROLLED_BOUNDARY`;
+- eligible results target only the existing controlled open, cancel, protection-modification, or close boundary and never carry execution authority;
+- candidate provenance, freshness, structured references, deterministic risk, account context, lifecycle, reconciliation, exposure effects, and close volume are checked independently of LLM output;
+- `NO_ACTION` remains terminal non-action, review remains review-only, and stale, unsafe, ambiguous, unresolved, or persistence-unsafe input fails closed;
+- canonical inputs determine the policy hash and idempotency key; the append-only protected journal is restart-safe, duplicate-idempotent, and rejects malformed or conflicting records;
+- defaults keep the gate and both eligibility classes disabled while the policy hard block remains enabled;
+- focused, neighboring, and controlled-execution integration tests, changed-path compileall, Docker config/restart/health, static scans, and one blocked one-shot CLI run passed;
+- no approval, confirmation, executable request, broker mutation, scheduler, continuous loop, full regression, or broker execution occurred.
 
 ## 2.2 Immediate goal
 
-Sprint 40 may add an Autonomous Execution Policy Gate that evaluates Sprint 39 candidates independently. It must remain disabled by default and must not infer confirmation, bypass the controlled execution/management contracts, or grant live submission from LLM output alone.
+Sprint 41 should perform soak testing, failure hardening, observability review, and release closure for the non-production autonomous decision/policy path. It must not weaken the disabled-by-default mutation controls or treat policy eligibility as execution authority.
 
 Do not add another adapter, approval boundary, scheduler, or continuous runtime loop. Reuse deterministic policy, lifecycle/reconciliation state, protected journals, account fingerprinting, idempotency, kill switches, and the existing bridge trust boundary.
 ## 2.3 Long-term end-state
@@ -1087,7 +1091,7 @@ The project has progressed through the following engineering milestones:
 Current milestone:
 
 ```text
-Sprint 39 implemented and focused/non-executing-runtime verified
+Sprint 40 implemented and focused/policy-blocked-runtime verified
 manual broker submission not run
 ```
 
@@ -1758,9 +1762,9 @@ structured market/context inputs
 
 The orchestrator is one-shot only, treats `NO_ACTION` as success, and has no execution authority or bridge mutation dependency.
 
-### Sprint 40 - Autonomous Execution Policy Gate (planned)
+### Sprint 40 - Autonomous Execution Policy Gate (completed)
 
-Deliver deterministic authorization separate from the LLM, including candidate freshness, account mode, lifecycle/reconciliation consistency, position conflict, kill switch, cadence, and idempotency checks. Defaults must remain blocked and no prompt may bypass policy.
+Delivered a deterministic, non-executing policy gate that maps Sprint 39 candidates to `BLOCK`, `REQUIRE_HUMAN_REVIEW`, or eligibility for an existing controlled boundary. It validates provenance, freshness, risk, account context, lifecycle/reconciliation state, management exposure, close volume, and protected journal integrity. Defaults keep the gate and eligibility disabled with the hard block enabled; all execution-authority and mutation flags remain false.
 
 ### Sprint 41 - Soak Test, Hardening, and Release Closure (planned)
 
@@ -2125,4 +2129,4 @@ Inspect the repository, verify the current state, and cite exact files and symbo
 
 # 35. CURRENT ONE-PARAGRAPH SUMMARY
 
-`Trading_Advisory_Chatbot` has completed the controlled MT5 execution MVP, export-only operator acceptance, read-only lifecycle supervision, controlled position management, and Sprint 39 autonomous decision orchestration. The new one-shot orchestrator lives under trading decision ownership and consumes existing structured runtime context, method-selection, signal-score, deterministic readiness/risk, lifecycle, and reconciliation artifacts to produce one frozen, versioned, redacted, non-executable candidate. It supports `NO_ACTION`, `OPEN_POSITION`, `CANCEL_PENDING_ORDER`, `MODIFY_POSITION_PROTECTION`, `CLOSE_POSITION`, and `REQUIRE_HUMAN_REVIEW`; stale, conflicting, incomplete, risk-blocked, account-mismatched, ambiguous, unresolved, or persistence-unsafe inputs fail closed. Canonical inputs determine the intent, eligibility, blocker codes, provenance hash, and decision idempotency key, while the append-only journal is restart-safe and duplicate-idempotent. Sprint 39 focused tests passed 33 cases and neighboring decision/scoring/lifecycle/reconciliation tests passed 93 cases; changed-path compileall, Docker config/restart/HTTP health, static scans, and a non-executing `NO_ACTION` runtime run passed. Full regression and broker execution were not run. Autonomous execution remains disabled, every candidate carries false execution authority and execution flags, `src/` has no MetaTrader5 import, orchestrator/CLI mutation calls remain zero, and production still has exactly one `.order_send(` call-site. Sprint 40 is the Autonomous Execution Policy Gate and must remain independently deterministic and blocked by default.
+`Trading_Advisory_Chatbot` has completed the controlled MT5 execution MVP, export-only operator acceptance, read-only lifecycle supervision, controlled position management, autonomous decision orchestration, and Sprint 40 autonomous execution policy gating. The one-shot policy gate lives under trading decision ownership and deterministically validates a frozen Sprint 39 candidate against provenance, freshness, structured references, readiness/risk, account context, lifecycle, reconciliation, exposure, and protected-journal state. It produces only `BLOCK`, `REQUIRE_HUMAN_REVIEW`, or eligibility for an existing controlled open/management boundary; eligibility never grants execution authority, creates confirmation, or calls a mutation endpoint. Canonical policy inputs determine stable policy and idempotency hashes, while the append-only protected journal is restart-safe, duplicate-idempotent, and fail-closed for malformed or conflicting persistence. Sprint 40 focused tests passed 34 cases, directly neighboring orchestrator/decision/lifecycle/reconciliation/management tests passed 133 cases, and controlled-execution integration tests passed 16 cases; changed-path compileall, Docker config/restart/HTTP health, static scans, and a default-blocked one-shot CLI run passed. Full regression and broker mutation were not run. The policy gate, open eligibility, and management eligibility remain disabled by default, the policy hard block remains enabled, every authority/execution flag remains false, `src/` has no MetaTrader5 import, policy/CLI mutation calls remain zero, and production still has exactly one `.order_send(` call-site. Sprint 41 is Soak Test, Hardening, and Release Closure.

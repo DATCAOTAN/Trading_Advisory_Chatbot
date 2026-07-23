@@ -383,3 +383,33 @@ Commit: included in this commit
 - All candidates and runtime outputs remain non-executable; autonomous execution, live execution, order-send, and broker mutation remain disabled.
 - Sprint 39 is one-shot only; it does not schedule decisions or authorize/submit/manage broker actions.
 - Next: Sprint 40 - Autonomous Execution Policy Gate, independently deterministic and blocked by default.
+
+---
+
+### Sprint 40 - Autonomous Execution Policy Gate
+
+Date: 2026-07-23
+Verification: `FOCUSED_AND_POLICY_BLOCKED_RUNTIME_PASS`
+Commit: included in this commit
+
+#### Implemented
+
+- Added one deterministic, frozen, versioned policy result and gate under existing decision ownership.
+- Mapped candidates only to block, human review, or eligibility for an existing controlled open/management boundary.
+- Added fail-closed provenance, freshness, risk, account, lifecycle, reconciliation, exposure, close-volume, and persistence checks.
+- Added canonical policy/idempotency hashing, protected append-only journaling, redacted serialization, and one non-executing CLI.
+- Kept policy/open/management eligibility disabled and the policy hard block enabled by default.
+
+#### Verification
+
+- Focused policy tests: 34 passed; neighboring orchestrator, decision-policy, lifecycle, reconciliation, and management tests: 133 passed; controlled-execution integration tests: 16 passed.
+- Changed-path compileall, `docker-compose config --quiet`, app restart, and Streamlit HTTP 200 health: passed.
+- Blocked runtime: `BLOCK`, target `NONE`, validation `VALID`, journal appended; execution authority and executable remained false.
+- Static scan: exactly 1 production `.order_send(` call-site; 0 `MetaTrader5` imports under `src`; 0 policy/CLI mutation calls or authority-true defaults.
+- Full regression and broker mutation: NOT RUN.
+
+#### Current state / limitations / next step
+
+- Policy eligibility is not approval or execution authority; every submission/execution/order flag remains false.
+- No scheduler, continuous loop, autonomous confirmation, controlled endpoint call, or broker operation was added.
+- Next: Sprint 41 - Soak Test, Hardening, and Release Closure.
