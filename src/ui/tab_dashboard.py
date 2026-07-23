@@ -79,6 +79,10 @@ from src.services.trading.proposal import (
     ProposalDraftService,
     ProposalIntentJournalStore,
 )
+from src.ui.autonomous_candidate_review import (
+    get_autonomous_decision_run_result,
+    render_autonomous_candidate_review_card,
+)
 
 
 @st.cache_data(ttl=5)
@@ -162,6 +166,7 @@ def render(orchestrator):
     st.markdown("#### 📡 Dữ Liệu Thời Gian Thực")
 
     _render_market_data_provider_status(orchestrator)
+    _render_autonomous_decision_review_card()
 
     col_live1, col_live2 = st.columns(2)
 
@@ -221,6 +226,13 @@ def render(orchestrator):
 # =============================================================================
 # HELPERS NỘI BỘ
 # =============================================================================
+def _render_autonomous_decision_review_card():
+    run_result = get_autonomous_decision_run_result(st.session_state)
+    candidate = run_result.candidate if run_result else None
+    validation = run_result.validation if run_result else None
+    render_autonomous_candidate_review_card(candidate, validation)
+
+
 def _render_market_data_provider_status(orchestrator):
     try:
         service = orchestrator.live_service

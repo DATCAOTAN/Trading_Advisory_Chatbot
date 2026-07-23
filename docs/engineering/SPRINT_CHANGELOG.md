@@ -471,3 +471,32 @@ Commit: NOT COMMITTED
 - Structured proposals remain advisory and non-executable; LLM-supplied action cannot override deterministic resolution.
 - Symbol metadata is consumed only when supplied by the structured snapshot; no universal distance constant is assumed.
 - This is post-release maintenance, not Sprint 42.
+
+---
+
+### Post-release Maintenance - Read-only Streamlit Market/Pending Order Review Card
+
+Date: 2026-07-23
+Verification: `FOCUSED_AND_LIVE_PASS` (Streamlit runtime scope)
+Commit: NOT COMMITTED
+
+#### Implemented
+
+- Added typed session ownership for one already-produced `AutonomousDecisionRunResult`; replacement and clearing remain explicit and rendering never generates a candidate.
+- Added a bounded operator-review projection with proposal values required for local review while preserving the existing redacted public serialization and journals unchanged.
+- Reused the existing presenter, Review Card, resolver output, and validation result for conditional MARKET, LIMIT, STOP, and separate STOP_LIMIT trigger/limit display.
+- Preserved v1, NO_ACTION, human-review, management, missing-state, freshness, deterministic blocker order, and non-executable safety behavior.
+- Added no button, scheduler, duplicate validator, candidate producer, LLM call, journal access, bridge call, confirmation, permission, or broker mutation path.
+
+#### Verification
+
+- Focused Review Card tests: 20 passed; neighboring candidate/orchestrator/policy/dashboard tests: 132 passed.
+- Changed-path compileall and static scans passed: 0 `MetaTrader5` imports under `src/`, exactly 1 unchanged production `.order_send(` call-site.
+- Docker Compose config, app restart, healthy status, and Streamlit HTTP 200 (`ok`) passed.
+- Streamlit AppTest rendered a typed v2 stop-limit result through the session owner twice with 0 exceptions, 0 buttons, exact bounded proposal values, `NON_EXECUTABLE` safety, and journal count unchanged at 1.
+- Full regression, MT5 bridge runtime, controlled endpoints, and broker mutation: NOT RUN.
+
+#### Current state / limitations
+
+- A producer must explicitly store its already-produced typed run result; page load and refresh intentionally do not run the autonomous orchestrator or LLM.
+- This is post-release maintenance, not a new execution, permission, or approval boundary.

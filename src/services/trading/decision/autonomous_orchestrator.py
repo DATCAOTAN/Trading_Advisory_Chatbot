@@ -260,6 +260,39 @@ class AutonomousDecisionCandidate:
             "metadata_redacted": True,
         }
 
+    def to_operator_review_dict(self) -> dict[str, Any]:
+        """Return the bounded local projection used for human proposal review."""
+        return {
+            "schema_version": self.schema_version,
+            "generated_at": self.generated_at,
+            "expires_at": self.expires_at,
+            "symbol": self.symbol_reference,
+            "intent": self.intent,
+            "side": self.side,
+            "entry_intent": self.entry_intent,
+            "order_type": self.order_type,
+            "action": self.action,
+            "entry_price": self.entry_price,
+            "trigger_price": self.trigger_price,
+            "limit_price": self.limit_price,
+            "stop_loss": self.stop_loss,
+            "take_profit": self.take_profit,
+            "proposed_volume": self.proposed_volume,
+            "risk_policy_present": bool(self.risk_policy_reference),
+            "structured_reasoning_summary": _operator_review_reasoning(
+                self.structured_reasoning
+            ),
+            "recommendation": self.market_recommendation,
+            "execution_authority": False,
+            "execution_permission_requested": False,
+            "live_submission_allowed": False,
+            "live_execution_allowed": False,
+            "order_send_allowed": False,
+            "execution_allowed": False,
+            "executable": False,
+            "order_sent": False,
+        }
+
 
 @dataclass(frozen=True)
 class AutonomousDecisionValidationResult:
@@ -1608,6 +1641,30 @@ def _canonical_json(value: Any) -> str:
 
 def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _operator_review_reasoning(values: Sequence[str]) -> list[str]:
+    sensitive_markers = (
+        "password",
+        "credential",
+        "api_key",
+        "token",
+        "account_login",
+        "account login",
+        "ticket_id",
+        "deal_id",
+        "position_id",
+    )
+    summaries: list[str] = []
+    for value in values[:8]:
+        summary = str(value or "").strip()
+        if not summary:
+            continue
+        if any(marker in summary.lower() for marker in sensitive_markers):
+            summaries.append("[REDACTED]")
+        else:
+            summaries.append(summary[:240])
+    return summaries
 
 
 def _valid_hash(value: Any) -> bool:
