@@ -317,12 +317,13 @@ class OperatorProtectedArtifactCaptureService:
                     max_age_seconds=max_age_seconds,
                 )
             paths = _persist_bundle(bundle, artifacts)
+            compatibility_time = max(now, datetime.now(timezone.utc))
             _verify_export_compatibility(
                 paths,
                 bundle,
                 expected_export,
                 max_age_seconds=max_age_seconds,
-                current_time=now,
+                current_time=compatibility_time,
             )
             manifest = _build_manifest(artifacts, paths)
             _write_protected_json(bundle / MANIFEST_FILENAME, manifest)
@@ -973,7 +974,10 @@ def _verify_export_compatibility(paths, bundle, expected_phrase, **kwargs):
             **kwargs,
         )
     except ProtectedRequestExportError as exc:
-        raise ProtectedArtifactCaptureError("protected bundle is not exporter-compatible") from exc
+        safe_reason = str(exc).strip() or type(exc).__name__
+        raise ProtectedArtifactCaptureError(
+            f"protected bundle is not exporter-compatible: {safe_reason}"
+        ) from exc
     finally:
         try:
             probe.unlink(missing_ok=True)

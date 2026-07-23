@@ -420,6 +420,24 @@ def test_completed_bundle_is_accepted_by_existing_exporter(tmp_path):
         _cleanup_bundle(result)
 
 
+def test_export_compatibility_uses_validation_time_after_capture_started(tmp_path):
+    service, _ = _service(tmp_path)
+    result = service.capture(
+        semantic_input=_write_semantics(tmp_path),
+        output_dir=Path("data/trading/protected_requests/clock-drift-compatible"),
+        approval_confirmation_phrase=EXPECTED_HUMAN_VALUE_APPROVAL_LOCK_PHRASE,
+        export_confirmation_phrase=EXPORT_CONFIRMATION,
+        current_time=datetime.now(timezone.utc) - timedelta(seconds=10),
+    )
+
+    try:
+        paths = verify_protected_artifact_bundle(result.bundle_path)
+        assert len(paths) == 9
+        assert result.status == "PROTECTED_ARTIFACT_BUNDLE_COMPLETE"
+    finally:
+        _cleanup_bundle(result)
+
+
 def test_no_submission_reconciliation_or_execution_flag_changes(tmp_path, monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("forbidden execution path called")

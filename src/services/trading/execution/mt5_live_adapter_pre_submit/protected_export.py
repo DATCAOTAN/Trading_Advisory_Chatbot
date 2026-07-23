@@ -6,9 +6,10 @@ import json
 import os
 import re
 import stat
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Mapping, TypeVar
 
 from src.services.trading.execution.live_parameter_value_proposal.models import (
@@ -70,6 +71,16 @@ class ProtectedRequestExportResult:
     account_fingerprint_redacted: str
     output_path: str
     validation_status: str = "VALID"
+
+
+@dataclass(frozen=True)
+class VerifiedProtectedExecutionArtifacts:
+    approval_lock: HumanValueApprovalLock = field(repr=False)
+    final_validation: MT5RequestDictFinalValidationBoundary = field(repr=False)
+    final_validation_report: MT5RequestDictFinalValidationReport = field(repr=False)
+    pre_submit_report: MT5PreSubmitGateReport = field(repr=False)
+    account_fingerprint: str = field(repr=False)
+    semantic_hash: str = field(repr=False)
 
 
 _Model = TypeVar("_Model")
@@ -493,3 +504,115 @@ def _write_protected_json(path_value: str | Path, payload: Mapping[str, Any]) ->
         except OSError:
             pass
         raise ProtectedRequestExportError("protected request could not be written") from exc
+
+
+def _artifact_digest(path_value: str | Path) -> str:
+    path = Path(path_value)
+    if not path.is_file() or path.is_symlink():
+        raise ProtectedRequestExportError("required artifact is missing or not a regular file")
+    if path.stat().st_size > _MAX_ARTIFACT_BYTES:
+        raise ProtectedRequestExportError("artifact exceeds the protected export size limit")
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise ProtectedRequestExportError("artifact is not readable") from exc
+
+
+def load_verified_protected_execution_artifacts(
+    *,
+    proposal_artifact: str | Path,
+    approval_artifact: str | Path,
+    lock_artifact: str | Path,
+    final_validation_artifact: str | Path,
+    final_validation_report_artifact: str | Path,
+    pre_submit_artifact: str | Path,
+    account_fingerprint_artifact: str | Path,
+    account_fingerprint_submit_artifact: str | Path,
+    human_confirmation_artifact: str | Path,
+    expected_confirmation_phrase: str,
+    max_age_seconds: int = 300,
+    current_time: datetime | None = None,
+) -> VerifiedProtectedExecutionArtifacts:
+    artifact_paths = {
+        "proposal_artifact": proposal_artifact,
+        "approval_artifact": approval_artifact,
+        "lock_artifact": lock_artifact,
+        "final_validation_artifact": final_validation_artifact,
+        "final_validation_report_artifact": final_validation_report_artifact,
+        "pre_submit_artifact": pre_submit_artifact,
+        "account_fingerprint_artifact": account_fingerprint_artifact,
+        "account_fingerprint_submit_artifact": account_fingerprint_submit_artifact,
+        "human_confirmation_artifact": human_confirmation_artifact,
+    }
+    before = {name: _artifact_digest(path) for name, path in artifact_paths.items()}
+
+    with TemporaryDirectory(prefix="mt5-controlled-artifact-verification-") as temporary:
+        probe = Path(temporary) / "verified-export-only-request.json"
+        export_protected_request(
+            **artifact_paths,
+            output=probe,
+            expected_confirmation_phrase=expected_confirmation_phrase,
+            max_age_seconds=max_age_seconds,
+            current_time=current_time,
+        )
+        probe_payload = _load_json_mapping(probe)
+
+        lock_payload = _load_json_mapping(lock_artifact)
+        parameters_payload = lock_payload.get("approved_semantic_parameters")
+        if not isinstance(parameters_payload, Mapping):
+            raise ProtectedRequestExportError(
+                "approval lock is schema-only or lacks protected semantic values"
+            )
+        try:
+            parameters = ApprovedSemanticExecutionParameters.from_protected_dict(
+                parameters_payload
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProtectedRequestExportError(
+                "approved semantic values failed integrity validation"
+            ) from exc
+        approval_lock = _load_model(
+            HumanValueApprovalLock,
+            lock_payload,
+            omit={"approved_semantic_parameters", "slot_locks"},
+            overrides={"approved_semantic_parameters": parameters},
+        )
+        final_validation = _load_model(
+            MT5RequestDictFinalValidationBoundary,
+            _load_json_mapping(final_validation_artifact),
+            omit={"validated_fields"},
+        )
+        final_report = _load_model(
+            MT5RequestDictFinalValidationReport,
+            _load_json_mapping(final_validation_report_artifact),
+            ignore={"concrete_value_created"},
+        )
+        pre_submit_report = _load_model(
+            MT5PreSubmitGateReport,
+            _load_json_mapping(pre_submit_artifact),
+        )
+
+    after = {name: _artifact_digest(path) for name, path in artifact_paths.items()}
+    if before != after:
+        raise ProtectedRequestExportError("protected artifacts changed during validation")
+    if (
+        probe_payload.get("execution_permission_requested") is not False
+        or not hmac.compare_digest(
+            str(probe_payload.get("human_confirmation_phrase", "")),
+            expected_confirmation_phrase,
+        )
+    ):
+        raise ProtectedRequestExportError("export-only request contract is invalid")
+
+    fingerprint = str(probe_payload.get("expected_account_context_fingerprint", ""))
+    semantic_hash = str(probe_payload.get("canonical_semantic_hash", ""))
+    if not _HASH_PATTERN.fullmatch(fingerprint) or not _HASH_PATTERN.fullmatch(semantic_hash):
+        raise ProtectedRequestExportError("verified artifact hashes are invalid")
+    return VerifiedProtectedExecutionArtifacts(
+        approval_lock=approval_lock,
+        final_validation=final_validation,
+        final_validation_report=final_report,
+        pre_submit_report=pre_submit_report,
+        account_fingerprint=fingerprint,
+        semantic_hash=semantic_hash,
+    )

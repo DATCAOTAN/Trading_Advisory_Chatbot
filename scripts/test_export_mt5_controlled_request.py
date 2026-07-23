@@ -27,6 +27,7 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_export
     EXPECTED_PROTECTED_REQUEST_EXPORT_PHRASE,
     ProtectedRequestExportError,
     export_protected_request,
+    load_verified_protected_execution_artifacts,
 )
 from src.services.trading.execution.mt5_request_dict_dry_run_builder.builder import (
     MT5RequestDictDryRunBuilder,
@@ -226,6 +227,23 @@ def test_valid_export_uses_genuine_compatible_artifacts(tmp_path):
     assert payload["human_confirmation_phrase"] == EXPORT_CONFIRMATION
     assert MANUAL_CONTROLLED_CONFIRMATION == "SUBMIT CONTROLLED MT5 ORDER"
     assert EXPORT_CONFIRMATION != MANUAL_CONTROLLED_CONFIRMATION
+
+
+def test_verified_execution_artifacts_preserve_export_only_boundary(tmp_path):
+    files = _artifact_files(tmp_path)
+    verified = load_verified_protected_execution_artifacts(
+        **files,
+        expected_confirmation_phrase=EXPORT_CONFIRMATION,
+    )
+    _export(tmp_path, files)
+    exported = json.loads((tmp_path / "request.json").read_text(encoding="utf-8"))
+
+    assert verified.account_fingerprint == ACCOUNT_FINGERPRINT
+    assert verified.approval_lock.approved_semantic_integrity_valid() is True
+    assert verified.final_validation_report.valid is True
+    assert verified.pre_submit_report.valid is True
+    assert exported["execution_permission_requested"] is False
+    assert exported["human_confirmation_phrase"] == EXPORT_CONFIRMATION
 
 
 def test_modified_semantic_values_fail_closed(tmp_path):
