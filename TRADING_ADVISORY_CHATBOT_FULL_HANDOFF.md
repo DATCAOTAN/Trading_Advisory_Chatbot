@@ -1,8 +1,8 @@
 # TRADING_ADVISORY_CHATBOT — FULL CODEBASE, RUNTIME, ROADMAP, AND AGENT HANDOFF
 
-**Handoff version:** 4.1
+**Handoff version:** 4.2
 **Prepared from:** the uploaded `Trading_Advisory_Chatbot.zip`, the current Codex handoff snapshot, and the reported runtime/test results.
-**Snapshot period:** 2026-07-20 to 2026-07-22
+**Snapshot period:** 2026-07-20 to 2026-07-23
 **Primary workspace:** repository root
 
 ---
@@ -76,52 +76,48 @@ The immediate development focus is no longer broad RAG tuning, UI polish, or add
 
 The latest completed engineering task is:
 
-`Sprint 38 - Controlled MT5 Position Management`
+`Sprint 39 - Autonomous Decision Orchestrator`
 
 Current verified state:
 
 ```text
-verification_level=FOCUSED_AND_BLOCKED_RUNTIME_PASS
-focused_management_tests=33 passed
-neighboring_lifecycle_reconciliation_idempotency_execution_tests=94 passed
-prior_full_regression_after_confirmation_split=2612 passed
-prior_full_regression_subtests=156 passed
-bridge_health=OK
-bridge_terminal_connected=true
-management_endpoint=/execution/controlled-manage
-management_missing_auth=REJECTED_401
-management_invalid_auth=REJECTED_401
-cancel_pending_order_default=BLOCKED_MANAGEMENT_DISABLED
-modify_position_protection_default=BLOCKED_MANAGEMENT_DISABLED
-close_position_default=BLOCKED_MANAGEMENT_DISABLED
+verification_level=FOCUSED_AND_NON_EXECUTING_RUNTIME_PASS
+focused_orchestrator_tests=33 passed
+neighboring_decision_scoring_lifecycle_reconciliation_tests=93 passed
+runtime_candidate_intent=NO_ACTION
+runtime_candidate_validation=VALID
+runtime_journal_records=1
+runtime_execution_authority=false
+runtime_latency_ms=973.165
 production_order_send_call_sites=1
 src_metatrader5_imports=0
-automatic_retry_allowed=false
-controlled_management_enabled=false
-cancel_allowed=false
-protection_modification_allowed=false
-position_close_allowed=false
-management_hard_block=true
-management_kill_switch_engaged=true
+orchestrator_mutation_calls=0
+autonomous_execution_enabled=false
+live_execution_allowed=false
+order_send_allowed=false
+execution_allowed=false
+executable=false
 order_sent=false
-manual_broker_mutation=NOT_RUN
-full_regression=NOT_RUN_FOR_SPRINT_38
+broker_execution=NOT_RUN
+full_regression=NOT_RUN_FOR_SPRINT_39
 ```
 
 Meaning:
 
-- one immutable protected management contract supports canceling one pending order, modifying protection on one existing position, or closing all/part of one existing position;
-- deterministic app and bridge policy binds the request to one fresh lifecycle observation, account fingerprint, hashed broker target, explicit intent-specific confirmation, mutation hash, and idempotency key;
-- the host bridge independently resolves exactly one current target, revalidates account and capability state, and routes every mutation through the existing isolated `order_send` call-site;
-- management records reuse the protected execution journal with restart-safe `RESERVED`, `MANAGEMENT_STARTED`, `RESULT_CONFIRMED`, `RESULT_REJECTED`, and `RESULT_UNKNOWN` states;
-- accepted or unknown results use bounded lifecycle snapshots for evidence; inconclusive evidence remains unknown and is never retried automatically;
-- focused and neighboring tests, changed-path compileall, Docker config/restart/health, static scans, and a blocked non-mutating terminal runtime check passed;
-- no manual CLI execution, broker mutation, controlled submission, or full regression occurred.
+- one frozen, versioned candidate contract supports `NO_ACTION`, `OPEN_POSITION`, `CANCEL_PENDING_ORDER`, `MODIFY_POSITION_PROTECTION`, `CLOSE_POSITION`, and `REQUIRE_HUMAN_REVIEW`;
+- the orchestrator consumes existing structured context, method-selection, score, deterministic readiness/risk, lifecycle, and reconciliation artifacts without parsing free-form assistant output;
+- identical canonical decision inputs produce the same intent, eligibility, blocker codes, provenance hash, and decision idempotency key;
+- stale, incomplete, conflicting, risk-blocked, account-mismatched, ambiguous lifecycle, unresolved reconciliation, or unsafe persistence state fails closed;
+- the append-only decision journal is restart-safe and idempotent, and malformed/conflicting records prevent an eligible candidate;
+- the one-shot CLI emits a redacted summary and never requests confirmation or calls execution/management paths;
+- focused and neighboring tests, changed-path compileall, Docker config/restart/health, static scans, and one non-executing runtime run passed;
+- no broker execution, management mutation, scheduler, continuous autonomous loop, or full regression occurred.
+
 ## 2.2 Immediate goal
 
-Sprint 39 may add an Autonomous Decision Orchestrator that produces structured management decisions, but it must not grant execution authority, auto-answer confirmations, call the management endpoint, or bypass the controlled management policy. Controlled execution and management remain operator-authorized and disabled by default.
+Sprint 40 may add an Autonomous Execution Policy Gate that evaluates Sprint 39 candidates independently. It must remain disabled by default and must not infer confirmation, bypass the controlled execution/management contracts, or grant live submission from LLM output alone.
 
-Do not add another adapter, approval boundary, or scheduler framework. Reuse lifecycle state, protected journals, deterministic policy, account fingerprinting, idempotency, reconciliation, and the existing bridge trust boundary.
+Do not add another adapter, approval boundary, scheduler, or continuous runtime loop. Reuse deterministic policy, lifecycle/reconciliation state, protected journals, account fingerprinting, idempotency, kill switches, and the existing bridge trust boundary.
 ## 2.3 Long-term end-state
 
 The long-term product goal is an **autonomous MT5 decision and execution system** that can:
@@ -1091,7 +1087,7 @@ The project has progressed through the following engineering milestones:
 Current milestone:
 
 ```text
-34B implemented and focused-verified
+Sprint 39 implemented and focused/non-executing-runtime verified
 manual broker submission not run
 ```
 
@@ -1736,79 +1732,39 @@ Delivered:
 - non-submitting live bridge checks passed;
 - Docker app restart and Streamlit HTTP 200 health check passed.
 
-## Release B — Autonomous Demo System
+## Release B - Autonomous Demo System
 
-### Sprint 37 — Autonomous Decision Orchestrator
+### Sprint 37 - Read-Only Position Lifecycle and Runtime Supervisor (completed)
 
-Deliver a structured continuous decision flow:
+Delivered bounded authenticated lifecycle snapshots, protected broker-reference hashing, restart-safe lifecycle observations, overlap prevention, and a non-mutating one-shot/runtime supervisor path.
+
+### Sprint 38 - Controlled MT5 Position Management (completed)
+
+Delivered one explicitly confirmed controlled path for canceling one active pending order, modifying protection on one unique open position, or reducing/closing one unique open position. All mutation permissions remain disabled by default.
+
+### Sprint 39 - Autonomous Decision Orchestrator (completed)
+
+Delivered the deterministic non-executable flow:
 
 ```text
-market data
-→ quality/freshness
-→ regime/calendar
-→ knowledge/context
-→ method selection
-→ scoring
-→ readiness
-→ structured autonomous decision candidate
+structured market/context inputs
+-> method selection and score
+-> deterministic readiness/risk
+-> lifecycle and reconciliation constraints
+-> structured autonomous decision candidate
+-> validation and append-only decision journal
+-> stop
 ```
 
-The output must be structured and validated, not executable free-form LLM text.
+The orchestrator is one-shot only, treats `NO_ACTION` as success, and has no execution authority or bridge mutation dependency.
 
-### Sprint 38 — Autonomous Execution Policy Gate
+### Sprint 40 - Autonomous Execution Policy Gate (planned)
 
-Deliver:
+Deliver deterministic authorization separate from the LLM, including candidate freshness, account mode, lifecycle/reconciliation consistency, position conflict, kill switch, cadence, and idempotency checks. Defaults must remain blocked and no prompt may bypass policy.
 
-- deterministic authorization separate from the LLM;
-- account-mode policy;
-- current-position conflict checks;
-- freshness and confidence checks;
-- execution cadence/duplicate controls;
-- kill switch;
-- no prompt bypass;
-- default block on unknown state.
+### Sprint 41 - Soak Test, Hardening, and Release Closure (planned)
 
-### Sprint 39 — Position Lifecycle Manager
-
-Deliver:
-
-- no-position/pending/submitted/filled/open/managing/closing/closed/reconciled state machine;
-- read and reconcile existing positions;
-- handle externally created or manually modified positions;
-- no conflicting simultaneous lifecycle operations;
-- position-management actions remain policy controlled.
-
-### Sprint 40 — Continuous Runtime Supervisor
-
-Deliver:
-
-- one authoritative runtime loop;
-- stale data detection;
-- bridge/terminal health;
-- lease/lock preventing duplicate supervisors;
-- journal consistency;
-- lifecycle consistency;
-- safe shutdown;
-- pause/resume;
-- operator-visible health.
-
-### Sprint 41 — Autonomous Demo Soak Testing and Production Hardening
-
-Deliver:
-
-- long-running demo validation;
-- restart recovery;
-- network interruption;
-- terminal closure;
-- model/schema failures;
-- unknown order outcome;
-- journal corruption;
-- clock/freshness issues;
-- duplicate prompts;
-- concurrency tests;
-- observability;
-- incident/runbook documentation.
-
+Deliver long-running non-production validation, restart/network/terminal failure coverage, journal corruption and concurrency tests, runtime observability, operational runbooks, and release closure. Live-account promotion remains a separate explicit milestone.
 ## Release C — Live Account Promotion Gate
 
 After autonomous demo soak testing succeeds, create a separate promotion milestone.
@@ -2169,4 +2125,4 @@ Inspect the repository, verify the current state, and cite exact files and symbo
 
 # 35. CURRENT ONE-PARAGRAPH SUMMARY
 
-`Trading_Advisory_Chatbot` has completed the controlled MT5 execution MVP, export-only operator acceptance, the read-only lifecycle supervisor, and Sprint 38 controlled position management. A single shared adapter now carries three explicitly confirmed intents: cancel one active pending order, modify protection on one uniquely matched open position, or close all/part of one uniquely matched position. Requests are immutable and integrity-bound to a fresh lifecycle observation, account fingerprint, protected broker-reference hash, mutation hash, intent-specific phrase, and idempotency key. The host bridge independently revalidates journals, lifecycle eligibility, account context, current broker target, volume/protection constraints, permissions, and terminal capability, then reuses the sole isolated `order_send` call-site; exact identifiers remain in protected journals. Results are persisted as `RESERVED`, `MANAGEMENT_STARTED`, `RESULT_CONFIRMED`, `RESULT_REJECTED`, or `RESULT_UNKNOWN`, and bounded lifecycle evidence is checked without automatic retry. Sprint 38 focused tests passed 33 cases and neighboring lifecycle/reconciliation/idempotency/controlled-execution tests passed 94 cases; changed-path compileall, Docker config/restart/HTTP health, static scans, and a terminal-backed default-block runtime check passed. That runtime check returned HTTP 401 for missing/invalid auth and `MANAGEMENT_DISABLED` for all three intents without creating journals or invoking broker mutation. Full regression and manual management were not run. All management permissions remain disabled, hard block and kill switches remain engaged, `src/` has no MetaTrader5 import, and production still has exactly one `.order_send(` call-site.
+`Trading_Advisory_Chatbot` has completed the controlled MT5 execution MVP, export-only operator acceptance, read-only lifecycle supervision, controlled position management, and Sprint 39 autonomous decision orchestration. The new one-shot orchestrator lives under trading decision ownership and consumes existing structured runtime context, method-selection, signal-score, deterministic readiness/risk, lifecycle, and reconciliation artifacts to produce one frozen, versioned, redacted, non-executable candidate. It supports `NO_ACTION`, `OPEN_POSITION`, `CANCEL_PENDING_ORDER`, `MODIFY_POSITION_PROTECTION`, `CLOSE_POSITION`, and `REQUIRE_HUMAN_REVIEW`; stale, conflicting, incomplete, risk-blocked, account-mismatched, ambiguous, unresolved, or persistence-unsafe inputs fail closed. Canonical inputs determine the intent, eligibility, blocker codes, provenance hash, and decision idempotency key, while the append-only journal is restart-safe and duplicate-idempotent. Sprint 39 focused tests passed 33 cases and neighboring decision/scoring/lifecycle/reconciliation tests passed 93 cases; changed-path compileall, Docker config/restart/HTTP health, static scans, and a non-executing `NO_ACTION` runtime run passed. Full regression and broker execution were not run. Autonomous execution remains disabled, every candidate carries false execution authority and execution flags, `src/` has no MetaTrader5 import, orchestrator/CLI mutation calls remain zero, and production still has exactly one `.order_send(` call-site. Sprint 40 is the Autonomous Execution Policy Gate and must remain independently deterministic and blocked by default.

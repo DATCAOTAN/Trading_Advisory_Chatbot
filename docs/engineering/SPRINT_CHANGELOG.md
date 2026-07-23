@@ -355,3 +355,31 @@ Commit: included in this commit
 - Controlled management, all intent permissions, live execution, and order-send remain disabled; hard block and kill switches remain engaged.
 - Fake-MT5 mutation/reconciliation paths are verified, but no real pending order or position was changed.
 - Next: Sprint 39 - Autonomous Decision Orchestrator; it must produce decisions only and must not grant execution authority.
+---
+
+### Sprint 39 - Autonomous Decision Orchestrator
+
+Date: 2026-07-23
+Verification: `FOCUSED_AND_NON_EXECUTING_RUNTIME_PASS`
+Commit: included in this commit
+
+#### Implemented
+
+- Added one frozen, versioned, non-executable candidate contract and one deterministic orchestrator under existing trading decision ownership.
+- Reused structured context, method-selection, score, readiness/risk, lifecycle, and reconciliation artifacts; no free-text output grants authority.
+- Added fail-closed classification for stale, incomplete, conflicting, risk-blocked, account-mismatched, ambiguous lifecycle, unresolved reconciliation, and unsafe journal state.
+- Added canonical provenance/idempotency hashing, restart-safe append-only journaling, duplicate suppression, redacted public output, and one non-executing CLI.
+
+#### Verification
+
+- Focused orchestrator tests: 33 passed; neighboring decision-policy, scoring, lifecycle, and reconciliation tests: 93 passed.
+- Changed-path compileall, `docker-compose config --quiet`, app restart, and Streamlit HTTP 200 health: passed.
+- Non-executing runtime: `NO_ACTION`, `VALID`, one decision journal record, `execution_authority=false`, 973.165 ms.
+- Static scan: exactly 1 production `.order_send(` call-site; 0 `MetaTrader5` imports under `src`; 0 orchestrator/CLI mutation calls; 0 execution-authority-true markers.
+- Full regression and broker execution: NOT RUN.
+
+#### Current state / limitations / next step
+
+- All candidates and runtime outputs remain non-executable; autonomous execution, live execution, order-send, and broker mutation remain disabled.
+- Sprint 39 is one-shot only; it does not schedule decisions or authorize/submit/manage broker actions.
+- Next: Sprint 40 - Autonomous Execution Policy Gate, independently deterministic and blocked by default.
