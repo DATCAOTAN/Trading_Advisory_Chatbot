@@ -1,6 +1,6 @@
 # TRADING_ADVISORY_CHATBOT — FULL CODEBASE, RUNTIME, ROADMAP, AND AGENT HANDOFF
 
-**Handoff version:** 4.2
+**Handoff version:** 4.3
 **Prepared from:** the uploaded `Trading_Advisory_Chatbot.zip`, the current Codex handoff snapshot, and the reported runtime/test results.
 **Snapshot period:** 2026-07-20 to 2026-07-23
 **Primary workspace:** repository root
@@ -76,50 +76,56 @@ The immediate development focus is no longer broad RAG tuning, UI polish, or add
 
 The latest completed engineering task is:
 
-`Sprint 40 - Autonomous Execution Policy Gate`
+`Sprint 41 - Soak Test, Hardening, and Release Closure`
 
 Current verified state:
 
 ```text
-verification_level=FOCUSED_AND_POLICY_BLOCKED_RUNTIME_PASS
-focused_policy_tests=34 passed
-neighboring_orchestrator_decision_lifecycle_reconciliation_management_tests=133 passed
-controlled_execution_integration_tests=16 passed
-runtime_policy_decision=BLOCK
-runtime_target_boundary=NONE
-runtime_policy_validation=VALID
-runtime_journal_appended=true
-runtime_execution_authority=false
+verification_level=FULL_REGRESSION_SOAK_AND_RUNTIME_PASS
+release_closure_tests=7 passed
+full_regression_tests=2744 passed
+full_regression_subtests=156 passed
+full_regression_warnings=3
+full_regression_duration_seconds=132.69
+fake_soak_decision_cycles=300
+fake_soak_policy_cycles=300
+fake_soak_lifecycle_cycles=200
+fake_soak_reconciliation_reads=50
+runtime_soak_duration_seconds=620.2
+runtime_health_checks=60
+runtime_lifecycle_snapshots=60
+runtime_decision_checks=10
+runtime_policy_checks=10
 production_order_send_call_sites=1
 src_metatrader5_imports=0
-policy_mutation_calls=0
-autonomous_policy_gate_enabled=false
-autonomous_open_eligibility_enabled=false
-autonomous_management_eligibility_enabled=false
-autonomous_policy_hard_block=true
+runtime_mutation_markers=0
+live_submission_allowed=false
 live_execution_allowed=false
 order_send_allowed=false
 execution_allowed=false
 executable=false
 order_sent=false
+automatic_retry_allowed=false
+kill_switch_engaged=true
+controlled_management_enabled=false
+autonomous_policy_gate_enabled=false
+autonomous_policy_hard_block=true
 broker_mutation=NOT_RUN
-full_regression=NOT_RUN_FOR_SPRINT_40
 ```
 
 Meaning:
 
-- one frozen, versioned policy result maps a validated Sprint 39 candidate only to `BLOCK`, `REQUIRE_HUMAN_REVIEW`, or `ELIGIBLE_FOR_CONTROLLED_BOUNDARY`;
-- eligible results target only the existing controlled open, cancel, protection-modification, or close boundary and never carry execution authority;
-- candidate provenance, freshness, structured references, deterministic risk, account context, lifecycle, reconciliation, exposure effects, and close volume are checked independently of LLM output;
-- `NO_ACTION` remains terminal non-action, review remains review-only, and stale, unsafe, ambiguous, unresolved, or persistence-unsafe input fails closed;
-- canonical inputs determine the policy hash and idempotency key; the append-only protected journal is restart-safe, duplicate-idempotent, and rejects malformed or conflicting records;
-- defaults keep the gate and both eligibility classes disabled while the policy hard block remains enabled;
-- focused, neighboring, and controlled-execution integration tests, changed-path compileall, Docker config/restart/health, static scans, and one blocked one-shot CLI run passed;
-- no approval, confirmation, executable request, broker mutation, scheduler, continuous loop, full regression, or broker execution occurred.
+- the complete scripts regression, release-closure suite, bounded fake soak, and ten-minute authenticated read-only terminal soak completed without product crash or deadlock;
+- decision, policy, lifecycle, reconciliation, restart, duplicate, bridge-loss, timeout, authentication, overlap, stale-state, malformed-journal, and conflicting-persistence behavior remains fail-closed;
+- duplicate fake soak cycles produced only 3 decision, 3 policy, and 5 lifecycle records; total fake-soak journal growth was 15,248 bytes;
+- fake soak RSS grew 24,576 bytes after warm-up with threads stable at 15; runtime measurement RSS grew 12,288 bytes with bridge threads stable at 13;
+- app and bridge restart, Streamlit health, bridge health/market data, write-skeleton block, controlled execution/management blockers, lifecycle health, and blocked policy checks passed;
+- no production defect or safely removable redundant Sprint 37-40 code was demonstrated, so production behavior was not changed;
+- all mutation permissions remain disabled, no broker mutation occurred, and exact broker identifiers remain protected.
 
 ## 2.2 Immediate goal
 
-Sprint 41 should perform soak testing, failure hardening, observability review, and release closure for the non-production autonomous decision/policy path. It must not weaken the disabled-by-default mutation controls or treat policy eligibility as execution authority.
+The planned sprint roadmap is complete. Further work is operational acceptance or a narrowly scoped maintenance fix only when runtime evidence demonstrates a defect; no Sprint 42 is planned.
 
 Do not add another adapter, approval boundary, scheduler, or continuous runtime loop. Reuse deterministic policy, lifecycle/reconciliation state, protected journals, account fingerprinting, idempotency, kill switches, and the existing bridge trust boundary.
 ## 2.3 Long-term end-state
@@ -1091,7 +1097,7 @@ The project has progressed through the following engineering milestones:
 Current milestone:
 
 ```text
-Sprint 40 implemented and focused/policy-blocked-runtime verified
+Sprint 41 implemented and full-regression/soak/runtime verified
 manual broker submission not run
 ```
 
@@ -1766,12 +1772,15 @@ The orchestrator is one-shot only, treats `NO_ACTION` as success, and has no exe
 
 Delivered a deterministic, non-executing policy gate that maps Sprint 39 candidates to `BLOCK`, `REQUIRE_HUMAN_REVIEW`, or eligibility for an existing controlled boundary. It validates provenance, freshness, risk, account context, lifecycle/reconciliation state, management exposure, close volume, and protected journal integrity. Defaults keep the gate and eligibility disabled with the hard block enabled; all execution-authority and mutation flags remain false.
 
-### Sprint 41 - Soak Test, Hardening, and Release Closure (planned)
+### Sprint 41 - Soak Test, Hardening, and Release Closure (completed)
 
-Deliver long-running non-production validation, restart/network/terminal failure coverage, journal corruption and concurrency tests, runtime observability, operational runbooks, and release closure. Live-account promotion remains a separate explicit milestone.
-## Release C — Live Account Promotion Gate
+Delivered one focused release-closure suite plus complete regression and bounded runtime evidence. The fake soak completed 300 decision, 300 policy, 200 lifecycle, and 50 reconciliation-read samples; the terminal soak completed 60 health checks, 60 lifecycle snapshots, and 10 blocked decision/policy checks over 620.2 seconds. Restart, duplicate, bridge-loss, timeout, authentication, overlap, journal corruption, and persistence-unavailable scenarios remained fail-closed. No product defect, broker mutation, new boundary, scheduler, or evidence-supported simplification was introduced.
 
-After autonomous demo soak testing succeeds, create a separate promotion milestone.
+Full regression passed 2,744 tests and 156 subtests with 3 dependency deprecation warnings in 132.69 seconds. Static state remains exactly one production `.order_send(` call-site and zero `MetaTrader5` imports under `src/`.
+
+## Operational live-account promotion gate (outside the completed sprint roadmap)
+
+Any later live-account promotion requires a separate explicit operator decision; it is not Sprint 42 and is not implied by release closure.
 
 Requirements:
 
@@ -2129,4 +2138,4 @@ Inspect the repository, verify the current state, and cite exact files and symbo
 
 # 35. CURRENT ONE-PARAGRAPH SUMMARY
 
-`Trading_Advisory_Chatbot` has completed the controlled MT5 execution MVP, export-only operator acceptance, read-only lifecycle supervision, controlled position management, autonomous decision orchestration, and Sprint 40 autonomous execution policy gating. The one-shot policy gate lives under trading decision ownership and deterministically validates a frozen Sprint 39 candidate against provenance, freshness, structured references, readiness/risk, account context, lifecycle, reconciliation, exposure, and protected-journal state. It produces only `BLOCK`, `REQUIRE_HUMAN_REVIEW`, or eligibility for an existing controlled open/management boundary; eligibility never grants execution authority, creates confirmation, or calls a mutation endpoint. Canonical policy inputs determine stable policy and idempotency hashes, while the append-only protected journal is restart-safe, duplicate-idempotent, and fail-closed for malformed or conflicting persistence. Sprint 40 focused tests passed 34 cases, directly neighboring orchestrator/decision/lifecycle/reconciliation/management tests passed 133 cases, and controlled-execution integration tests passed 16 cases; changed-path compileall, Docker config/restart/HTTP health, static scans, and a default-blocked one-shot CLI run passed. Full regression and broker mutation were not run. The policy gate, open eligibility, and management eligibility remain disabled by default, the policy hard block remains enabled, every authority/execution flag remains false, `src/` has no MetaTrader5 import, policy/CLI mutation calls remain zero, and production still has exactly one `.order_send(` call-site. Sprint 41 is Soak Test, Hardening, and Release Closure.
+`Trading_Advisory_Chatbot` has completed its planned roadmap through Sprint 41. The system includes the controlled MT5 execution MVP, protected export-only operator workflow, restart-safe reconciliation and lifecycle supervision, controlled position management, deterministic autonomous decision candidates, and a non-executing autonomous policy gate. Sprint 41 added one integrated release-closure test file and verified the existing architecture rather than adding features: 2,744 tests and 156 subtests passed, a bounded fake soak completed 300 decision, 300 policy, 200 lifecycle, and 50 reconciliation-read samples, and a 620.2-second authenticated read-only terminal soak completed repeated health, lifecycle, decision, and policy checks. Duplicate journals remained bounded, restart/failure/corruption paths failed closed, RSS and thread measurements showed no clear monotonic leak, and public output stayed redacted. All execution, management, retry, and autonomous authority defaults remain blocked; broker mutation was not run, `src/` has no MetaTrader5 import, and production retains exactly one isolated `.order_send(` call-site. No Sprint 42 is planned; any future work is explicit operational acceptance or evidence-driven maintenance.

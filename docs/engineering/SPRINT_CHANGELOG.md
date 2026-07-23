@@ -413,3 +413,33 @@ Commit: included in this commit
 - Policy eligibility is not approval or execution authority; every submission/execution/order flag remains false.
 - No scheduler, continuous loop, autonomous confirmation, controlled endpoint call, or broker operation was added.
 - Next: Sprint 41 - Soak Test, Hardening, and Release Closure.
+
+---
+
+### Sprint 41 - Soak Test, Hardening, and Release Closure
+
+Date: 2026-07-23
+Verification: `FULL_REGRESSION_SOAK_AND_RUNTIME_PASS`
+Commit: included in this commit
+
+#### Implemented
+
+- Added one integrated release-closure test file; no production feature, boundary, adapter, endpoint, scheduler, or permission was added.
+- Covered non-mutating decision/policy flow, default blockers, restart/idempotency, bridge loss, auth failure, timeout, overlap, unknown-result retry prohibition, corruption, redaction, and static invariants.
+- No production defect or evidence-supported Sprint 37-40 simplification was found.
+
+#### Verification
+
+- Closure tests: 7 passed; full scripts regression: 2,744 passed, 156 subtests passed, 3 dependency warnings, 132.69 seconds.
+- Fake soak: 300 decision, 300 policy, 200 lifecycle, and 50 reconciliation-read samples; 11 bounded journal records totaling 15,248 bytes.
+- Fake soak after warm-up: RSS +24,576 bytes; threads 15 to 15; no crash, deadlock, conflict, or authority leak.
+- Terminal read-only soak: 620.2 seconds, 60 health checks, 60 lifecycle snapshots, and 10 blocked decision/policy checks.
+- Runtime measurement: health median/p95 3.393/10.948 ms; lifecycle 6.265/13.133 ms; bridge RSS +12,288 bytes; threads 13 to 13.
+- Docker config/app restart/HTTP 200, bridge restart/health/market data, HTTP 401 auth rejection, write-skeleton block, management blockers, and one healthy lifecycle cycle passed.
+- Static state: exactly 1 production `.order_send(` call-site; 0 `MetaTrader5` imports under `src`; 0 autonomous/runtime mutation markers.
+
+#### Current state / limitations / completion
+
+- All execution, management, retry, and autonomous policy permissions remain blocked by default; broker mutation was NOT RUN.
+- Three regression warnings are upstream dependency deprecations; actual broker submission and position mutation remain operator-only and unverified in this closure.
+- The planned sprint roadmap is complete. No Sprint 42 is planned; future work is operational acceptance or evidence-driven maintenance only.
