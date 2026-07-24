@@ -12,6 +12,7 @@ services:
       - ./data:/app/data
       - ./src:/app/src
       - ./scripts:/app/scripts
+      - ./tools:/app/tools
       - ./.env:/app/.env
     environment:
       - PYTHONUNBUFFERED=1
