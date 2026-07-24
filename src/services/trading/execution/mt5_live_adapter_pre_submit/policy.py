@@ -22,6 +22,11 @@ class MT5LiveAdapterPreSubmitConfig:
     idempotency_path: str = "data/trading/execution_journal/mt5_pre_submit_idempotency.jsonl"
     max_read_records: int = 100
     controlled_execution_enabled: bool = False
+    pending_submission_enabled: bool = False
+    pending_submission_hard_block: bool = True
+    pending_limit_enabled: bool = False
+    pending_stop_enabled: bool = False
+    pending_stop_limit_enabled: bool = False
     execution_auth_token: str = field(default="", repr=False)
     execution_confirmation_phrase: str = "SUBMIT CONTROLLED MT5 ORDER"
     bridge_url: str = "http://host.docker.internal:8765"
@@ -66,6 +71,17 @@ class MT5LiveAdapterPreSubmitConfig:
             idempotency_path=getattr(config, "TRADING_MT5_PRE_SUBMIT_IDEMPOTENCY_PATH", "data/trading/execution_journal/mt5_pre_submit_idempotency.jsonl"),
             max_read_records=getattr(config, "TRADING_MT5_PRE_SUBMIT_MAX_READ_RECORDS", 100),
             controlled_execution_enabled=getattr(config, "TRADING_MT5_CONTROLLED_EXECUTION_ENABLED", False),
+            pending_submission_enabled=getattr(
+                config, "TRADING_MT5_PENDING_SUBMISSION_ENABLED", False
+            ),
+            pending_submission_hard_block=getattr(
+                config, "TRADING_MT5_PENDING_SUBMISSION_HARD_BLOCK", True
+            ),
+            pending_limit_enabled=getattr(config, "TRADING_MT5_PENDING_LIMIT_ENABLED", False),
+            pending_stop_enabled=getattr(config, "TRADING_MT5_PENDING_STOP_ENABLED", False),
+            pending_stop_limit_enabled=getattr(
+                config, "TRADING_MT5_PENDING_STOP_LIMIT_ENABLED", False
+            ),
             execution_auth_token=getattr(config, "TRADING_MT5_CONTROLLED_EXECUTION_AUTH_TOKEN", ""),
             execution_confirmation_phrase=getattr(config, "TRADING_MT5_CONTROLLED_EXECUTION_CONFIRMATION_PHRASE", "SUBMIT CONTROLLED MT5 ORDER"),
             bridge_url=getattr(config, "MT5_BRIDGE_URL", "http://host.docker.internal:8765"),

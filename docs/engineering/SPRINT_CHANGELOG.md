@@ -529,3 +529,33 @@ Commit: NOT COMMITTED
 - Bridge pending-order execution is not implemented; this boundary is reviewed dry-run preparation only.
 - Exactly one existing production `.order_send(` call-site remains; `src/` has zero `MetaTrader5` imports.
 - Next task, only if explicitly approved: Controlled Pending Order Submission.
+---
+
+### Post-release Maintenance - Controlled Pending Order Submission
+
+Date: 2026-07-24
+Verification: `FOCUSED_AND_PENDING_SUBMISSION_BLOCKED_RUNTIME_PASS`
+Commit: included in this commit
+
+#### Implemented
+
+- Extended the existing protected request, shared adapter, authenticated controlled-submit endpoint, execution journal, reconciliation, and lifecycle ownership; no parallel endpoint, adapter, journal, or approval framework was added.
+- Supports all six LIMIT, STOP, and STOP_LIMIT types with independent app/bridge validation and exact stop-limit trigger-to-`price`, limit-to-`stoplimit` mapping.
+- Added terminal Bid/Ask, tick/digits/stops, volume-step, GTC, pending-family, account, reference, freshness, and integrity checks.
+- Preserved one isolated production `order_send` call-site, protected result redaction, completed-result replay, conflicting duplicate blocking, and retry-prohibited `RESULT_UNKNOWN`.
+
+#### Verification
+
+- Focused pending-submission tests: 28 passed; neighboring pending dry-run, market controlled-submit, management, reconciliation, and lifecycle tests: 129 passed.
+- Changed-path compileall and `git diff --check`: passed.
+- Docker Compose config/app restart: passed; app healthy and Streamlit HTTP 200 (`ok`).
+- Host bridge health: `OK`; protected pending runtime attempt: HTTP 403 `EXECUTION_DISABLED`, no order sent, identifiers null.
+- Read-only lifecycle snapshot: `OK`; reconciliation read: `NOT_REQUIRED`, `RETRY_PROHIBITED`, identifiers null.
+- Static scan: exactly 1 production `.order_send(` call-site, 0 `MetaTrader5` imports under `src/`, 1 existing controlled-submit endpoint, and 0 autonomous submission calls.
+- Full regression and broker mutation: NOT RUN.
+
+#### Current state / limitations
+
+- App and bridge pending submission plus LIMIT, STOP, and STOP_LIMIT family flags remain disabled/hard-blocked by default.
+- Runtime reconciliation used an existing non-reconcilable protected record, so no broker-history match was required.
+- Next: pending-order operational acceptance with explicit operator enablement on a testing account; no autonomous submission.

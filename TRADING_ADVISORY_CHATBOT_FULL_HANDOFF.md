@@ -2152,6 +2152,18 @@ Inspect the repository, verify the current state, and cite exact files and symbo
 
 ---
 
-# 35. CURRENT ONE-PARAGRAPH SUMMARY
+# 35. CURRENT CONTROLLED PENDING-ORDER STATE
 
-`Trading_Advisory_Chatbot` has completed its planned roadmap through Sprint 41 and post-release maintenance now supports deterministic structured market/pending candidates, a read-only Streamlit Review Card, and a typed reviewed pending-order contract with a non-executable semantic dry-run draft for all six LIMIT, STOP, and STOP_LIMIT types. The pending mapper binds candidate, snapshot, symbol metadata, review, confirmation, and protected account-context integrity; it creates no bridge request and grants no execution authority. Sprint 41's verified release baseline remains 2,744 tests and 156 subtests with bounded fake and authenticated read-only terminal soaks. The newer pending contract task is verified only at `FOCUSED_AND_PENDING_DRY_RUN_PASS` with 35 focused and 319 neighboring tests; full regression and broker/runtime mutation were not run for it. All execution, management, retry, and autonomous authority defaults remain blocked, bridge pending execution is not implemented, `src/` has no `MetaTrader5` import, and production retains exactly one isolated `.order_send(` call-site. No Sprint 42 is planned; future changes remain explicit operational acceptance or evidence-driven maintenance.
+Post-release maintenance now extends the existing authenticated `/execution/controlled-submit` boundary to all six pending types: `BUY_LIMIT`, `SELL_LIMIT`, `BUY_STOP`, `SELL_STOP`, `BUY_STOP_LIMIT`, and `SELL_STOP_LIMIT`.
+
+- App ownership: the immutable reviewed pending contract is revalidated for schema, canonical integrity, review/confirmation references, freshness, protected account context, explicit GTC policy, volume, protection values, execution metadata, permission, and pre-submit state before protected serialization.
+- Bridge ownership: the host bridge independently validates the protected contract, current account, symbol capability, Bid/Ask relationship, digits, tick size, stops level, volume range/step, GTC support, and requested pending family before mapping MT5 constants.
+- STOP_LIMIT mapping remains exact: semantic `trigger_price` maps to MT5 `price`; semantic `limit_price` maps to MT5 `stoplimit`. Unsupported terminal capability fails closed without conversion.
+- Submission ownership remains the existing isolated call in `tools/mt5_bridge/execution.py`; no endpoint, adapter, journal, retry path, or call-site was added.
+- The existing protected journal atomically reserves pending requests, replays identical completed results without resubmission, rejects conflicting duplicates, and preserves `RESULT_UNKNOWN` as retry-prohibited across restart.
+- Read-only reconciliation now recognizes active, filled, cancelled, expired, and rejected pending orders; lifecycle reuses `ORDER_ACTIVE`, `POSITION_OPEN`, `BROKER_ACCEPTED`, `BROKER_REJECTED`, and `RECONCILIATION_REQUIRED`.
+- Pending submission and every LIMIT/STOP/STOP_LIMIT family are disabled and hard-blocked by default on both app and bridge. Existing execution kill switches and `order_send` permissions remain blocked by default.
+- Verification: `FOCUSED_AND_PENDING_SUBMISSION_BLOCKED_RUNTIME_PASS`; 28 focused pending-submission tests and 129 neighboring tests passed, changed-path compileall passed, Docker/Streamlit were healthy, bridge health was `OK`, a protected pending request was blocked with `EXECUTION_DISABLED`, lifecycle read returned `OK`, and reconciliation read returned `NOT_REQUIRED` with retry prohibited.
+- Full regression and broker mutation were NOT RUN. Pending-order operational acceptance is still required before any operator-enabled use.
+
+`Trading_Advisory_Chatbot` remains complete through Sprint 41, with this work classified as explicit post-release maintenance rather than Sprint 42. Production still has exactly one `.order_send(` call-site and `src/` has zero `MetaTrader5` imports.

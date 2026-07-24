@@ -78,7 +78,12 @@ class ControlledPendingOrderContract:
     account_context_reference: str = ""
     source_review_artifact_id: str = ""
     source_confirmation_intent_id: str = ""
+    confirmation_artifact_hash: str = ""
     structured_order_hash: str = ""
+    deviation: int = 0
+    magic: int = 0
+    comment: str = field(default="", repr=False)
+    audit: str = field(default="", repr=False)
     validation_status: str = "BLOCKED"
     blocker_codes: tuple[str, ...] = ()
     canonical_integrity_hash: str = ""
@@ -123,7 +128,9 @@ class ControlledPendingOrderContract:
             "account_context_reference": self.account_context_reference,
             "source_review_artifact_id": self.source_review_artifact_id,
             "source_confirmation_intent_id": self.source_confirmation_intent_id,
+            "confirmation_artifact_hash": self.confirmation_artifact_hash,
             "structured_order_hash": self.structured_order_hash,
+            "execution_metadata_present": bool(self.comment and self.audit),
             "validation_status": self.validation_status,
             "blocker_codes": list(self.blocker_codes),
             "canonical_integrity_hash": self.canonical_integrity_hash,
@@ -168,6 +175,70 @@ class ControlledPendingOrderContract:
             "order_sent": False,
         }
 
+    def to_protected_dict(self) -> dict[str, Any]:
+        """Serialize the immutable approved contract for the protected bridge boundary."""
+        return {
+            "schema_version": self.schema_version,
+            "contract_reference": self.contract_reference,
+            "candidate_reference": self.candidate_reference,
+            "candidate_provenance_hash": self.candidate_provenance_hash,
+            "generated_at": self.generated_at,
+            "expires_at": self.expires_at,
+            "symbol": self.symbol,
+            "side": self.side,
+            "order_type": self.order_type,
+            "action": self.action,
+            "entry_intent": self.entry_intent,
+            "entry_price": self.entry_price,
+            "trigger_price": self.trigger_price,
+            "limit_price": self.limit_price,
+            "stop_loss": self.stop_loss,
+            "take_profit": self.take_profit,
+            "proposed_volume": self.proposed_volume,
+            "risk_policy_reference": self.risk_policy_reference,
+            "expiration_policy": self.expiration_policy,
+            "market_snapshot_reference": self.market_snapshot_reference,
+            "market_snapshot_provenance_hash": self.market_snapshot_provenance_hash,
+            "symbol_metadata_reference": self.symbol_metadata_reference,
+            "symbol_metadata_hash": self.symbol_metadata_hash,
+            "account_context_reference": self.account_context_reference,
+            "source_review_artifact_id": self.source_review_artifact_id,
+            "source_confirmation_intent_id": self.source_confirmation_intent_id,
+            "confirmation_artifact_hash": self.confirmation_artifact_hash,
+            "structured_order_hash": self.structured_order_hash,
+            "deviation": self.deviation,
+            "magic": self.magic,
+            "comment": self.comment,
+            "audit": self.audit,
+            "validation_status": self.validation_status,
+            "blocker_codes": list(self.blocker_codes),
+            "canonical_integrity_hash": self.canonical_integrity_hash,
+            "idempotency_key": self.idempotency_key,
+            "source_refs": list(self.source_refs),
+            "execution_authority": False,
+            "human_confirmation_present": False,
+            "execution_permission_requested": False,
+            "live_submission_allowed": False,
+            "live_execution_allowed": False,
+            "order_send_allowed": False,
+            "execution_allowed": False,
+            "executable": False,
+            "order_sent": False,
+            "metadata_redacted": True,
+        }
+
+    def integrity_valid(self) -> bool:
+        calculated = _sha256(_canonical_json(_contract_material(self)))
+        return (
+            _valid_hash(self.canonical_integrity_hash)
+            and hmac.compare_digest(calculated, self.canonical_integrity_hash)
+            and self.contract_reference == "controlled_pending_" + calculated[:24]
+            and hmac.compare_digest(
+                self.idempotency_key,
+                _sha256("controlled-pending-dry-run/v1|" + calculated),
+            )
+        )
+
 
 @dataclass(frozen=True)
 class PendingOrderDryRunRequestDraft:
@@ -189,6 +260,10 @@ class PendingOrderDryRunRequestDraft:
     volume: str = field(default="", repr=False)
     risk_policy_reference: str = ""
     expiration_policy: str = ""
+    deviation: int = 0
+    magic: int = 0
+    comment: str = field(default="", repr=False)
+    audit: str = field(default="", repr=False)
     account_context_reference: str = ""
     semantic_request_hash: str = ""
     idempotency_key: str = ""
@@ -226,6 +301,7 @@ class PendingOrderDryRunRequestDraft:
             "volume_present": bool(self.volume),
             "risk_policy_reference": self.risk_policy_reference,
             "expiration_policy": self.expiration_policy,
+            "execution_metadata_present": bool(self.comment and self.audit),
             "account_context_reference": self.account_context_reference,
             "semantic_request_hash": self.semantic_request_hash,
             "idempotency_key_hash": _sha256(self.idempotency_key),
@@ -259,11 +335,18 @@ class PendingOrderDryRunRequestDraft:
             "volume": self.volume,
             "risk_policy_reference": self.risk_policy_reference,
             "expiration_policy": self.expiration_policy,
+            "deviation": self.deviation,
+            "magic": self.magic,
+            "comment": self.comment,
+            "audit": self.audit,
             "contract_reference": self.contract_reference,
             "contract_integrity_hash": self.contract_integrity_hash,
             "account_context_reference": self.account_context_reference,
             "non_executable": True,
         }
+
+    def integrity_valid(self, contract: ControlledPendingOrderContract) -> bool:
+        return self == _build_draft(contract) and contract.integrity_valid()
 
 
 @dataclass(frozen=True)
@@ -297,6 +380,11 @@ class ControlledPendingOrderDryRunMapper:
         confirmation_intent: HumanConfirmedProposalIntent,
         account_context: ProtectedAccountContextCapture,
         expected_account_context_fingerprint: str,
+        expiration_policy: str = "",
+        deviation: int = 0,
+        magic: int = 0,
+        comment: str = "",
+        audit: str = "",
         now: datetime | None = None,
     ) -> ControlledPendingOrderDryRunResult:
         evaluated_at = _utc(now)
@@ -430,10 +518,17 @@ class ControlledPendingOrderDryRunMapper:
             blockers.append("PROPOSED_VOLUME_INVALID")
         if not candidate.stop_loss or not candidate.take_profit:
             blockers.append("PROTECTION_VALUES_MISSING")
-        expiration_policy = str(getattr(candidate, "expiration_policy", "") or "")
-        if expiration_policy:
+        selected_expiration_policy = str(expiration_policy or "").strip().upper()
+        if selected_expiration_policy and selected_expiration_policy != "GTC":
             blockers.append("UNSUPPORTED_EXPIRATION_POLICY")
-        warnings.append("EXPIRATION_POLICY_NOT_SUPPORTED_BY_CANDIDATE_SCHEMA")
+        if not selected_expiration_policy:
+            warnings.append("EXPIRATION_POLICY_REQUIRED_FOR_SUBMISSION")
+        if isinstance(deviation, bool) or not isinstance(deviation, int) or deviation < 0:
+            blockers.append("DEVIATION_INVALID")
+        if isinstance(magic, bool) or not isinstance(magic, int) or magic < 0:
+            blockers.append("MAGIC_INVALID")
+        if len(str(comment)) > 31:
+            blockers.append("COMMENT_INVALID")
 
         blockers = _ordered_unique(blockers)
         warnings = _ordered_unique(warnings)
@@ -465,7 +560,7 @@ class ControlledPendingOrderDryRunMapper:
             "take_profit": candidate.take_profit,
             "proposed_volume": candidate.proposed_volume,
             "risk_policy_reference": candidate.risk_policy_reference,
-            "expiration_policy": "",
+            "expiration_policy": selected_expiration_policy,
             "market_snapshot_reference": candidate.market_snapshot_reference,
             "market_snapshot_provenance_hash": candidate.market_snapshot_provenance_hash,
             "symbol_metadata_hash": metadata_hash,
@@ -474,6 +569,10 @@ class ControlledPendingOrderDryRunMapper:
             "source_confirmation_intent_id": confirmation_intent.intent_id,
             "confirmation_artifact_hash": confirmation_intent.artifact_hash,
             "structured_order_hash": candidate.structured_order_hash,
+            "deviation": deviation,
+            "magic": magic,
+            "comment": str(comment),
+            "audit": str(audit),
             "expires_at": candidate.expires_at,
             "blocker_codes": blockers,
             "source_refs": source_refs,
@@ -500,6 +599,7 @@ class ControlledPendingOrderDryRunMapper:
             take_profit=candidate.take_profit,
             proposed_volume=candidate.proposed_volume,
             risk_policy_reference=candidate.risk_policy_reference,
+            expiration_policy=selected_expiration_policy,
             market_snapshot_reference=candidate.market_snapshot_reference,
             market_snapshot_provenance_hash=candidate.market_snapshot_provenance_hash,
             symbol_metadata_reference=metadata_reference,
@@ -507,7 +607,12 @@ class ControlledPendingOrderDryRunMapper:
             account_context_reference=account_context_reference,
             source_review_artifact_id=review_artifact.artifact_id,
             source_confirmation_intent_id=confirmation_intent.intent_id,
+            confirmation_artifact_hash=confirmation_intent.artifact_hash,
             structured_order_hash=candidate.structured_order_hash,
+            deviation=deviation,
+            magic=magic,
+            comment=str(comment),
+            audit=str(audit),
             validation_status=status,
             blocker_codes=tuple(blockers),
             canonical_integrity_hash=integrity_hash,
@@ -538,6 +643,10 @@ def _build_draft(contract: ControlledPendingOrderContract) -> PendingOrderDryRun
         "volume": contract.proposed_volume,
         "risk_policy_reference": contract.risk_policy_reference,
         "expiration_policy": contract.expiration_policy,
+        "deviation": contract.deviation,
+        "magic": contract.magic,
+        "comment": contract.comment,
+        "audit": contract.audit,
         "contract_reference": contract.contract_reference,
         "contract_integrity_hash": contract.canonical_integrity_hash,
         "account_context_reference": contract.account_context_reference,
@@ -563,11 +672,50 @@ def _build_draft(contract: ControlledPendingOrderContract) -> PendingOrderDryRun
         volume=contract.proposed_volume,
         risk_policy_reference=contract.risk_policy_reference,
         expiration_policy=contract.expiration_policy,
+        deviation=contract.deviation,
+        magic=contract.magic,
+        comment=contract.comment,
+        audit=contract.audit,
         account_context_reference=contract.account_context_reference,
         semantic_request_hash=semantic_hash,
         idempotency_key=_sha256("pending-order-request-draft/v1|" + semantic_hash),
     )
 
+
+def _contract_material(contract: ControlledPendingOrderContract) -> dict[str, Any]:
+    return {
+        "schema_version": contract.schema_version,
+        "candidate_reference": contract.candidate_reference,
+        "candidate_provenance_hash": contract.candidate_provenance_hash,
+        "symbol": contract.symbol,
+        "side": contract.side,
+        "order_type": contract.order_type,
+        "action": contract.action,
+        "entry_intent": contract.entry_intent,
+        "entry_price": contract.entry_price,
+        "trigger_price": contract.trigger_price,
+        "limit_price": contract.limit_price,
+        "stop_loss": contract.stop_loss,
+        "take_profit": contract.take_profit,
+        "proposed_volume": contract.proposed_volume,
+        "risk_policy_reference": contract.risk_policy_reference,
+        "expiration_policy": contract.expiration_policy,
+        "market_snapshot_reference": contract.market_snapshot_reference,
+        "market_snapshot_provenance_hash": contract.market_snapshot_provenance_hash,
+        "symbol_metadata_hash": contract.symbol_metadata_hash,
+        "account_context_reference": contract.account_context_reference,
+        "source_review_artifact_id": contract.source_review_artifact_id,
+        "source_confirmation_intent_id": contract.source_confirmation_intent_id,
+        "confirmation_artifact_hash": contract.confirmation_artifact_hash,
+        "structured_order_hash": contract.structured_order_hash,
+        "deviation": contract.deviation,
+        "magic": contract.magic,
+        "comment": contract.comment,
+        "audit": contract.audit,
+        "expires_at": contract.expires_at,
+        "blocker_codes": list(contract.blocker_codes),
+        "source_refs": tuple(contract.source_refs),
+    }
 
 def _symbol_metadata_material(
     snapshot: AutonomousOrderMarketSnapshot,

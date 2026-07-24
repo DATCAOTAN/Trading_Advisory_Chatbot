@@ -121,6 +121,66 @@ class MT5Client:
             "redacted": True,
         }
 
+    def pending_order_context(self, symbol: str) -> Dict[str, Any]:
+        ok, message = self.ensure_initialized()
+        if not ok:
+            return {"status": "UNAVAILABLE", "message": message, "metadata_redacted": True}
+        try:
+            selected = _call_mt5(mt5.symbol_select, symbol, True)
+            info = _call_mt5(mt5.symbol_info, symbol)
+            tick = _call_mt5(mt5.symbol_info_tick, symbol)
+        except Exception as exc:
+            return {
+                "status": "UNAVAILABLE",
+                "message": type(exc).__name__,
+                "metadata_redacted": True,
+            }
+        if not selected or info is None or tick is None:
+            return {
+                "status": "UNAVAILABLE",
+                "message": "PENDING_SYMBOL_CONTEXT_UNAVAILABLE",
+                "metadata_redacted": True,
+            }
+        info_data = info._asdict()
+        tick_data = tick._asdict()
+        order_mode = int(info_data.get("order_mode") or 0)
+        supported: list[str] = []
+        capabilities = (
+            ("LIMIT", ("BUY_LIMIT", "SELL_LIMIT"), "SYMBOL_ORDER_LIMIT"),
+            ("STOP", ("BUY_STOP", "SELL_STOP"), "SYMBOL_ORDER_STOP"),
+            (
+                "STOP_LIMIT",
+                ("BUY_STOP_LIMIT", "SELL_STOP_LIMIT"),
+                "SYMBOL_ORDER_STOP_LIMIT",
+            ),
+        )
+        for _, order_types, flag_name in capabilities:
+            flag = getattr(mt5, flag_name, None)
+            if isinstance(flag, int) and order_mode & flag == flag:
+                supported.extend(
+                    order_type
+                    for order_type in order_types
+                    if hasattr(mt5, "ORDER_TYPE_" + order_type)
+                )
+        disabled_mode = getattr(mt5, "SYMBOL_TRADE_MODE_DISABLED", object())
+        return {
+            "status": "OK",
+            "symbol": symbol,
+            "symbol_available": True,
+            "symbol_trade_allowed": info_data.get("trade_mode") != disabled_mode,
+            "bid": tick_data.get("bid"),
+            "ask": tick_data.get("ask"),
+            "digits": info_data.get("digits"),
+            "point": info_data.get("point"),
+            "tick_size": info_data.get("trade_tick_size"),
+            "trade_stops_level": info_data.get("trade_stops_level"),
+            "volume_min": info_data.get("volume_min"),
+            "volume_max": info_data.get("volume_max"),
+            "volume_step": info_data.get("volume_step"),
+            "expiration_mode": info_data.get("expiration_mode"),
+            "supported_pending_order_types": supported,
+            "metadata_redacted": True,
+        }
     def symbols(self) -> Dict[str, Any]:
         ok, message = self.ensure_initialized()
         if not ok:
@@ -232,10 +292,16 @@ class MT5Client:
         if not ok:
             return {"status": "QUERY_FAILED", "message": message, "orders": [], "deals": [], "positions": []}
         try:
-            orders = _call_mt5(mt5.history_orders_get, start, end)
+            active_orders = _call_mt5(mt5.orders_get)
+            historical_orders = _call_mt5(mt5.history_orders_get, start, end)
             deals = _call_mt5(mt5.history_deals_get, start, end)
             positions = _call_mt5(mt5.positions_get)
-            if orders is None or deals is None or positions is None:
+            if (
+                active_orders is None
+                or historical_orders is None
+                or deals is None
+                or positions is None
+            ):
                 return {
                     "status": "QUERY_FAILED",
                     "message": "MT5_QUERY_RETURNED_NONE",
@@ -253,7 +319,10 @@ class MT5Client:
             }
         return {
             "status": "OK",
-            "orders": [_normalize_reconciliation_row(item, "order") for item in orders or []],
+            "orders": [
+                _normalize_reconciliation_row(item, "order")
+                for item in [*(active_orders or []), *(historical_orders or [])]
+            ],
             "deals": [_normalize_reconciliation_row(item, "deal") for item in deals or []],
             "positions": [_normalize_reconciliation_row(item, "position") for item in positions or []],
         }
@@ -402,18 +471,26 @@ def _normalize_reconciliation_row(item: Any, kind: str) -> Dict[str, Any]:
     data = item._asdict()
     type_value = data.get("type")
     buy_names = {
-        "order": "ORDER_TYPE_BUY",
-        "deal": "DEAL_TYPE_BUY",
-        "position": "POSITION_TYPE_BUY",
+        "order": (
+            "ORDER_TYPE_BUY", "ORDER_TYPE_BUY_LIMIT", "ORDER_TYPE_BUY_STOP",
+            "ORDER_TYPE_BUY_STOP_LIMIT",
+        ),
+        "deal": ("DEAL_TYPE_BUY",),
+        "position": ("POSITION_TYPE_BUY",),
     }
     sell_names = {
-        "order": "ORDER_TYPE_SELL",
-        "deal": "DEAL_TYPE_SELL",
-        "position": "POSITION_TYPE_SELL",
+        "order": (
+            "ORDER_TYPE_SELL", "ORDER_TYPE_SELL_LIMIT", "ORDER_TYPE_SELL_STOP",
+            "ORDER_TYPE_SELL_STOP_LIMIT",
+        ),
+        "deal": ("DEAL_TYPE_SELL",),
+        "position": ("POSITION_TYPE_SELL",),
     }
-    if type_value == getattr(mt5, buy_names[kind], object()):
+    buy_values = {getattr(mt5, name, object()) for name in buy_names[kind]}
+    sell_values = {getattr(mt5, name, object()) for name in sell_names[kind]}
+    if type_value in buy_values:
         direction = "BUY"
-    elif type_value == getattr(mt5, sell_names[kind], object()):
+    elif type_value in sell_values:
         direction = "SELL"
     else:
         direction = "UNKNOWN"
@@ -431,8 +508,25 @@ def _normalize_reconciliation_row(item: Any, kind: str) -> Dict[str, Any]:
         "volume": volume,
         "time": _timestamp(data.get("time_msc") or data.get("time_setup_msc") or data.get("time")),
         "comment": str(data.get("comment", ""))[:64],
+        "order_status": _order_status(data.get("state")) if kind == "order" else "",
     }
 
+
+def _order_status(value: Any) -> str:
+    mappings = {
+        "ACTIVE": (
+            "ORDER_STATE_STARTED", "ORDER_STATE_PLACED", "ORDER_STATE_PARTIAL",
+            "ORDER_STATE_REQUEST_ADD", "ORDER_STATE_REQUEST_MODIFY",
+        ),
+        "FILLED": ("ORDER_STATE_FILLED",),
+        "CANCELLED": ("ORDER_STATE_CANCELED",),
+        "REJECTED": ("ORDER_STATE_REJECTED",),
+        "EXPIRED": ("ORDER_STATE_EXPIRED",),
+    }
+    for status, names in mappings.items():
+        if value in {getattr(mt5, name, object()) for name in names}:
+            return status
+    return "UNKNOWN"
 
 def _normalize_lifecycle_row(item: Any, kind: str, correlation_tags: tuple[str, ...]) -> Dict[str, Any]:
     row = _normalize_reconciliation_row(item, kind)

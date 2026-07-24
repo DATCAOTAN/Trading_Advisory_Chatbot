@@ -19,6 +19,10 @@ from tools.mt5_bridge.execution import (
 RECONCILIATION_REQUEST_VERSION = "mt5-execution-reconciliation/v1"
 EVIDENCE_CLASSIFICATIONS = {
     "UNIQUE_CONFIRMED_MATCH",
+    "UNIQUE_ACTIVE_ORDER_MATCH",
+    "UNIQUE_CANCELLED_ORDER_MATCH",
+    "UNIQUE_EXPIRED_ORDER_MATCH",
+    "UNIQUE_REJECTED_ORDER_MATCH",
     "AMBIGUOUS_MATCH",
     "NO_MATCH",
     "QUERY_FAILED",
@@ -216,13 +220,29 @@ class ControlledMT5ReconciliationService:
             except Exception:
                 evidence = {"status": "QUERY_FAILED", "orders": [], "deals": [], "positions": []}
             match = _match_evidence(request, evidence)
-            status = {
-                "UNIQUE_CONFIRMED_MATCH": "CONFIRMED",
-                "QUERY_FAILED": "FAILED",
-            }.get(match["classification"], "INCONCLUSIVE")
+            confirmed = {
+                "UNIQUE_CONFIRMED_MATCH",
+                "UNIQUE_ACTIVE_ORDER_MATCH",
+            }
+            rejected = {
+                "UNIQUE_CANCELLED_ORDER_MATCH",
+                "UNIQUE_EXPIRED_ORDER_MATCH",
+                "UNIQUE_REJECTED_ORDER_MATCH",
+            }
+            status = (
+                "CONFIRMED"
+                if match["classification"] in confirmed
+                else "REJECTED"
+                if match["classification"] in rejected
+                else "FAILED"
+                if match["classification"] == "QUERY_FAILED"
+                else "INCONCLUSIVE"
+            )
             resulting_state = (
                 "RESULT_CONFIRMED"
-                if match["classification"] == "UNIQUE_CONFIRMED_MATCH"
+                if match["classification"] in confirmed
+                else "RESULT_REJECTED"
+                if match["classification"] in rejected
                 else "RESULT_UNKNOWN"
             )
             completed = self.journal.complete_reconciliation(
@@ -290,7 +310,19 @@ def _match_evidence(
     if not orders and not deals and not positions:
         return _match("NO_MATCH", ["NO_BROKER_EVIDENCE_IN_BOUNDED_WINDOW"])
 
-    orders_by_id = {str(row.get("ticket")): row for row in orders if row.get("ticket") is not None}
+    active_orders = [row for row in orders if row.get("order_status") == "ACTIVE"]
+    if len(active_orders) == 1 and not deals and not positions:
+        return _match(
+            "UNIQUE_ACTIVE_ORDER_MATCH",
+            ["UNIQUE_ACTIVE_PENDING_ORDER_MATCH"],
+            {"orders": [active_orders[0].get("ticket")], "deals": [], "positions": []},
+        )
+    if len(active_orders) > 1:
+        return _match("AMBIGUOUS_MATCH", ["MULTIPLE_ACTIVE_ORDER_MATCHES"])
+
+    orders_by_id = {
+        str(row.get("ticket")): row for row in orders if row.get("ticket") is not None
+    }
     positions_by_id = {
         str(row.get("ticket")): row for row in positions if row.get("ticket") is not None
     }
@@ -310,29 +342,51 @@ def _match_evidence(
     candidates = []
     expected_volume = Decimal(request.expected_volume)
     for group in groups.values():
-        total_volume = sum((Decimal(str(row.get("volume", "0"))) for row in group["deals"]), Decimal(0))
-        tagged = any(request.correlation_tag in str(row.get("comment", "")) for row in group["deals"])
+        total_volume = sum(
+            (Decimal(str(row.get("volume", "0"))) for row in group["deals"]),
+            Decimal(0),
+        )
+        tagged = any(
+            request.correlation_tag in str(row.get("comment", ""))
+            for row in group["deals"]
+        )
         linked = group["order"] is not None or bool(group["positions"])
         if total_volume == expected_volume and (linked or tagged):
             candidates.append(group)
-
-    if len(candidates) != 1:
+    if len(candidates) == 1:
+        candidate = candidates[0]
+        broker_refs = {
+            "orders": [candidate["order"].get("ticket")] if candidate["order"] else [],
+            "deals": [row.get("ticket") for row in candidate["deals"]],
+            "positions": [row.get("ticket") for row in candidate["positions"]],
+        }
         return _match(
-            "AMBIGUOUS_MATCH",
-            ["MULTIPLE_OR_WEAK_BROKER_EVIDENCE"],
+            "UNIQUE_CONFIRMED_MATCH",
+            ["SYMBOL_DIRECTION_VOLUME_TIME_AND_RELATIONSHIP_MATCH"],
+            broker_refs,
         )
-    candidate = candidates[0]
-    broker_refs = {
-        "orders": [candidate["order"].get("ticket")] if candidate["order"] else [],
-        "deals": [row.get("ticket") for row in candidate["deals"]],
-        "positions": [row.get("ticket") for row in candidate["positions"]],
-    }
-    return _match(
-        "UNIQUE_CONFIRMED_MATCH",
-        ["SYMBOL_DIRECTION_VOLUME_TIME_AND_RELATIONSHIP_MATCH"],
-        broker_refs,
-    )
+    if len(candidates) > 1:
+        return _match("AMBIGUOUS_MATCH", ["MULTIPLE_OR_WEAK_BROKER_EVIDENCE"])
 
+    terminal_orders = [
+        row
+        for row in orders
+        if row.get("order_status") in {"FILLED", "CANCELLED", "EXPIRED", "REJECTED"}
+    ]
+    if len(terminal_orders) != 1 or positions:
+        return _match("AMBIGUOUS_MATCH", ["MULTIPLE_OR_WEAK_BROKER_EVIDENCE"])
+    terminal = terminal_orders[0]
+    classification = {
+        "FILLED": "UNIQUE_CONFIRMED_MATCH",
+        "CANCELLED": "UNIQUE_CANCELLED_ORDER_MATCH",
+        "EXPIRED": "UNIQUE_EXPIRED_ORDER_MATCH",
+        "REJECTED": "UNIQUE_REJECTED_ORDER_MATCH",
+    }[terminal["order_status"]]
+    return _match(
+        classification,
+        ["UNIQUE_TERMINAL_ORDER_STATE_MATCH"],
+        {"orders": [terminal.get("ticket")], "deals": [], "positions": []},
+    )
 
 def _row_matches(
     request: ProtectedReconciliationRequest, row: Mapping[str, Any], row_kind: str

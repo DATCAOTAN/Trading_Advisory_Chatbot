@@ -610,9 +610,26 @@ def _classify_record(
             [],
         )
     if recent_orders:
+        statuses = {str(row.get("order_status", "")) for row in recent_orders}
+        if "REJECTED" in statuses:
+            return _classification(
+                MT5LifecycleState.BROKER_REJECTED,
+                "BROKER_ORDER_REJECTED",
+                "",
+                recent_orders,
+                [],
+                [],
+            )
+        evidence = (
+            "BROKER_ORDER_CANCELLED"
+            if "CANCELLED" in statuses
+            else "BROKER_ORDER_EXPIRED"
+            if "EXPIRED" in statuses
+            else "BROKER_ORDER_HISTORY_MATCH"
+        )
         return _classification(
             MT5LifecycleState.BROKER_ACCEPTED,
-            "BROKER_ORDER_HISTORY_MATCH",
+            evidence,
             "",
             recent_orders,
             [],

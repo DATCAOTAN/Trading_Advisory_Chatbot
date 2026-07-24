@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+import hmac
 from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Dict, Mapping
 
 from src.services.trading.execution.mt5_live_adapter_pre_submit.models import hash_text
+
+
+if TYPE_CHECKING:
+    from src.services.trading.execution.mt5_live_adapter_pre_submit.pending_order_dry_run import (
+        ControlledPendingOrderContract,
+        ControlledPendingOrderValidation,
+        PendingOrderDryRunRequestDraft,
+    )
+
+
+PENDING_EXECUTION_REQUEST_VERSION = "controlled-mt5-pending-execution/v1"
 
 
 @dataclass(frozen=True)
@@ -82,6 +95,128 @@ class MT5ControlledExecutionRequest:
             execution_permission_requested=execution_permission_requested,
         )
 
+    @classmethod
+    def from_pending_artifacts(
+        cls,
+        contract: ControlledPendingOrderContract,
+        contract_validation: ControlledPendingOrderValidation,
+        request_draft: PendingOrderDryRunRequestDraft,
+        pre_submit_report,
+        *,
+        expected_account_context_fingerprint: str,
+        human_confirmation_phrase: str,
+        execution_permission_requested: bool = True,
+        now: datetime | None = None,
+    ) -> "MT5ControlledExecutionRequest":
+        from src.services.trading.execution.mt5_live_adapter_pre_submit.pending_order_dry_run import (
+            PENDING_ORDER_CONTRACT_SCHEMA_VERSION,
+            SUPPORTED_PENDING_ORDER_TYPES,
+        )
+
+        evaluated_at = now or datetime.now(timezone.utc)
+        if evaluated_at.tzinfo is None:
+            evaluated_at = evaluated_at.replace(tzinfo=timezone.utc)
+        evaluated_at = evaluated_at.astimezone(timezone.utc)
+        if (
+            contract.schema_version != PENDING_ORDER_CONTRACT_SCHEMA_VERSION
+            or contract.validation_status != "VALID"
+            or contract.blocker_codes
+            or not contract.integrity_valid()
+        ):
+            raise ValueError("PENDING_CONTRACT_INTEGRITY_INVALID")
+        if (
+            contract_validation.valid is not True
+            or contract_validation.status != "VALID"
+            or contract_validation.blockers
+        ):
+            raise ValueError("PENDING_CONTRACT_APPROVAL_INVALID")
+        if request_draft is None or not request_draft.integrity_valid(contract):
+            raise ValueError("PENDING_DRY_RUN_BINDING_INVALID")
+        if contract.action != "PENDING" or contract.order_type not in SUPPORTED_PENDING_ORDER_TYPES:
+            raise ValueError("PENDING_ORDER_TYPE_INVALID")
+        if contract.expiration_policy != "GTC":
+            raise ValueError("PENDING_EXPIRATION_POLICY_REQUIRED")
+        if (
+            not contract.proposed_volume
+            or not contract.comment
+            or not contract.audit
+            or contract.deviation < 0
+            or contract.deviation > 1000
+            or contract.magic < 0
+            or contract.magic > 2_147_483_647
+        ):
+            raise ValueError("PENDING_EXECUTION_VALUES_INCOMPLETE")
+        required_references = (
+            contract.candidate_reference,
+            contract.candidate_provenance_hash,
+            contract.market_snapshot_reference,
+            contract.market_snapshot_provenance_hash,
+            contract.symbol_metadata_reference,
+            contract.symbol_metadata_hash,
+            contract.account_context_reference,
+            contract.source_review_artifact_id,
+            contract.source_confirmation_intent_id,
+            contract.confirmation_artifact_hash,
+            contract.structured_order_hash,
+        )
+        if any(not value for value in required_references) or not contract.source_refs:
+            raise ValueError("PENDING_APPROVAL_REFERENCES_INCOMPLETE")
+        try:
+            generated_at = datetime.fromisoformat(contract.generated_at)
+            expires_at = datetime.fromisoformat(contract.expires_at)
+            if generated_at.tzinfo is None or expires_at.tzinfo is None:
+                raise ValueError
+        except ValueError as exc:
+            raise ValueError("PENDING_CONTRACT_TIMESTAMP_INVALID") from exc
+        generated_at = generated_at.astimezone(timezone.utc)
+        expires_at = expires_at.astimezone(timezone.utc)
+        if (
+            generated_at > evaluated_at
+            or (evaluated_at - generated_at).total_seconds() > 300
+            or expires_at <= evaluated_at
+        ):
+            raise ValueError("PENDING_CONTRACT_EXPIRED")
+        if (
+            getattr(pre_submit_report, "valid", False) is not True
+            or getattr(pre_submit_report, "controlled_demo_integration_workflow_allowed", False) is not True
+        ):
+            raise ValueError("PRE_SUBMIT_VALIDATION_REQUIRED")
+        fingerprint = str(expected_account_context_fingerprint or "").strip().lower()
+        phrase = str(human_confirmation_phrase or "").strip()
+        if (
+            len(fingerprint) != 64
+            or any(character not in "0123456789abcdef" for character in fingerprint)
+            or not phrase
+            or execution_permission_requested is not True
+        ):
+            raise ValueError("PENDING_EXECUTION_REQUEST_INCOMPLETE")
+        expected_account_reference = "account_context_" + hash_text(
+            "pending-dry-run|" + fingerprint
+        )[:24]
+        if not hmac.compare_digest(contract.account_context_reference, expected_account_reference):
+            raise ValueError("ACCOUNT_CONTEXT_MISMATCH")
+        confirmation_reference = hash_text(
+            f"{phrase}|{contract.idempotency_key}|{fingerprint}"
+        )
+        return cls(
+            request_version=PENDING_EXECUTION_REQUEST_VERSION,
+            approved_semantic_parameters=contract.to_protected_dict(),
+            canonical_semantic_hash=contract.canonical_integrity_hash,
+            approval_value_hash=contract.canonical_integrity_hash,
+            lock_value_hash=contract.canonical_integrity_hash,
+            approval_reference=contract.source_confirmation_intent_id,
+            lock_reference=contract.contract_reference,
+            source_artifact_reference=contract.candidate_reference,
+            approval_timestamp=contract.generated_at,
+            lock_timestamp=contract.generated_at,
+            human_confirmation_reference=confirmation_reference,
+            human_confirmation_phrase=phrase,
+            pre_submit_validation_reference=getattr(pre_submit_report, "report_id", ""),
+            pre_submit_validation_valid=True,
+            idempotency_key=contract.idempotency_key,
+            expected_account_context_fingerprint=fingerprint,
+            execution_permission_requested=execution_permission_requested,
+        )
     def as_protected_dict(self) -> Dict[str, Any]:
         return {
             "request_version": self.request_version,

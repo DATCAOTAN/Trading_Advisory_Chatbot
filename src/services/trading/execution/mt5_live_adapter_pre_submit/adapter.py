@@ -6,6 +6,7 @@ from time import perf_counter
 from src.services.trading.execution.mt5_bridge_write_skeleton import MT5BridgeWriteSkeletonService
 from src.services.trading.execution.mt5_bridge_write_skeleton.client import MT5BridgeWriteSkeletonClient
 from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled import (
+    PENDING_EXECUTION_REQUEST_VERSION,
     MT5ControlledExecutionReceipt,
     MT5ControlledExecutionRequest,
 )
@@ -109,7 +110,7 @@ class MT5LiveAdapterDisabled:
     def submit_prepared_request(
         self, request: MT5ControlledExecutionRequest, *, typed_confirmation: str
     ) -> MT5ControlledExecutionReceipt:
-        blocker = self._controlled_submission_blocker(typed_confirmation)
+        blocker = self._controlled_submission_blocker(typed_confirmation, request)
         if blocker:
             return MT5ControlledExecutionReceipt("BLOCKED", "NOT_RESERVED", False, False, False, blocker)
         if not hmac.compare_digest(request.human_confirmation_phrase, typed_confirmation.strip()):
@@ -211,7 +212,11 @@ class MT5LiveAdapterDisabled:
             )
         return MT5ReconciliationReceipt.from_payload(payload)
 
-    def _controlled_submission_blocker(self, typed_confirmation: str) -> str:
+    def _controlled_submission_blocker(
+        self,
+        typed_confirmation: str,
+        request: MT5ControlledExecutionRequest | None = None,
+    ) -> str:
         if (
             not self.config.controlled_execution_enabled
             or not self.config.live_adapter_enabled
@@ -221,6 +226,25 @@ class MT5LiveAdapterDisabled:
             or self.config.kill_switch_engaged
         ):
             return "CONTROLLED_EXECUTION_DISABLED"
+        if request is not None and request.request_version == PENDING_EXECUTION_REQUEST_VERSION:
+            order_type = str(
+                request.approved_semantic_parameters.get("order_type", "")
+            ).upper()
+            family_allowed = (
+                self.config.pending_limit_enabled
+                if order_type in {"BUY_LIMIT", "SELL_LIMIT"}
+                else self.config.pending_stop_enabled
+                if order_type in {"BUY_STOP", "SELL_STOP"}
+                else self.config.pending_stop_limit_enabled
+                if order_type in {"BUY_STOP_LIMIT", "SELL_STOP_LIMIT"}
+                else False
+            )
+            if (
+                not self.config.pending_submission_enabled
+                or self.config.pending_submission_hard_block
+                or not family_allowed
+            ):
+                return "PENDING_SUBMISSION_DISABLED"
         if not self.config.execution_auth_token:
             return "CONTROLLED_EXECUTION_AUTHENTICATION_MISSING"
         if not hmac.compare_digest(
