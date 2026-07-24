@@ -803,6 +803,13 @@ def resolve_autonomous_order_action(order_type: str) -> str:
     return semantics[2]
 
 
+def autonomous_market_snapshot_provenance_hash(
+    snapshot: AutonomousOrderMarketSnapshot,
+) -> str:
+    """Return the canonical provenance hash used by structured order candidates."""
+    return _sha256(_canonical_json(_market_snapshot_material(snapshot)))
+
+
 def _empty_structured_order() -> dict[str, Any]:
     return {
         "side": "",
@@ -899,8 +906,8 @@ def _resolve_order_proposal(
     else:
         resolved["market_snapshot_reference"] = _safe_or_empty(snapshot.snapshot_reference)
         market_material = _market_snapshot_material(snapshot)
-        resolved["market_snapshot_provenance_hash"] = _sha256(
-            _canonical_json(market_material)
+        resolved["market_snapshot_provenance_hash"] = (
+            autonomous_market_snapshot_provenance_hash(snapshot)
         )
         if not resolved["market_snapshot_reference"] or not snapshot.source_refs:
             blockers.append("MARKET_SNAPSHOT_PROVENANCE_MISSING")

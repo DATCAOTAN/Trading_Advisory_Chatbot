@@ -500,3 +500,32 @@ Commit: NOT COMMITTED
 
 - A producer must explicitly store its already-produced typed run result; page load and refresh intentionally do not run the autonomous orchestrator or LLM.
 - This is post-release maintenance, not a new execution, permission, or approval boundary.
+
+---
+
+### Post-release Maintenance - Controlled Pending Order Contract and Dry-Run Mapping
+
+Date: 2026-07-24
+Verification: `FOCUSED_AND_PENDING_DRY_RUN_PASS`
+Commit: NOT COMMITTED
+
+#### Implemented
+
+- Added one typed pending-order contract and semantic dry-run mapper inside existing controlled execution ownership; no new package, endpoint, permission boundary, or UI flow was added.
+- Supports all six LIMIT, STOP, and STOP_LIMIT types while preserving separate stop-limit trigger/limit fields.
+- Reuses candidate validation and canonical snapshot hashing; requires symbol metadata, fresh matching protected account context, and existing review/confirmation references bound to candidate provenance and structured-order integrity.
+- Produces a redacted public contract and request draft only for valid reviewed inputs; all execution flags remain false.
+
+#### Verification
+
+- Focused pending-contract tests: 35 passed.
+- Neighboring candidate, policy, approval, semantic-contract, request-draft, and dry-run-validator tests: 319 passed.
+- Changed-path compileall and static safety scans: passed.
+- Fixture `BUY_STOP_LIMIT` dry-run: `VALID`; trigger/limit separate; no bridge request, execution journal, or broker mutation.
+- Full regression, Docker/runtime checks, MT5 bridge pending execution, controlled submission, and broker mutation: NOT RUN.
+
+#### Current state / limitations
+
+- Bridge pending-order execution is not implemented; this boundary is reviewed dry-run preparation only.
+- Exactly one existing production `.order_send(` call-site remains; `src/` has zero `MetaTrader5` imports.
+- Next task, only if explicitly approved: Controlled Pending Order Submission.
