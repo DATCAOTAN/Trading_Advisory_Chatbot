@@ -534,8 +534,8 @@ Commit: NOT COMMITTED
 ### Post-release Maintenance - Controlled Pending Order Submission
 
 Date: 2026-07-24
-Verification: `FOCUSED_AND_PENDING_SUBMISSION_BLOCKED_RUNTIME_PASS`
-Commit: included in this commit
+Verification: `FULL_REGRESSION_PASS`
+Commit: `67844f9`; regression fix: `02c3298`
 
 #### Implemented
 
@@ -552,7 +552,7 @@ Commit: included in this commit
 - Host bridge health: `OK`; protected pending runtime attempt: HTTP 403 `EXECUTION_DISABLED`, no order sent, identifiers null.
 - Read-only lifecycle snapshot: `OK`; reconciliation read: `NOT_REQUIRED`, `RETRY_PROHIBITED`, identifiers null.
 - Static scan: exactly 1 production `.order_send(` call-site, 0 `MetaTrader5` imports under `src/`, 1 existing controlled-submit endpoint, and 0 autonomous submission calls.
-- Full regression and broker mutation: NOT RUN.
+- Full scripts regression: 2,865 passed and 156 subtests passed in 155.84 seconds; 3 dependency warnings. Broker mutation: NOT RUN.
 
 #### Current state / limitations
 
