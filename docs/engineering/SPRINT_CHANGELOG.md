@@ -587,3 +587,15 @@ Commit: NOT COMMITTED
 - Runtime had no authoritative typed reviewed pending candidate; no fixture was substituted and no runtime pending artifact was exported.
 - Full regression, controlled submission, reconciliation, and broker mutation: NOT RUN.
 - Next: pending-order operational acceptance after a real runtime candidate is explicitly reviewed and handed off.
+---
+
+### Verification Follow-up - Pending Artifact Capture Full Regression
+
+Date: 2026-07-24
+Verification: `FULL_REGRESSION_PASS`
+Commit verified: `8de0d94`
+
+- Full scripts regression: 2,895 passed and 156 subtests passed in 132.11 seconds.
+- Warnings: 3 dependency deprecations; no test failures.
+- Controlled submission, reconciliation, runtime candidate export, and broker mutation: NOT RUN.
+- Operational status remains `PASS_WITH_RUNTIME_CANDIDATE_LIMITATION` until a real typed reviewed runtime candidate is explicitly handed off and exported.

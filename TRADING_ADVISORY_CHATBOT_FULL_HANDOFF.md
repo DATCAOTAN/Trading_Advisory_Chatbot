@@ -2182,6 +2182,7 @@ Post-release maintenance now connects one authoritative typed reviewed pending c
 - All six pending types are supported; STOP_LIMIT retains separate trigger and limit values.
 - Every artifact preserves execution authority, execution permission, live submission, executable, order-send, and order-sent state as false. Pre-submit permission is not granted.
 - Verification: 30 focused tests and 150 neighboring export/candidate/review/pending tests passed; changed-path compileall and `git diff --check` passed; Docker app restart, healthy status, and Streamlit HTTP 200 `ok` passed.
+- Post-commit full scripts regression: 2,895 tests and 156 subtests passed in 132.11 seconds with 3 dependency warnings (FULL_REGRESSION_PASS).
 - Runtime verification result: `PASS_WITH_RUNTIME_CANDIDATE_LIMITATION`. The current runtime had no authoritative typed reviewed pending candidate, so no runtime pending artifact was fabricated or exported.
 - Static state remains exactly one production `.order_send(` call-site, zero `MetaTrader5` imports under `src/`, one existing controlled-submit endpoint, and disabled/hard-blocked pending defaults.
-- Controlled submission, reconciliation, execution-journal mutation, and broker mutation were NOT RUN. Pending-order operational acceptance remains pending.
+- Controlled submission, reconciliation, execution-journal mutation, and broker mutation were NOT RUN. Full regression passed; pending-order operational acceptance remains pending.
