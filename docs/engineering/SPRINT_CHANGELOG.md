@@ -559,3 +559,31 @@ Commit: `67844f9`; regression fix: `02c3298`
 - App and bridge pending submission plus LIMIT, STOP, and STOP_LIMIT family flags remain disabled/hard-blocked by default.
 - Runtime reconciliation used an existing non-reconcilable protected record, so no broker-history match was required.
 - Next: pending-order operational acceptance with explicit operator enablement on a testing account; no autonomous submission.
+
+---
+
+### Post-release Maintenance - Pending Artifact Capture and Validation-Only Export
+
+Date: 2026-07-24
+Verification: `PASS_WITH_RUNTIME_CANDIDATE_LIMITATION`
+Commit: NOT COMMITTED
+
+#### Implemented
+
+- Added explicit protected handoff for an existing typed reviewed pending candidate and its typed market snapshot.
+- Reused the existing pending dry-run mapper and controlled pending request builder to export `controlled-mt5-pending-execution/v1`.
+- Added one path-only CLI, atomic/idempotent protected bundle writes, integrity validation, and an explicit non-submitting Streamlit action.
+- Kept public serialization redacted and every execution, submission, executable, and order-send flag false.
+
+#### Verification
+
+- Focused pending artifact tests: 30 passed; neighboring export, capture, candidate, Review Card, pending dry-run, and controlled-submission tests: 150 passed with 2 dependency warnings.
+- Changed-path compileall and `git diff --check`: passed.
+- Docker app restart/healthy and Streamlit HTTP 200 (`ok`): passed; execution journals changed: 0.
+- Static scan: exactly 1 production `.order_send(` call-site, 0 `MetaTrader5` imports under `src/`, protected output path Git-ignored, pending defaults disabled/hard-blocked.
+
+#### Current state / limitations / next step
+
+- Runtime had no authoritative typed reviewed pending candidate; no fixture was substituted and no runtime pending artifact was exported.
+- Full regression, controlled submission, reconciliation, and broker mutation: NOT RUN.
+- Next: pending-order operational acceptance after a real runtime candidate is explicitly reviewed and handed off.

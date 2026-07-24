@@ -106,6 +106,7 @@ class MT5ControlledExecutionRequest:
         expected_account_context_fingerprint: str,
         human_confirmation_phrase: str,
         execution_permission_requested: bool = True,
+        validation_only: bool = False,
         now: datetime | None = None,
     ) -> "MT5ControlledExecutionRequest":
         from src.services.trading.execution.mt5_live_adapter_pre_submit.pending_order_dry_run import (
@@ -134,18 +135,19 @@ class MT5ControlledExecutionRequest:
             raise ValueError("PENDING_DRY_RUN_BINDING_INVALID")
         if contract.action != "PENDING" or contract.order_type not in SUPPORTED_PENDING_ORDER_TYPES:
             raise ValueError("PENDING_ORDER_TYPE_INVALID")
-        if contract.expiration_policy != "GTC":
-            raise ValueError("PENDING_EXPIRATION_POLICY_REQUIRED")
-        if (
-            not contract.proposed_volume
-            or not contract.comment
-            or not contract.audit
-            or contract.deviation < 0
-            or contract.deviation > 1000
-            or contract.magic < 0
-            or contract.magic > 2_147_483_647
-        ):
-            raise ValueError("PENDING_EXECUTION_VALUES_INCOMPLETE")
+        if not validation_only:
+            if contract.expiration_policy != "GTC":
+                raise ValueError("PENDING_EXPIRATION_POLICY_REQUIRED")
+            if (
+                not contract.proposed_volume
+                or not contract.comment
+                or not contract.audit
+                or contract.deviation < 0
+                or contract.deviation > 1000
+                or contract.magic < 0
+                or contract.magic > 2_147_483_647
+            ):
+                raise ValueError("PENDING_EXECUTION_VALUES_INCOMPLETE")
         required_references = (
             contract.candidate_reference,
             contract.candidate_provenance_hash,
@@ -176,7 +178,7 @@ class MT5ControlledExecutionRequest:
             or expires_at <= evaluated_at
         ):
             raise ValueError("PENDING_CONTRACT_EXPIRED")
-        if (
+        if not validation_only and (
             getattr(pre_submit_report, "valid", False) is not True
             or getattr(pre_submit_report, "controlled_demo_integration_workflow_allowed", False) is not True
         ):
@@ -187,7 +189,8 @@ class MT5ControlledExecutionRequest:
             len(fingerprint) != 64
             or any(character not in "0123456789abcdef" for character in fingerprint)
             or not phrase
-            or execution_permission_requested is not True
+            or (validation_only and execution_permission_requested is not False)
+            or (not validation_only and execution_permission_requested is not True)
         ):
             raise ValueError("PENDING_EXECUTION_REQUEST_INCOMPLETE")
         expected_account_reference = "account_context_" + hash_text(
@@ -211,8 +214,10 @@ class MT5ControlledExecutionRequest:
             lock_timestamp=contract.generated_at,
             human_confirmation_reference=confirmation_reference,
             human_confirmation_phrase=phrase,
-            pre_submit_validation_reference=getattr(pre_submit_report, "report_id", ""),
-            pre_submit_validation_valid=True,
+            pre_submit_validation_reference=(
+                "" if validation_only else getattr(pre_submit_report, "report_id", "")
+            ),
+            pre_submit_validation_valid=not validation_only,
             idempotency_key=contract.idempotency_key,
             expected_account_context_fingerprint=fingerprint,
             execution_permission_requested=execution_permission_requested,

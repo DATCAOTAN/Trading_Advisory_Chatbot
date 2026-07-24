@@ -308,6 +308,9 @@ class AutonomousDecisionRunResult:
     journal_appended: bool
     persistence_safe: bool
     journal_warning: str = ""
+    order_market_snapshot: AutonomousOrderMarketSnapshot | None = field(
+        default=None, repr=False, compare=False
+    )
 
     def to_public_dict(self) -> dict[str, Any]:
         payload = self.candidate.to_public_dict()
@@ -671,6 +674,7 @@ class AutonomousDecisionOrchestrator:
             journal_appended=appended,
             persistence_safe=persistence_safe,
             journal_warning=journal_warning,
+            order_market_snapshot=inputs.order_market_snapshot,
         )
 
 

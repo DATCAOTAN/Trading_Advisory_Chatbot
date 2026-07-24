@@ -2167,3 +2167,21 @@ Post-release maintenance now extends the existing authenticated `/execution/cont
 - Broker mutation was NOT RUN. Pending-order operational acceptance is still required before any operator-enabled use.
 
 `Trading_Advisory_Chatbot` remains complete through Sprint 41, with this work classified as explicit post-release maintenance rather than Sprint 42. Production still has exactly one `.order_send(` call-site and `src/` has zero `MetaTrader5` imports.
+
+---
+
+# 36. CURRENT PENDING ARTIFACT CAPTURE AND VALIDATION-ONLY STATE
+
+Post-release maintenance now connects one authoritative typed reviewed pending candidate to the existing pending contract and protected-request builders without adding an execution boundary.
+
+- Candidate ownership remains `AutonomousDecisionRunResult`; its private typed market snapshot is retained without changing public candidate serialization or decision journals.
+- Streamlit exposes one explicit `Export Protected Pending Candidate` handoff action. Page render and refresh do not export, rerun the LLM, generate another candidate, or append a decision journal.
+- The operator CLI accepts only protected candidate, account-context, output-directory references, and the exact export-only confirmation. It has no order parameter arguments.
+- The existing `ControlledPendingOrderDryRunMapper` and `MT5ControlledExecutionRequest.from_pending_artifacts(...)` produce `controlled-mt5-pending-execution/v1` in validation-only mode.
+- Protected handoff and bundle writes are integrity-bound, atomic, conflict-safe, idempotent for identical sources, and restricted to Git-ignored `data/trading/protected_requests/` storage.
+- All six pending types are supported; STOP_LIMIT retains separate trigger and limit values.
+- Every artifact preserves execution authority, execution permission, live submission, executable, order-send, and order-sent state as false. Pre-submit permission is not granted.
+- Verification: 30 focused tests and 150 neighboring export/candidate/review/pending tests passed; changed-path compileall and `git diff --check` passed; Docker app restart, healthy status, and Streamlit HTTP 200 `ok` passed.
+- Runtime verification result: `PASS_WITH_RUNTIME_CANDIDATE_LIMITATION`. The current runtime had no authoritative typed reviewed pending candidate, so no runtime pending artifact was fabricated or exported.
+- Static state remains exactly one production `.order_send(` call-site, zero `MetaTrader5` imports under `src/`, one existing controlled-submit endpoint, and disabled/hard-blocked pending defaults.
+- Controlled submission, reconciliation, execution-journal mutation, and broker mutation were NOT RUN. Pending-order operational acceptance remains pending.

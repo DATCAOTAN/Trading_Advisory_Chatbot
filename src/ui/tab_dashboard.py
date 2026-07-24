@@ -68,6 +68,11 @@ from src.services.trading.execution.live_design import (
     LiveExecutionDesignReportStore,
     LiveExecutionDesignSpecService,
 )
+from src.services.trading.execution.mt5_live_adapter_pre_submit.pending_artifact_export import (
+    EXPECTED_PROTECTED_REQUEST_EXPORT_PHRASE,
+    PendingArtifactExportError,
+    write_pending_candidate_handoff,
+)
 from src.services.trading.market.live_feature_service import LiveFeatureService
 from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBundleBuilder
 from src.services.trading.market.regime_detector import MarketRegimeDetector
@@ -231,6 +236,53 @@ def _render_autonomous_decision_review_card():
     candidate = run_result.candidate if run_result else None
     validation = run_result.validation if run_result else None
     render_autonomous_candidate_review_card(candidate, validation)
+    _render_pending_candidate_handoff(run_result)
+
+
+def _render_pending_candidate_handoff(run_result):
+    if run_result is None or run_result.candidate.action != "PENDING":
+        return
+    st.caption(
+        "Protected validation-only handoff. This action does not submit, call MT5, "
+        "or grant execution permission."
+    )
+    st.caption(f"Required phrase: `{EXPECTED_PROTECTED_REQUEST_EXPORT_PHRASE}`")
+    review = st.session_state.get("human_review_artifact")
+    confirmation = st.session_state.get("human_confirmed_proposal_intent")
+    ready = (
+        run_result.order_market_snapshot is not None
+        and review is not None
+        and confirmation is not None
+    )
+    phrase = st.text_input(
+        "Export-only confirmation",
+        key="pending_candidate_export_confirmation",
+        type="password",
+        disabled=not ready,
+    )
+    if st.button(
+        "Export Protected Pending Candidate",
+        key="export_protected_pending_candidate",
+        disabled=not ready,
+    ):
+        try:
+            result = write_pending_candidate_handoff(
+                run_result=run_result,
+                review_artifact=review,
+                confirmation_intent=confirmation,
+                output_dir="data/trading/protected_requests/pending-candidates",
+                confirmation_phrase=phrase,
+            )
+            st.success(
+                f"Pending candidate handoff {result.export_status}: "
+                f"{result.candidate_reference_redacted}"
+            )
+            st.caption(
+                f"schema={result.schema_version} | order_type={result.order_type} | "
+                f"validation={result.validation_status} | path={result.artifact_path}"
+            )
+        except PendingArtifactExportError as exc:
+            st.warning(f"Pending candidate handoff blocked: {str(exc)}")
 
 
 def _render_market_data_provider_status(orchestrator):
