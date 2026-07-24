@@ -34,6 +34,10 @@ IDEMPOTENCY_STATES = {
 IDEMPOTENCY_TRANSITIONS = {
     "RESERVED": {"SUBMISSION_STARTED", "RESULT_REJECTED", "RESERVATION_ABANDONED"},
     "SUBMISSION_STARTED": {"RESULT_CONFIRMED", "RESULT_REJECTED", "RESULT_UNKNOWN"},
+    "RESULT_UNKNOWN": {"RESULT_CONFIRMED"},
+}
+RECONCILIATION_TRANSITIONS = {
+    **IDEMPOTENCY_TRANSITIONS,
     "RESULT_UNKNOWN": {"RESULT_CONFIRMED", "RESULT_REJECTED"},
 }
 MANAGEMENT_STATES = {
@@ -42,7 +46,7 @@ MANAGEMENT_STATES = {
 MANAGEMENT_TRANSITIONS = {
     "RESERVED": {"MANAGEMENT_STARTED", "RESULT_REJECTED"},
     "MANAGEMENT_STARTED": {"RESULT_CONFIRMED", "RESULT_REJECTED", "RESULT_UNKNOWN"},
-    "RESULT_UNKNOWN": {"RESULT_CONFIRMED", "RESULT_REJECTED"},
+    "RESULT_UNKNOWN": {"RESULT_CONFIRMED"},
 }
 
 
@@ -512,7 +516,7 @@ class ProtectedExecutionJournal:
             if row.get("idempotency_key_hash") == key_hash and row.get("state")
         ]
         previous_state = previous_states[-1] if previous_states else None
-        if state not in IDEMPOTENCY_TRANSITIONS.get(previous_state, set()):
+        if state not in RECONCILIATION_TRANSITIONS.get(previous_state, set()):
             raise RuntimeError("invalid idempotency state transition")
         self._append_unlocked(
             {
@@ -580,8 +584,19 @@ class ProtectedExecutionJournal:
             if not previous:
                 if state != "RESERVED":
                     raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_CORRUPT")
-            elif state not in IDEMPOTENCY_TRANSITIONS.get(previous[-1], set()):
-                raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_CORRUPT")
+            else:
+                protected_result = row.get("protected_result")
+                reconciliation_bound = (
+                    isinstance(protected_result, dict)
+                    and bool(protected_result.get("reconciliation_reference"))
+                )
+                transitions = (
+                    RECONCILIATION_TRANSITIONS
+                    if reconciliation_bound
+                    else IDEMPOTENCY_TRANSITIONS
+                )
+                if state not in transitions.get(previous[-1], set()):
+                    raise ProtectedExecutionJournalError("EXECUTION_JOURNAL_CORRUPT")
             previous.append(state)
 
     def _append_unlocked(self, row: Mapping[str, Any]) -> None:

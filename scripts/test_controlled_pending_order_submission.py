@@ -450,6 +450,36 @@ def evidence_order(status):
     }
 
 
+def test_reconciliation_evidence_can_finalize_unknown_as_rejected(tmp_path):
+    journal_path = tmp_path / "pending-reconciliation.jsonl"
+    journal = ProtectedExecutionJournal(journal_path)
+    correlation_identity = "pending-reconciliation-correlation"
+    assert journal.reserve(
+        "pending-reconciliation-key",
+        "pending-request-hash",
+        FINGERPRINT,
+        {"correlation_identity": correlation_identity},
+    )
+    journal.transition("pending-reconciliation-key", "SUBMISSION_STARTED")
+    journal.transition("pending-reconciliation-key", "RESULT_UNKNOWN")
+
+    completed = journal.complete_reconciliation(
+        "pending-reconciliation-reference",
+        correlation_identity,
+        reconciliation_status="REJECTED",
+        evidence_classification="UNIQUE_REJECTED_ORDER_MATCH",
+        original_execution_state="RESULT_UNKNOWN",
+        resulting_execution_state="RESULT_REJECTED",
+        retry_decision="RETRY_PROHIBITED",
+        reasons=["BROKER_ORDER_REJECTED"],
+        account_fingerprint=FINGERPRINT,
+    )
+
+    assert completed["resulting_execution_state"] == "RESULT_REJECTED"
+    reloaded = ProtectedExecutionJournal(journal_path)
+    assert reloaded.execution_record(correlation_identity)["state"] == "RESULT_REJECTED"
+
+
 @pytest.mark.parametrize(
     ("order_status", "classification"),
     [
