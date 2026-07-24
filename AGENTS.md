@@ -51,6 +51,28 @@ At the beginning of a new sprint, new agent session, or resumed task:
 - Prefer the shortest maintainable implementation that satisfies the acceptance criteria.
 - Let the sprint define WHAT and the boundaries; decide HOW only inside that scope.
 
+## Ponytail and RTK
+
+- Follow Ponytail's minimal-change ladder: reuse existing code and contracts
+  before introducing new implementation.
+- Minimal code must never remove validation, authentication, integrity,
+  idempotency, safety, redaction, persistence, or accessibility protections.
+- Prefer RTK for verbose read-only command output when it preserves command
+  semantics:
+  - `rtk git status`
+  - `rtk git diff`
+  - `rtk git log`
+  - `rtk grep`
+  - `rtk docker compose ps`
+  - `rtk docker logs`
+- Do not replace the required Windows Python test command:
+  `.\venv\Scripts\python.exe -m pytest ...`
+- Do not use bare `pytest`.
+- When compact RTK output is insufficient to diagnose a failure, run the exact
+  original command once and inspect the full output.
+- Do not use RTK output compression to hide failed tests, safety blockers,
+  warnings relevant to correctness, or changed paths.
+
 ## Anti-overengineering rules
 
 - Prefer modifying an existing appropriate module over creating a new package.
