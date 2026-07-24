@@ -599,3 +599,32 @@ Commit verified: `8de0d94`
 - Warnings: 3 dependency deprecations; no test failures.
 - Controlled submission, reconciliation, runtime candidate export, and broker mutation: NOT RUN.
 - Operational status remains `PASS_WITH_RUNTIME_CANDIDATE_LIMITATION` until a real typed reviewed runtime candidate is explicitly handed off and exported.
+
+---
+
+### Post-release Maintenance - Operator-Triggered Autonomous Candidate Generation
+
+Date: 2026-07-24
+Verification: `PASS_WITH_RUNTIME_INPUT_LIMITATION`
+Commit: NOT COMMITTED
+
+#### Implemented
+
+- Added one concrete authoritative input assembler over the existing feature, calendar, regime, knowledge, reasoning, scoring, readiness, and read-only lifecycle services.
+- Added one explicit Streamlit generation action and a session-guarded controller that calls the existing orchestrator once and stores only a valid persistence-safe typed result through the existing owner.
+- Preserved read-only Review Card ownership, explicit replacement/clear semantics, duplicate/rerun protection, deterministic validation, and all non-executable safety flags.
+- Added no scheduler, background worker, alternate candidate model, execution boundary, automatic export, permission control, bridge mutation, or fallback trading value.
+
+#### Verification
+
+- Focused generation tests: 34 passed; neighboring orchestrator/candidate/review/policy/export tests: 146 passed; dashboard safety tests: 36 passed.
+- Changed-path compileall, `git diff --check`, ignore checks, and static safety scans: passed.
+- Docker Compose config/app restart: passed; app healthy; Streamlit HTTP 200 (`ok`); bridge `OK`, terminal connected.
+- Streamlit runtime: action rendered and initial session had no candidate; generation failed closed before orchestration with `LIFECYCLE_UNAVAILABLE` because the runtime lifecycle auth token was unavailable.
+- Execution journal hash/size and protected artifact count remained unchanged; autonomous decision journal remained absent.
+
+#### Current state / limitations / next step
+
+- Implementation and focused verification are complete; a real typed runtime result remains blocked by missing read-only lifecycle authentication.
+- Automatic export, controlled submission, reconciliation mutation, broker mutation, and order submission: NOT RUN.
+- Next: provide the existing lifecycle endpoint authentication to the runtime, click generation once, then use validation-only pending export only if the authoritative result is a valid PENDING candidate.

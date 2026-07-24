@@ -2186,3 +2186,21 @@ Post-release maintenance now connects one authoritative typed reviewed pending c
 - Runtime verification result: `PASS_WITH_RUNTIME_CANDIDATE_LIMITATION`. The current runtime had no authoritative typed reviewed pending candidate, so no runtime pending artifact was fabricated or exported.
 - Static state remains exactly one production `.order_send(` call-site, zero `MetaTrader5` imports under `src/`, one existing controlled-submit endpoint, and disabled/hard-blocked pending defaults.
 - Controlled submission, reconciliation, execution-journal mutation, and broker mutation were NOT RUN. Full regression passed; pending-order operational acceptance remains pending.
+
+# 37. CURRENT OPERATOR-TRIGGERED CANDIDATE GENERATION STATE
+
+Post-release maintenance now provides one explicit Streamlit action that connects the existing authoritative runtime pipeline to the existing autonomous decision orchestrator and Review Card.
+
+- Input ownership remains the existing MT5 market provider, feature engine, calendar context, regime detector, knowledge router, context-pack builder, method selector, scoring engine, trade-readiness policy, and read-only lifecycle supervisor.
+- `Generate Autonomous Candidate` is the only generation trigger. Page load, refresh, unrelated widget changes, and Review Card rendering do not call the orchestrator.
+- The controller guards duplicate request identifiers and overlapping callbacks, calls the existing orchestrator at most once, and stores only a valid persistence-safe `AutonomousDecisionRunResult` through the existing session owner.
+- Missing, stale, invalid, or conflicting market, symbol, account, lifecycle, reconciliation, evidence, and reference inputs block before orchestration. The previous typed result is preserved on failure; replacement and clearing require explicit operator actions.
+- No result type is forced. NO_ACTION, MARKET, PENDING, human-review, management, and blocked candidates remain governed by the existing deterministic resolver and validator.
+- Every stored result remains non-executable. Generation does not export an artifact, confirm, approve, submit, reconcile, mutate the bridge, or change execution permissions.
+- Verification: 34 focused tests, 146 neighboring orchestrator/candidate/review/policy/export tests, and 36 dashboard safety tests passed. Changed-path compileall and static scans passed.
+- Docker Compose config and app restart passed; the app became healthy, Streamlit returned HTTP 200 `ok`, and bridge health was `OK` with the terminal connected.
+- Runtime verification result: `PASS_WITH_RUNTIME_INPUT_LIMITATION`. The explicit Streamlit action was present and no candidate existed before the click, but generation stopped before the orchestrator with `LIFECYCLE_UNAVAILABLE` because the configured runtime lacks the execution-auth token required by the read-only lifecycle endpoint.
+- Execution journal content and hash were unchanged, no autonomous decision journal was created, protected artifact count was unchanged, and refresh did not create work after the blocked action.
+- Static state remains exactly one production `.order_send(` call-site, zero `MetaTrader5` imports under `src/`, one unchanged controlled-submit endpoint, and disabled/hard-blocked autonomous and pending execution defaults.
+- Automatic export, controlled submission, reconciliation mutation, broker mutation, and order submission were NOT RUN.
+- Next after runtime lifecycle authentication is available: generate one typed result explicitly, review it, and only if it is a valid PENDING candidate continue with the existing validation-only pending artifact export.

@@ -12,9 +12,13 @@ from src.config import Config
 
 
 import json
+import secrets
 import streamlit as st
 from src.config import Config
 from src.services.trading.calendar import CalendarContextBuilder
+from src.services.trading.decision.operator_candidate_generation import (
+    AuthoritativeAutonomousInputAssembler,
+)
 from src.services.trading.execution import (
     DryRunConfirmationService,
     ExecutionAdapterRegistry,
@@ -86,7 +90,11 @@ from src.services.trading.proposal import (
 )
 from src.ui.autonomous_candidate_review import (
     get_autonomous_decision_run_result,
+    clear_autonomous_decision_run_result,
     render_autonomous_candidate_review_card,
+)
+from src.ui.operator_candidate_generation import (
+    OperatorCandidateGenerationController,
 )
 
 
@@ -171,7 +179,7 @@ def render(orchestrator):
     st.markdown("#### 📡 Dữ Liệu Thời Gian Thực")
 
     _render_market_data_provider_status(orchestrator)
-    _render_autonomous_decision_review_card()
+    _render_autonomous_decision_review_card(orchestrator)
 
     col_live1, col_live2 = st.columns(2)
 
@@ -231,7 +239,41 @@ def render(orchestrator):
 # =============================================================================
 # HELPERS NỘI BỘ
 # =============================================================================
-def _render_autonomous_decision_review_card():
+def _render_autonomous_decision_review_card(orchestrator):
+    actions = st.columns(2)
+    generation_active = st.session_state.get("autonomous_candidate_generation_active") is True
+    if actions[0].button(
+        "Generate Autonomous Candidate",
+        key="generate_autonomous_candidate",
+        disabled=generation_active,
+        use_container_width=True,
+    ):
+        controller = OperatorCandidateGenerationController(
+            AuthoritativeAutonomousInputAssembler(orchestrator.live_service)
+        )
+        with st.spinner("Building authoritative runtime context..."):
+            outcome = controller.generate(st.session_state, secrets.token_hex(16))
+        st.session_state["autonomous_candidate_generation_outcome"] = outcome
+    if actions[1].button(
+        "Clear Current Candidate",
+        key="clear_autonomous_candidate",
+        use_container_width=True,
+    ):
+        clear_autonomous_decision_run_result(st.session_state)
+        st.session_state.pop("autonomous_candidate_generation_outcome", None)
+
+    outcome = st.session_state.get("autonomous_candidate_generation_outcome")
+    if outcome is not None:
+        if outcome.status == "GENERATED":
+            st.success(
+                f"Generation={outcome.status} | intent={outcome.intent} | "
+                f"candidate={outcome.candidate_reference}"
+            )
+        elif outcome.status == "BLOCKED":
+            st.warning(f"Generation blocked: {outcome.blocker}")
+        else:
+            st.info(f"Generation={outcome.status} | reason={outcome.blocker}")
+
     run_result = get_autonomous_decision_run_result(st.session_state)
     candidate = run_result.candidate if run_result else None
     validation = run_result.validation if run_result else None
