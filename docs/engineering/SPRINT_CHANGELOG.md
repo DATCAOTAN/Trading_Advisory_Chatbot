@@ -687,3 +687,27 @@ Commit: this commit
 - Offline MARKET/PENDING results are non-exportable and non-submittable engineering evidence only.
 - Live acceptance remains `DEFERRED_UNTIL_FRESH_XAUUSDM_MARKET_DATA`.
 - Next: complete full regression/static review, retain the harness, then wait for genuinely fresh XAUUSDm tick and M15/H1/H4 data for a separately approved one-attempt live acceptance.
+---
+
+### Post-release Maintenance - Hermetic Offline and Regression LLM Isolation
+
+Date: 2026-07-26
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added a root process-local pytest bootstrap that disables structured external reasoning before dotenv-backed settings load and excludes two manual root runners from default discovery.
+- Added a constructor-level fail-closed guard for known external reasoning providers in hermetic tests and all project LLM clients in offline acceptance mode.
+- Kept the offline harness deterministic with a restored process-local marker; production runtime and every execution/export/submission gate remain unchanged.
+
+#### Verification
+
+- Focused hermetic and offline suites: 37 passed.
+- Default full regression without a shell LLM override: 2,998 passed and 156 subtests passed with 3 dependency warnings.
+- Changed-path compileall and `git diff --check`: passed; external provider constructors/requests: 0; `.env`: unchanged and untracked.
+
+#### Current state / next step
+
+- No external LLM, bridge, export, submission, reconciliation mutation, or broker mutation was run.
+- Live acceptance remains `DEFERRED_UNTIL_FRESH_XAUUSDM_MARKET_DATA`; next is the separately authorized one-attempt live acceptance after fresh XAUUSDm tick and M15/H1/H4 bars are available.

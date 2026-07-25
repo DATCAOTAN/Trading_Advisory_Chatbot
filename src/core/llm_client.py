@@ -36,6 +36,18 @@ class LLMClient:
 
     def __init__(self, provider_override: str = None):
         self.provider = provider_override if provider_override else Config.LLM_PROVIDER
+        provider = str(self.provider or "").strip().lower()
+        offline = os.getenv("TRADING_OFFLINE_ACCEPTANCE", "").strip().lower() in {
+            "1", "true", "yes", "y", "on"
+        }
+        hermetic = os.getenv("TRADING_TEST_HERMETIC", "").strip().lower() in {
+            "1", "true", "yes", "y", "on"
+        }
+        if offline or (
+            hermetic
+            and provider in {"groq", "google", "gemini", "openrouter"}
+        ):
+            raise RuntimeError("OFFLINE_EXTERNAL_PROVIDER_FORBIDDEN")
         
         self.openrouter_api_key = Config.OPENROUTER_API_KEY
         self.openrouter_model = Config.OPENROUTER_MODEL_NAME

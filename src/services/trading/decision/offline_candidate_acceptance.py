@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -149,6 +150,18 @@ def load_offline_scenario(scenario_or_path: str | Path) -> tuple[OfflineScenario
 
 
 def run_offline_candidate_acceptance(scenario_or_path: str | Path) -> dict[str, Any]:
+    previous = os.environ.get("TRADING_OFFLINE_ACCEPTANCE")
+    os.environ["TRADING_OFFLINE_ACCEPTANCE"] = "true"
+    try:
+        return _run_offline_candidate_acceptance(scenario_or_path)
+    finally:
+        if previous is None:
+            os.environ.pop("TRADING_OFFLINE_ACCEPTANCE", None)
+        else:
+            os.environ["TRADING_OFFLINE_ACCEPTANCE"] = previous
+
+
+def _run_offline_candidate_acceptance(scenario_or_path: str | Path) -> dict[str, Any]:
     _require_execution_disabled()
     scenario, reference_time = load_offline_scenario(scenario_or_path)
     feature_result = _feature_result(scenario, reference_time)

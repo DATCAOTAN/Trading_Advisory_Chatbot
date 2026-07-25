@@ -2234,3 +2234,16 @@ Post-release maintenance now includes one deterministic developer CLI for candid
 - Full regression passed with 2,990 tests and 156 subtests; compileall passed with 3 dependency warnings from the test suite. Ponytail full-mode review passed with no valid simplification finding.
 - No bridge, Docker, external LLM, protected export, controlled submission, reconciliation mutation, or broker mutation was run.
 - Live acceptance remains `DEFERRED_UNTIL_FRESH_XAUUSDM_MARKET_DATA`.
+# 40. HERMETIC OFFLINE AND DEFAULT PYTEST LLM ISOLATION
+
+Post-release maintenance now prevents ignored local `.env` reasoning settings from granting external-provider permission to automated tests or the offline acceptance harness.
+
+- Root `conftest.py` sets process-local `TRADING_REASONING_LLM_ENABLED=false` and `TRADING_TEST_HERMETIC=true` before application settings load.
+- The two root manual runners are excluded from default pytest discovery; they are not changed or treated as automated tests.
+- `LLMClient` rejects Groq, Google/Gemini, and OpenRouter construction in hermetic test mode, and rejects every project LLM client in offline acceptance mode before provider construction.
+- The offline harness sets and restores its process-local marker with `try/finally` and continues to use only `DeterministicProposalAdapter`.
+- Normal production behavior remains unchanged when neither hermetic nor offline mode is active; this is verified with a fake provider constructor and no external request.
+- Focused hermetic/offline verification: 37 passed. Default full regression: 2,998 passed and 156 subtests passed with 3 dependency warnings.
+- External provider constructor and request counts were zero for Groq, Google/Gemini, and OpenRouter. `.env` remained ignored, untracked, unstaged, and hash-unchanged during the focused check.
+- No bridge, Docker, live market provider, protected export, controlled submission, reconciliation mutation, `order_send`, or broker mutation was run.
+- Live acceptance remains `DEFERRED_UNTIL_FRESH_XAUUSDM_MARKET_DATA`.
