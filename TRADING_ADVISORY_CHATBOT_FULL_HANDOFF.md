@@ -2262,3 +2262,16 @@ Post-release maintenance now carries separate canonical and broker symbols throu
 - External LLM calls, candidate generation, bridge runtime calls, protected export, controlled submission, reconciliation mutation, `order_send`, and broker mutation were NOT RUN.
 - Execution, pending submission, autonomous execution, and management defaults remain disabled and hard-blocked.
 - BTCUSDm live acceptance remains pending and requires a separately authorized single generation attempt with fresh tick and M15/H1/H4 data.
+
+# 42. TASK-SCOPED BTCUSD M1 LIVE-ACCEPTANCE PROFILE
+
+Post-release maintenance now allows one explicit BTCUSD operator request to substitute M1 for the ordinary M15 short-term input without changing permanent defaults.
+
+- The existing market and feature services already accepted request-scoped timeframes; the operator assembler/controller now preserve that input.
+- The Streamlit action exposes a disabled-by-default BTCUSD M1 acceptance checkbox. It sends `M1,H1,H4` only when BTCUSD and the checkbox are both explicitly selected.
+- M1 uses the existing OHLCV provider, data-quality gate, feature engine, reasoning context, candidate validator, and reason ordering. The bridge already supported MT5 `TIMEFRAME_M1`.
+- `MARKET_DEFAULT_SYMBOL=XAUUSD`, the existing XAUUSD broker mapping, and `MARKET_DEFAULT_TIMEFRAMES=M15,H1,H4` remain unchanged. Requests without the override retain those defaults.
+- M1 has a 300-second stale-bar threshold. Stale M1, missing H1/H4, and every existing market/lifecycle blocker remain fail-closed before proposal generation.
+- Verification: `FULL_REGRESSION_PASS`; 16 focused tests, 164 neighboring tests, and 3,014 full-regression tests plus 156 subtests passed with 3 unchanged dependency warnings.
+- Execution, export, controlled submission, reconciliation mutation, `order_send`, and broker mutation were NOT RUN during implementation verification.
+- A separately authorized post-commit BTCUSDm live acceptance remains pending.

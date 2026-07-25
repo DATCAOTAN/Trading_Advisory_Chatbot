@@ -31,19 +31,25 @@ from src.services.trading.decision.autonomous_orchestrator import (
 from src.services.trading.decision.operator_candidate_generation import (
     AuthoritativeAutonomousInputAssembler,
     OperatorCandidateInputError,
+    _validate_market_sources,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.pending_order_dry_run import (
     ControlledPendingOrderDryRunMapper,
 )
 from src.services.trading.knowledge.router import KnowledgeRouter
+from src.services.trading.market.data_quality import DataQualityGate
 from src.services.trading.market.feature_engine import _spread_state
 from src.services.trading.market.market_snapshot_bundle import (
     MarketSnapshotBundle,
     MarketSnapshotBundleBuilder,
 )
-from src.services.trading.market.models import TickSnapshot
+from src.services.trading.market.models import MarketSnapshot, OHLCVBar, TickSnapshot
 from src.services.trading.market.mt5_bridge_provider import MT5BridgeMarketDataProvider
-from src.services.trading.market.timeframes import broker_symbol_for
+from src.services.trading.market.timeframes import (
+    broker_symbol_for,
+    default_symbol,
+    normalize_timeframes,
+)
 from src.ui.operator_candidate_generation import OperatorCandidateGenerationController
 from tools.mt5_bridge.execution import ProtectedBridgeExecutionRequest
 
@@ -318,6 +324,158 @@ def test_btc_spread_and_gold_only_evidence_do_not_fall_back_to_xau():
 
 
 def test_no_external_or_broker_side_effects_are_introduced():
+    assert Config.TRADING_AUTONOMOUS_POLICY_GATE_ENABLED is False
+    assert Config.TRADING_MT5_PRE_SUBMIT_ALLOW_LIVE_SUBMISSION is False
+    assert Config.TRADING_MT5_PRE_SUBMIT_ALLOW_ORDER_SEND is False
+
+def _acceptance_bundle(*, stale_m1=False, include_h1=True, include_h4=True):
+    now = datetime.now(timezone.utc)
+
+    def snapshot(timeframe, minutes, age_minutes):
+        latest = now - timedelta(minutes=age_minutes)
+        bars = [
+            OHLCVBar(
+                timestamp=(latest - timedelta(minutes=minutes * (39 - index))).isoformat(),
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.5,
+                volume=1.0,
+                timeframe=timeframe,
+                symbol="BTCUSD",
+            )
+            for index in range(40)
+        ]
+        return MarketSnapshot(
+            symbol="BTCUSD",
+            timeframe=timeframe,
+            bars=bars,
+            provider_name="fixture",
+            data_quality="COMPLETE",
+        )
+
+    snapshots = {"M1": snapshot("M1", 1, 10 if stale_m1 else 1)}
+    if include_h1:
+        snapshots["H1"] = snapshot("H1", 60, 60)
+    if include_h4:
+        snapshots["H4"] = snapshot("H4", 240, 240)
+    return MarketSnapshotBundle(
+        bundle_id="btc-m1-acceptance-bundle",
+        created_at=now.isoformat(),
+        symbol="BTCUSD",
+        broker_symbol="BTCUSDm",
+        provider_name="fixture",
+        timeframes=snapshots,
+        tick=TickSnapshot(
+            "BTCUSD",
+            bid=100.0,
+            ask=101.0,
+            spread=1.0,
+            timestamp=now.isoformat(),
+            digits=2,
+            point=0.01,
+            tick_size=0.01,
+            minimum_distance_points=10,
+            volume_min=0.01,
+            volume_max=10.0,
+            volume_step=0.01,
+            tick_value=0.01,
+            contract_size=1.0,
+        ),
+        account_id_hash="a" * 64,
+        provider_health=SimpleNamespace(status="OK"),
+    )
+
+
+def _acceptance_market_result(bundle):
+    quality = DataQualityGate().evaluate(bundle, ["M1", "H1", "H4"])
+    feature = SimpleNamespace(
+        feature_snapshot_id="btc-m1-feature",
+        created_at=datetime.now(timezone.utc).isoformat(),
+        symbol="BTCUSD",
+        broker_symbol="BTCUSDm",
+        source_snapshot_ids=["btc-m1-source"],
+    )
+    return SimpleNamespace(bundle=bundle, quality_report=quality, feature_snapshot=feature)
+
+
+def test_explicit_btc_acceptance_uses_m1_instead_of_m15():
+    class RecordingFeatureService:
+        calls = []
+
+        def build_features(self, symbol, timeframes, candle_count):
+            self.calls.append((symbol, tuple(timeframes), candle_count))
+            raise RuntimeError("stop after request capture")
+
+    feature_service = RecordingFeatureService()
+    assembler = AuthoritativeAutonomousInputAssembler(
+        SimpleNamespace(calendar_provider=SimpleNamespace()),
+        feature_service=feature_service,
+    )
+    with pytest.raises(OperatorCandidateInputError, match="MARKET_SNAPSHOT_UNAVAILABLE"):
+        assembler.build(symbol="BTCUSD", timeframes=("M1", "H1", "H4"))
+    assert normalize_timeframes(("M1", "H1", "H4")) == ["M1", "H1", "H4"]
+    assert feature_service.calls == [
+        ("BTCUSD", ("M1", "H1", "H4"), Config.MARKET_DEFAULT_CANDLE_COUNT)
+    ]
+
+
+def test_stale_m1_blocks_before_generation():
+    result = _acceptance_market_result(_acceptance_bundle(stale_m1=True))
+    assert result.quality_report.per_timeframe_quality["M1"] == "STALE"
+    with pytest.raises(OperatorCandidateInputError, match="MARKET_SNAPSHOT_STALE"):
+        _validate_market_sources(
+            result,
+            symbol="BTCUSD",
+            now=datetime.now(timezone.utc),
+            max_age_seconds=Config.TRADING_AUTONOMOUS_DECISION_INPUT_MAX_AGE_SECONDS,
+        )
+
+
+def test_fresh_m1_passes_short_term_market_gate():
+    result = _acceptance_market_result(_acceptance_bundle())
+    assert result.quality_report.status == "COMPLETE"
+    _validate_market_sources(
+        result,
+        symbol="BTCUSD",
+        now=datetime.now(timezone.utc),
+        max_age_seconds=Config.TRADING_AUTONOMOUS_DECISION_INPUT_MAX_AGE_SECONDS,
+    )
+
+
+def test_h1_and_h4_remain_required_for_acceptance_profile():
+    for missing in ("H1", "H4"):
+        bundle = _acceptance_bundle(
+            include_h1=missing != "H1", include_h4=missing != "H4"
+        )
+        quality = DataQualityGate().evaluate(bundle, ["M1", "H1", "H4"])
+        assert quality.per_timeframe_quality[missing] == "EMPTY"
+        assert quality.status == "INVALID"
+
+
+def test_request_without_override_retains_existing_timeframes():
+    class RecordingFeatureService:
+        calls = []
+
+        def build_features(self, symbol, timeframes, candle_count):
+            self.calls.append((symbol, tuple(timeframes), candle_count))
+            raise RuntimeError("stop after request capture")
+
+    feature_service = RecordingFeatureService()
+    assembler = AuthoritativeAutonomousInputAssembler(
+        SimpleNamespace(calendar_provider=SimpleNamespace()),
+        feature_service=feature_service,
+    )
+    with pytest.raises(OperatorCandidateInputError, match="MARKET_SNAPSHOT_UNAVAILABLE"):
+        assembler.build(symbol="BTCUSD")
+    assert feature_service.calls[0][1] == tuple(Config.MARKET_DEFAULT_TIMEFRAMES)
+    assert "M1" not in feature_service.calls[0][1]
+
+
+def test_xau_default_and_operating_permissions_remain_unchanged():
+    assert default_symbol() == "XAUUSD"
+    assert tuple(Config.MARKET_DEFAULT_TIMEFRAMES) == ("M15", "H1", "H4")
+    assert broker_symbol_for("XAUUSD") == Config.MARKET_BROKER_SYMBOL_XAUUSD
     assert Config.TRADING_AUTONOMOUS_POLICY_GATE_ENABLED is False
     assert Config.TRADING_MT5_PRE_SUBMIT_ALLOW_LIVE_SUBMISSION is False
     assert Config.TRADING_MT5_PRE_SUBMIT_ALLOW_ORDER_SEND is False

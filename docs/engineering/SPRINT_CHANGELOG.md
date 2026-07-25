@@ -739,3 +739,29 @@ Commit: this commit
 - All execution, submission, autonomous execution, and management defaults remain disabled and hard-blocked.
 - BTCUSDm runtime freshness, account/lifecycle health, and one natural candidate result remain unverified.
 - Next: separately authorize one BTCUSDm live-acceptance attempt while execution, export, and submission remain disabled.
+
+---
+
+### Post-release Maintenance - Task-Scoped BTCUSD M1 Acceptance Profile
+
+Date: 2026-07-26
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Reused the existing request-scoped timeframe input and added M1 to the supported timeframe normalizer with a 300-second freshness threshold.
+- Added one explicit BTCUSD-only UI checkbox that requests `M1,H1,H4`; ordinary requests still use `M15,H1,H4`.
+- Preserved XAUUSD as the permanent default and preserved all operating-mode, approval, execution, export, submission, and broker-mutation gates.
+
+#### Verification
+
+- Focused M1/multi-symbol tests: 16 passed.
+- Neighboring market/operator/provider/orchestrator/Review Card tests: 164 passed.
+- Full regression: 3,014 passed and 156 subtests passed with 3 dependency warnings.
+- Live candidate generation, export, submission, reconciliation mutation, `order_send`, and broker mutation: NOT RUN before commit.
+
+#### Current state / next step
+
+- Implementation and regression verification are complete; runtime acceptance is pending.
+- Next: run the separately authorized BTCUSDm M1/H1/H4 preflight and make at most one natural candidate-generation attempt.

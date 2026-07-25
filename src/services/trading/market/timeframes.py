@@ -5,9 +5,11 @@ from typing import Iterable, List
 from src.config import Config
 
 
-SUPPORTED_TIMEFRAMES = ("M5", "M15", "H1", "H4", "D1")
+SUPPORTED_TIMEFRAMES = ("M1", "M5", "M15", "H1", "H4", "D1")
 
 _ALIASES = {
+    "1M": "M1",
+    "M1": "M1",
     "5M": "M5",
     "M5": "M5",
     "15M": "M15",

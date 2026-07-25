@@ -246,6 +246,12 @@ def _render_autonomous_decision_review_card(orchestrator):
         index=0 if Config.MARKET_DEFAULT_SYMBOL != "BTCUSD" else 1,
         key="autonomous_candidate_symbol",
     )
+    btc_m1_acceptance = st.checkbox(
+        "Use BTCUSD M1 acceptance profile",
+        value=False,
+        disabled=selected_symbol != "BTCUSD",
+        key="autonomous_candidate_btc_m1_acceptance",
+    )
     actions = st.columns(2)
     generation_active = st.session_state.get("autonomous_candidate_generation_active") is True
     if actions[0].button(
@@ -259,7 +265,12 @@ def _render_autonomous_decision_review_card(orchestrator):
         )
         with st.spinner("Building authoritative runtime context..."):
             outcome = controller.generate(
-                st.session_state, secrets.token_hex(16), symbol=selected_symbol
+                st.session_state,
+                secrets.token_hex(16),
+                symbol=selected_symbol,
+                timeframes=("M1", "H1", "H4")
+                if selected_symbol == "BTCUSD" and btc_m1_acceptance
+                else None,
             )
         st.session_state["autonomous_candidate_generation_outcome"] = outcome
     if actions[1].button(

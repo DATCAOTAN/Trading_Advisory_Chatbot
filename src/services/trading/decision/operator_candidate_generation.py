@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable
 
 from src.config import Config
 from src.services.trading.decision.autonomous_proposal_provider import (
@@ -77,14 +77,18 @@ class AuthoritativeAutonomousInputAssembler:
         self.mode = mode
 
     def build(
-        self, *, symbol: str | None = None, now: datetime | None = None
+        self,
+        *,
+        symbol: str | None = None,
+        timeframes: Iterable[str] | None = None,
+        now: datetime | None = None,
     ) -> AutonomousDecisionInputs:
         evaluated_at = _utc(now)
         symbol = str(symbol or Config.MARKET_DEFAULT_SYMBOL).strip().upper()
         try:
             feature_result = self.feature_service.build_features(
                 symbol,
-                Config.MARKET_DEFAULT_TIMEFRAMES,
+                timeframes or Config.MARKET_DEFAULT_TIMEFRAMES,
                 Config.MARKET_DEFAULT_CANDLE_COUNT,
             )
         except Exception as exc:

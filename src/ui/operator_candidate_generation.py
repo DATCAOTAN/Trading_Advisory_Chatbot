@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
 from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionOrchestrator,
@@ -34,7 +34,12 @@ class OperatorCandidateGenerationController:
         self.decision_orchestrator = decision_orchestrator or AutonomousDecisionOrchestrator()
 
     def generate(
-        self, session_state: Any, request_id: str, *, symbol: str | None = None
+        self,
+        session_state: Any,
+        request_id: str,
+        *,
+        symbol: str | None = None,
+        timeframes: Iterable[str] | None = None,
     ) -> OperatorCandidateGenerationOutcome:
         normalized_request = str(request_id or "").strip()
         if not normalized_request:
@@ -51,11 +56,12 @@ class OperatorCandidateGenerationController:
         session_state[AUTONOMOUS_GENERATION_ACTIVE_SESSION_KEY] = True
         session_state[AUTONOMOUS_GENERATION_REQUEST_SESSION_KEY] = normalized_request
         try:
-            inputs = (
-                self.input_assembler.build(symbol=symbol)
-                if symbol is not None
-                else self.input_assembler.build()
-            )
+            build_kwargs = {}
+            if symbol is not None:
+                build_kwargs["symbol"] = symbol
+            if timeframes is not None:
+                build_kwargs["timeframes"] = timeframes
+            inputs = self.input_assembler.build(**build_kwargs)
             run_result = self.decision_orchestrator.run_once(inputs)
             if not isinstance(run_result, AutonomousDecisionRunResult):
                 return OperatorCandidateGenerationOutcome(
