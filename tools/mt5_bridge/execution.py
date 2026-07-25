@@ -819,7 +819,7 @@ class ControlledMT5ExecutionService:
         required = {
             "schema_version", "contract_reference", "candidate_reference",
             "candidate_provenance_hash", "generated_at", "expires_at", "symbol",
-            "side", "order_type", "action", "entry_intent", "entry_price",
+            "broker_symbol", "side", "order_type", "action", "entry_intent", "entry_price",
             "trigger_price", "limit_price", "stop_loss", "take_profit",
             "proposed_volume", "risk_policy_reference", "expiration_policy",
             "market_snapshot_reference", "market_snapshot_provenance_hash",
@@ -859,7 +859,7 @@ class ControlledMT5ExecutionService:
             name: protected[name]
             for name in (
                 "schema_version", "candidate_reference", "candidate_provenance_hash",
-                "symbol", "side", "order_type", "action", "entry_intent",
+                "symbol", "broker_symbol", "side", "order_type", "action", "entry_intent",
                 "entry_price", "trigger_price", "limit_price", "stop_loss",
                 "take_profit", "proposed_volume", "risk_policy_reference",
                 "expiration_policy", "market_snapshot_reference",
@@ -907,10 +907,16 @@ class ControlledMT5ExecutionService:
             raise ValueError("PENDING_ORDER_TYPE_INVALID")
         if _required_text(protected["expiration_policy"], "expiration_policy").upper() != "GTC":
             raise ValueError("PENDING_EXPIRATION_POLICY_INVALID")
+        canonical_symbol = _required_text(protected["symbol"], "symbol")
+        broker_symbol = _required_text(protected["broker_symbol"], "broker_symbol")
+        expected_broker_symbol = _expected_broker_symbol(canonical_symbol)
+        if expected_broker_symbol and broker_symbol != expected_broker_symbol:
+            raise ValueError("PENDING_BROKER_SYMBOL_MISMATCH")
         values = {
             "mapping_kind": "PENDING",
             "action": action,
-            "symbol": _required_text(protected["symbol"], "symbol"),
+            "symbol": canonical_symbol,
+            "broker_symbol": broker_symbol,
             "side": side,
             "order_type": order_type,
             "entry_price": _optional_decimal(protected["entry_price"]),
@@ -1013,7 +1019,7 @@ class ControlledMT5ExecutionService:
                 raise ValueError("MT5_CONSTANTS_UNAVAILABLE")
             return
 
-        context = self.client.pending_order_context(values["symbol"])
+        context = self.client.pending_order_context(values["broker_symbol"])
         if (
             context.get("status") != "OK"
             or context.get("symbol_available") is not True
@@ -1118,7 +1124,7 @@ class ControlledMT5ExecutionService:
             }
         request = {
             "action": getattr(self.mt5, "TRADE_ACTION_PENDING"),
-            "symbol": values["symbol"],
+            "symbol": values["broker_symbol"],
             "volume": float(values["volume"]),
             "type": getattr(self.mt5, "ORDER_TYPE_" + values["order_type"]),
             "sl": float(values["stop_loss"]),
@@ -1397,6 +1403,20 @@ def _decimal_text(value: Decimal) -> str:
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return "0" if text in {"", "-0"} else text
+
+
+def _expected_broker_symbol(symbol: str) -> str:
+    canonical = str(symbol or "").upper().replace("/", "").replace("_", "")
+    configured = os.getenv(f"MARKET_BROKER_SYMBOL_{canonical}") or os.getenv(
+        f"MT5_SYMBOL_MAP_{canonical}"
+    )
+    if configured:
+        return configured.strip()
+    if canonical == "BTCUSD":
+        return "BTCUSDm"
+    if canonical == "XAUUSD":
+        return canonical
+    return ""
 
 
 def _sha256(value: str) -> str:

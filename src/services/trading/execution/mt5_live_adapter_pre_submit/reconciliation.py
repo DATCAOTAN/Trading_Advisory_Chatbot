@@ -36,9 +36,12 @@ class MT5ReconciliationRequest:
         submission_window_end: str | None = None,
     ) -> "MT5ReconciliationRequest":
         protected = dict(request.approved_semantic_parameters)
-        required = {"symbol", "order_type", "volume"}
-        if not required.issubset(protected):
+        if not {"symbol", "order_type"}.issubset(protected) or not (
+            "volume" in protected or "proposed_volume" in protected
+        ):
             raise ValueError("controlled request lacks reconciliation fields")
+        terminal_symbol = protected.get("broker_symbol") or protected["symbol"]
+        volume = protected.get("volume", protected.get("proposed_volume"))
         key_hash = hash_text(request.idempotency_key)
         identity = hash_text(
             "|".join(
@@ -58,9 +61,9 @@ class MT5ReconciliationRequest:
             correlation_identity=identity,
             correlation_tag="mt5r" + identity[:12],
             expected_account_context_fingerprint=request.expected_account_context_fingerprint,
-            symbol_reference=str(protected["symbol"]),
+            symbol_reference=str(terminal_symbol),
             expected_order_type=str(protected["order_type"]).upper(),
-            expected_volume=str(protected["volume"]),
+            expected_volume=str(volume),
             submission_window_start=request.lock_timestamp,
             submission_window_end=submission_window_end or datetime.now(timezone.utc).isoformat(),
             canonical_semantic_hash=request.canonical_semantic_hash,

@@ -21,6 +21,7 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.lifecycle_superv
 from src.services.trading.knowledge import KnowledgeRouter, RuntimeContextPackBuilder
 from src.services.trading.market.live_feature_service import LiveFeatureService
 from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBundleBuilder
+from src.services.trading.market.timeframes import broker_symbol_for
 from src.services.trading.market.regime_detector import MarketRegimeDetector
 from src.services.trading.reasoning import MethodSelectorService
 from src.services.trading.scoring import SignalScoringEngine
@@ -75,9 +76,11 @@ class AuthoritativeAutonomousInputAssembler:
         self.proposal_provider = proposal_provider or AutonomousOrderProposalProvider()
         self.mode = mode
 
-    def build(self, *, now: datetime | None = None) -> AutonomousDecisionInputs:
+    def build(
+        self, *, symbol: str | None = None, now: datetime | None = None
+    ) -> AutonomousDecisionInputs:
         evaluated_at = _utc(now)
-        symbol = Config.MARKET_DEFAULT_SYMBOL
+        symbol = str(symbol or Config.MARKET_DEFAULT_SYMBOL).strip().upper()
         try:
             feature_result = self.feature_service.build_features(
                 symbol,
@@ -201,8 +204,17 @@ def _validate_market_sources(
         not broker_symbol
         or str(getattr(feature, "symbol", "")).upper() != symbol.upper()
         or str(getattr(bundle, "broker_symbol", "")) != broker_symbol
+        or broker_symbol != broker_symbol_for(symbol)
     ):
         raise OperatorCandidateInputError("SYMBOL_METADATA_MISSING")
+    if symbol.upper() == "BTCUSD" and any(
+        getattr(bundle.tick, name, None) in (None, "")
+        for name in (
+            "digits", "point", "tick_size", "minimum_distance_points",
+            "volume_min", "volume_max", "volume_step", "tick_value", "contract_size",
+        )
+    ):
+        raise OperatorCandidateInputError("BROKER_SYMBOL_METADATA_MISSING")
     if not getattr(feature, "source_snapshot_ids", None):
         raise OperatorCandidateInputError("MARKET_SNAPSHOT_MISSING")
     if not _fresh(getattr(feature, "created_at", ""), now, max_age_seconds):

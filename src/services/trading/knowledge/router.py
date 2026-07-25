@@ -206,10 +206,13 @@ class KnowledgeRouter:
         selected: list[MacroCard] = []
         risk_state = calendar.calendar_risk_state
         for item in macros:
-            if _asset_matches(item.affected_assets, symbol) or "USD" in {value.upper() for value in item.affected_currencies}:
+            asset_scope = {str(value).upper() for value in item.affected_assets}
+            generic_asset = not asset_scope or "ALL" in asset_scope
+            usd_macro = "USD" in {value.upper() for value in item.affected_currencies}
+            if _asset_matches(item.affected_assets, symbol) or (generic_asset and usd_macro):
                 selected.append(item)
         if regime.primary_regime == "NEWS_RISK" or risk_state in {"UPCOMING_HIGH_IMPACT", "IMMEDIATE_HIGH_IMPACT", "EVENT_ACTIVE", "POST_EVENT_COOLDOWN"}:
-            news_cards = [item for item in macros if "calendar" in item.event_type.lower() or "risk" in item.title.lower()]
+            news_cards = [item for item in selected if "calendar" in item.event_type.lower() or "risk" in item.title.lower()]
             selected = news_cards + [item for item in selected if item not in news_cards]
         deduped: list[MacroCard] = []
         seen: set[str] = set()

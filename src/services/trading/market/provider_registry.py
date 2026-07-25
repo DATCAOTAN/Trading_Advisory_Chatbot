@@ -5,6 +5,7 @@ from typing import Any, Dict
 from src.config import Config
 from src.services.trading.market.models import AccountSnapshot, MarketSnapshot, ProviderHealth, TickSnapshot
 from src.services.trading.market.mt5_bridge_provider import MT5BridgeMarketDataProvider
+from src.services.trading.market.timeframes import broker_symbol_for
 
 
 class UnavailableMarketDataProvider:
@@ -29,7 +30,7 @@ class UnavailableMarketDataProvider:
         return AccountSnapshot(provider_name=self.provider_name, redacted=True)
 
     def normalize_symbol(self, symbol: str) -> str:
-        return str(symbol or "XAUUSD").upper().replace("_", "").replace("/", "")
+        return broker_symbol_for(symbol)
 
     def close(self) -> None:
         return None

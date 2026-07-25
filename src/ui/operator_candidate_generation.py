@@ -33,7 +33,9 @@ class OperatorCandidateGenerationController:
         self.input_assembler = input_assembler
         self.decision_orchestrator = decision_orchestrator or AutonomousDecisionOrchestrator()
 
-    def generate(self, session_state: Any, request_id: str) -> OperatorCandidateGenerationOutcome:
+    def generate(
+        self, session_state: Any, request_id: str, *, symbol: str | None = None
+    ) -> OperatorCandidateGenerationOutcome:
         normalized_request = str(request_id or "").strip()
         if not normalized_request:
             return OperatorCandidateGenerationOutcome("BLOCKED", "GENERATION_REQUEST_MISSING")
@@ -49,7 +51,11 @@ class OperatorCandidateGenerationController:
         session_state[AUTONOMOUS_GENERATION_ACTIVE_SESSION_KEY] = True
         session_state[AUTONOMOUS_GENERATION_REQUEST_SESSION_KEY] = normalized_request
         try:
-            inputs = self.input_assembler.build()
+            inputs = (
+                self.input_assembler.build(symbol=symbol)
+                if symbol is not None
+                else self.input_assembler.build()
+            )
             run_result = self.decision_orchestrator.run_once(inputs)
             if not isinstance(run_result, AutonomousDecisionRunResult):
                 return OperatorCandidateGenerationOutcome(

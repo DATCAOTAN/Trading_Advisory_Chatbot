@@ -331,8 +331,18 @@ def _market_snapshot(request):
     feature, bundle = request.feature_result.feature_snapshot, request.feature_result.bundle
     return AutonomousOrderMarketSnapshot(
         snapshot_reference=bundle.bundle_id, observed_at=bundle.tick.timestamp,
-        symbol=feature.symbol, bid=bundle.tick.bid, ask=bundle.tick.ask,
+        symbol=feature.symbol, broker_symbol=feature.broker_symbol,
+        bid=bundle.tick.bid, ask=bundle.tick.ask,
         provider_name=bundle.provider_name,
+        point=getattr(bundle.tick, "point", None),
+        tick_size=getattr(bundle.tick, "tick_size", None),
+        digits=getattr(bundle.tick, "digits", None),
+        minimum_distance_points=getattr(bundle.tick, "minimum_distance_points", None),
+        volume_min=getattr(bundle.tick, "volume_min", None),
+        volume_max=getattr(bundle.tick, "volume_max", None),
+        volume_step=getattr(bundle.tick, "volume_step", None),
+        tick_value=getattr(bundle.tick, "tick_value", None),
+        contract_size=getattr(bundle.tick, "contract_size", None),
         source_refs=tuple(dict.fromkeys((bundle.bundle_id, feature.feature_snapshot_id, *feature.source_snapshot_ids))),
     )
 

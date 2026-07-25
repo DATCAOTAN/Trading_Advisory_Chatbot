@@ -153,7 +153,10 @@ def _multi_timeframe_alignment(indicators: Dict[str, IndicatorSnapshot]) -> str:
 def _spread_state(bundle: MarketSnapshotBundle) -> str:
     if not bundle.tick or bundle.tick.spread is None:
         return "UNKNOWN"
-    max_spread = float(getattr(Config, f"MARKET_MAX_SPREAD_{bundle.symbol}", getattr(Config, "MARKET_MAX_SPREAD_XAUUSD", 1.0)))
+    configured = getattr(Config, f"MARKET_MAX_SPREAD_{bundle.symbol}", None)
+    if configured is None:
+        return "UNKNOWN"
+    max_spread = float(configured)
     if bundle.tick.spread < 0:
         return "UNKNOWN"
     return "OK" if bundle.tick.spread <= max_spread else "WIDE"

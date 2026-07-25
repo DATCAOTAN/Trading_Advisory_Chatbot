@@ -16,6 +16,7 @@ from src.services.trading.decision.autonomous_orchestrator import (
     autonomous_candidate_has_offline_provenance,
     autonomous_market_snapshot_provenance_hash,
 )
+from src.services.trading.market.timeframes import broker_symbol_for
 from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_artifact_capture import (
     ProtectedAccountContextCapture,
 )
@@ -60,6 +61,7 @@ class ControlledPendingOrderContract:
     generated_at: str
     expires_at: str
     symbol: str = field(repr=False)
+    broker_symbol: str = field(repr=False)
     side: str = ""
     order_type: str = ""
     action: str = "PENDING"
@@ -110,6 +112,7 @@ class ControlledPendingOrderContract:
             "generated_at": self.generated_at,
             "expires_at": self.expires_at,
             "symbol_present": bool(self.symbol),
+            "broker_symbol_present": bool(self.broker_symbol),
             "side": self.side,
             "order_type": self.order_type,
             "action": self.action,
@@ -154,6 +157,7 @@ class ControlledPendingOrderContract:
             "schema_version": self.schema_version,
             "contract_reference": self.contract_reference,
             "symbol": self.symbol,
+            "broker_symbol": self.broker_symbol,
             "side": self.side,
             "order_type": self.order_type,
             "action": self.action,
@@ -186,6 +190,7 @@ class ControlledPendingOrderContract:
             "generated_at": self.generated_at,
             "expires_at": self.expires_at,
             "symbol": self.symbol,
+            "broker_symbol": self.broker_symbol,
             "side": self.side,
             "order_type": self.order_type,
             "action": self.action,
@@ -252,6 +257,7 @@ class PendingOrderDryRunRequestDraft:
     action: str
     order_type: str
     symbol: str = field(repr=False)
+    broker_symbol: str = field(repr=False)
     side: str = ""
     entry_price: str = field(default="", repr=False)
     trigger_price: str = field(default="", repr=False)
@@ -293,6 +299,7 @@ class PendingOrderDryRunRequestDraft:
             "action": self.action,
             "order_type": self.order_type,
             "symbol_present": bool(self.symbol),
+            "broker_symbol_present": bool(self.broker_symbol),
             "side": self.side,
             "entry_price_present": bool(self.entry_price),
             "trigger_price_present": bool(self.trigger_price),
@@ -327,6 +334,7 @@ class PendingOrderDryRunRequestDraft:
             "action": self.action,
             "order_type": self.order_type,
             "symbol": self.symbol,
+            "broker_symbol": self.broker_symbol,
             "side": self.side,
             "entry_price": self.entry_price,
             "trigger_price": self.trigger_price,
@@ -430,6 +438,12 @@ class ControlledPendingOrderDryRunMapper:
             blockers.append("MARKET_SNAPSHOT_HASH_MISMATCH")
         if market_snapshot.symbol != candidate.symbol_reference:
             blockers.append("MARKET_SNAPSHOT_SYMBOL_MISMATCH")
+        if candidate.symbol_reference in {"XAUUSD", "BTCUSD"} and (
+            not candidate.broker_symbol_reference
+            or market_snapshot.broker_symbol != candidate.broker_symbol_reference
+            or candidate.broker_symbol_reference != broker_symbol_for(candidate.symbol_reference)
+        ):
+            blockers.append("BROKER_SYMBOL_REFERENCE_MISMATCH")
         if not market_snapshot.source_refs:
             blockers.append("MARKET_SNAPSHOT_SOURCE_REFS_MISSING")
         if not _fresh(
@@ -552,6 +566,7 @@ class ControlledPendingOrderDryRunMapper:
             "candidate_reference": candidate.candidate_reference,
             "candidate_provenance_hash": candidate.provenance_hash,
             "symbol": candidate.symbol_reference,
+            "broker_symbol": candidate.broker_symbol_reference,
             "side": candidate.side,
             "order_type": candidate.order_type,
             "action": candidate.action,
@@ -591,6 +606,7 @@ class ControlledPendingOrderDryRunMapper:
             generated_at=evaluated_at.isoformat(),
             expires_at=candidate.expires_at,
             symbol=candidate.symbol_reference,
+            broker_symbol=candidate.broker_symbol_reference,
             side=candidate.side,
             order_type=candidate.order_type,
             action=candidate.action,
@@ -637,6 +653,7 @@ def _build_draft(contract: ControlledPendingOrderContract) -> PendingOrderDryRun
         "action": contract.action,
         "order_type": contract.order_type,
         "symbol": contract.symbol,
+        "broker_symbol": contract.broker_symbol,
         "side": contract.side,
         "entry_price": contract.entry_price,
         "trigger_price": contract.trigger_price,
@@ -666,6 +683,7 @@ def _build_draft(contract: ControlledPendingOrderContract) -> PendingOrderDryRun
         action=contract.action,
         order_type=contract.order_type,
         symbol=contract.symbol,
+        broker_symbol=contract.broker_symbol,
         side=contract.side,
         entry_price=contract.entry_price,
         trigger_price=contract.trigger_price,
@@ -691,6 +709,7 @@ def _contract_material(contract: ControlledPendingOrderContract) -> dict[str, An
         "candidate_reference": contract.candidate_reference,
         "candidate_provenance_hash": contract.candidate_provenance_hash,
         "symbol": contract.symbol,
+        "broker_symbol": contract.broker_symbol,
         "side": contract.side,
         "order_type": contract.order_type,
         "action": contract.action,
@@ -726,7 +745,16 @@ def _symbol_metadata_material(
     point = _positive_decimal(snapshot.point)
     tick_size = _positive_decimal(snapshot.tick_size)
     minimum_distance = _positive_decimal(snapshot.minimum_distance_points, allow_zero=True)
-    if point is None or tick_size is None or minimum_distance is None:
+    volume_min = _positive_decimal(snapshot.volume_min)
+    volume_max = _positive_decimal(snapshot.volume_max)
+    volume_step = _positive_decimal(snapshot.volume_step)
+    tick_value = _positive_decimal(snapshot.tick_value)
+    contract_size = _positive_decimal(snapshot.contract_size)
+    if any(value is None for value in (point, tick_size, minimum_distance)):
+        return None
+    if snapshot.symbol == "BTCUSD" and any(value is None for value in (
+        volume_min, volume_max, volume_step, tick_value, contract_size,
+    )):
         return None
     if not isinstance(snapshot.digits, int) or isinstance(snapshot.digits, bool) or snapshot.digits < 0:
         return None
@@ -734,11 +762,17 @@ def _symbol_metadata_material(
         return None
     return {
         "symbol": snapshot.symbol,
+        "broker_symbol": snapshot.broker_symbol,
         "provider_name": snapshot.provider_name,
         "point": _decimal_text(point),
         "tick_size": _decimal_text(tick_size),
         "digits": snapshot.digits,
         "minimum_distance_points": _decimal_text(minimum_distance),
+        "volume_min": _decimal_text(volume_min) if volume_min is not None else "",
+        "volume_max": _decimal_text(volume_max) if volume_max is not None else "",
+        "volume_step": _decimal_text(volume_step) if volume_step is not None else "",
+        "tick_value": _decimal_text(tick_value) if tick_value is not None else "",
+        "contract_size": _decimal_text(contract_size) if contract_size is not None else "",
         "source_refs": sorted(set(snapshot.source_refs)),
     }
 

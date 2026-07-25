@@ -8,7 +8,7 @@ from typing import Any, Dict, Iterable
 from src.config import Config
 from src.services.trading.market.models import AccountSnapshot, MarketSnapshot, ProviderHealth, TickSnapshot
 from src.services.trading.market.provider_registry import ProviderRegistry
-from src.services.trading.market.timeframes import broker_symbol_for, default_symbol, normalize_timeframes
+from src.services.trading.market.timeframes import default_symbol, normalize_timeframes
 
 
 @dataclass
@@ -56,7 +56,7 @@ class MarketSnapshotBundleBuilder:
         candle_count: int | None = None,
     ) -> MarketSnapshotBundle:
         logical_symbol = str(symbol or default_symbol()).upper()
-        broker_symbol = broker_symbol_for(logical_symbol)
+        broker_symbol = self.provider.normalize_symbol(logical_symbol)
         normalized_timeframes = normalize_timeframes(timeframes)
         count = int(candle_count or getattr(Config, "MARKET_DEFAULT_CANDLE_COUNT", 300))
         created_at = datetime.now(timezone.utc).isoformat()

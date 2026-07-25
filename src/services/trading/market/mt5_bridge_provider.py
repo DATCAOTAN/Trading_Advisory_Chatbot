@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -17,6 +16,7 @@ from src.services.trading.market.models import (
     ProviderHealth,
     TickSnapshot,
 )
+from src.services.trading.market.timeframes import broker_symbol_for
 
 
 class MT5BridgeMarketDataProvider:
@@ -25,7 +25,7 @@ class MT5BridgeMarketDataProvider:
     def __init__(self, bridge_url: str | None = None, timeout_seconds: float | None = None, symbol_map: Mapping[str, str] | None = None):
         self.bridge_url = (bridge_url or getattr(Config, "MT5_BRIDGE_URL", "") or _default_bridge_url()).rstrip("/")
         self.timeout_seconds = float(timeout_seconds if timeout_seconds is not None else getattr(Config, "MT5_BRIDGE_TIMEOUT_SECONDS", 3))
-        self.symbol_map = {str(k).upper(): str(v) for k, v in (symbol_map or _config_symbol_map()).items()}
+        self.symbol_map = {str(k).upper(): str(v) for k, v in (symbol_map or {}).items()}
 
     def health_check(self) -> ProviderHealth:
         try:
@@ -92,6 +92,15 @@ class MT5BridgeMarketDataProvider:
                 spread=_safe_float(data.get("spread")),
                 timestamp=str(data.get("timestamp") or ""),
                 provider_name=self.provider_name,
+                digits=_safe_int(data.get("digits")),
+                point=_safe_float(data.get("point")),
+                tick_size=_safe_float(data.get("tick_size")),
+                minimum_distance_points=_safe_float(data.get("minimum_distance_points")),
+                volume_min=_safe_float(data.get("volume_min")),
+                volume_max=_safe_float(data.get("volume_max")),
+                volume_step=_safe_float(data.get("volume_step")),
+                tick_value=_safe_float(data.get("tick_value")),
+                contract_size=_safe_float(data.get("contract_size")),
             )
         except Exception:
             return TickSnapshot(symbol=symbol.upper(), provider_name=self.provider_name)
@@ -125,7 +134,7 @@ class MT5BridgeMarketDataProvider:
 
     def normalize_symbol(self, symbol: str) -> str:
         key = str(symbol or "XAUUSD").upper().replace("_", "").replace("/", "")
-        return self.symbol_map.get(key, key)
+        return self.symbol_map.get(key, broker_symbol_for(key))
 
     def close(self) -> None:
         return None
@@ -166,16 +175,6 @@ def _position_from_mapping(item: Mapping[str, Any]) -> PositionSnapshot:
         redacted=True,
     )
 
-
-def _config_symbol_map() -> Dict[str, str]:
-    mapping = {"XAUUSD": getattr(Config, "MARKET_BROKER_SYMBOL_XAUUSD", getattr(Config, "MT5_SYMBOL_MAP_XAUUSD", "XAUUSD"))}
-    for key, value in os.environ.items():
-        if key.startswith("MT5_SYMBOL_MAP_") and value:
-            mapping[key.replace("MT5_SYMBOL_MAP_", "").upper()] = value
-    for key, value in os.environ.items():
-        if key.startswith("MARKET_BROKER_SYMBOL_") and value:
-            mapping[key.replace("MARKET_BROKER_SYMBOL_", "").upper()] = value
-    return mapping
 
 
 def _default_bridge_url() -> str:

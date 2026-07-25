@@ -2247,3 +2247,18 @@ Post-release maintenance now prevents ignored local `.env` reasoning settings fr
 - External provider constructor and request counts were zero for Groq, Google/Gemini, and OpenRouter. `.env` remained ignored, untracked, unstaged, and hash-unchanged during the focused check.
 - No bridge, Docker, live market provider, protected export, controlled submission, reconciliation mutation, `order_send`, or broker mutation was run.
 - Live acceptance remains `DEFERRED_UNTIL_FRESH_XAUUSDM_MARKET_DATA`.
+
+# 41. BROKER-ALIGNED MULTI-SYMBOL CANDIDATE FLOW
+
+Post-release maintenance now carries separate canonical and broker symbols through the existing autonomous candidate and controlled pending-order flow.
+
+- The existing shared resolver owns canonical-to-broker mapping. The existing XAUUSD mapping remains unchanged and `BTCUSD -> BTCUSDm` is configured through the same mechanism.
+- The explicit operator generation action accepts `XAUUSD` or `BTCUSD`; no-symbol callers retain the existing XAUUSD default.
+- Market bundles use the provider-resolved broker symbol, and tick snapshots carry digits, point, tick size/value, contract size, stops distance, and volume limits/step.
+- Candidate, protected pending contract, dry-run draft, bridge validation, terminal mapping, reconciliation, and integrity hashes preserve both canonical and broker identities.
+- BTCUSD fails closed when required broker metadata is absent. Volume is checked against broker minimum, maximum, and step; spread fallback is deny-by-default until configured.
+- Calendar and knowledge fallback behavior no longer imports XAUUSD/gold relevance into BTCUSD processing. Existing XAUUSD behavior and legacy no-symbol callers remain covered.
+- Verification: `FULL_REGRESSION_PASS`; 10 focused tests, 398 focused/neighboring tests, and the full regression of 3,008 tests plus 156 subtests passed. Three dependency warnings were unchanged.
+- External LLM calls, candidate generation, bridge runtime calls, protected export, controlled submission, reconciliation mutation, `order_send`, and broker mutation were NOT RUN.
+- Execution, pending submission, autonomous execution, and management defaults remain disabled and hard-blocked.
+- BTCUSDm live acceptance remains pending and requires a separately authorized single generation attempt with fresh tick and M15/H1/H4 data.

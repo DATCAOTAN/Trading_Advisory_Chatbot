@@ -9,7 +9,7 @@ def relevance_for_event(symbol: str, event: CalendarEvent) -> SymbolCalendarRele
     currencies = _configured_list(f"MARKET_SYMBOL_RELEVANT_CURRENCIES_{logical_symbol}", "USD")
     keywords = _configured_list(
         f"MARKET_SYMBOL_RELEVANT_KEYWORDS_{logical_symbol}",
-        "gold,inflation,cpi,nfp,fomc,rate,yield,fed",
+        "gold,inflation,cpi,nfp,fomc,rate,yield,fed" if logical_symbol == "XAUUSD" else "",
     )
     score = 0.0
     reasons: list[str] = []

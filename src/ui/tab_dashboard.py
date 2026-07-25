@@ -240,6 +240,12 @@ def render(orchestrator):
 # HELPERS NỘI BỘ
 # =============================================================================
 def _render_autonomous_decision_review_card(orchestrator):
+    selected_symbol = st.selectbox(
+        "Canonical symbol",
+        ("XAUUSD", "BTCUSD"),
+        index=0 if Config.MARKET_DEFAULT_SYMBOL != "BTCUSD" else 1,
+        key="autonomous_candidate_symbol",
+    )
     actions = st.columns(2)
     generation_active = st.session_state.get("autonomous_candidate_generation_active") is True
     if actions[0].button(
@@ -252,7 +258,9 @@ def _render_autonomous_decision_review_card(orchestrator):
             AuthoritativeAutonomousInputAssembler(orchestrator.live_service)
         )
         with st.spinner("Building authoritative runtime context..."):
-            outcome = controller.generate(st.session_state, secrets.token_hex(16))
+            outcome = controller.generate(
+                st.session_state, secrets.token_hex(16), symbol=selected_symbol
+            )
         st.session_state["autonomous_candidate_generation_outcome"] = outcome
     if actions[1].button(
         "Clear Current Candidate",

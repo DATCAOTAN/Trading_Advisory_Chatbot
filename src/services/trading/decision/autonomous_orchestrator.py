@@ -22,6 +22,7 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.reconciliation i
     MT5ReconciliationReceipt,
 )
 from src.services.trading.knowledge.models import RuntimeContextPack
+from src.services.trading.market.timeframes import broker_symbol_for
 from src.services.trading.reasoning.models import MethodCandidateAssessment, MethodSelectionResult
 from src.services.trading.scoring.models import SignalScoreReport
 
@@ -133,10 +134,16 @@ class AutonomousOrderMarketSnapshot:
     bid: Any = field(repr=False)
     ask: Any = field(repr=False)
     provider_name: str = "mt5_bridge"
+    broker_symbol: str = ""
     point: Any = field(default=None, repr=False)
     tick_size: Any = field(default=None, repr=False)
     digits: int | None = None
     minimum_distance_points: Any = field(default=None, repr=False)
+    volume_min: Any = field(default=None, repr=False)
+    volume_max: Any = field(default=None, repr=False)
+    volume_step: Any = field(default=None, repr=False)
+    tick_value: Any = field(default=None, repr=False)
+    contract_size: Any = field(default=None, repr=False)
     source_refs: tuple[str, ...] = ()
 
 
@@ -208,6 +215,7 @@ class AutonomousDecisionCandidate:
     executable: bool = False
     order_sent: bool = False
     metadata_redacted: bool = True
+    broker_symbol_reference: str = ""
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -217,6 +225,7 @@ class AutonomousDecisionCandidate:
             "expires_at": self.expires_at,
             "operating_mode": self.operating_mode,
             "symbol_reference": self.symbol_reference,
+            "broker_symbol_reference": self.broker_symbol_reference,
             "intent": self.intent,
             "direction_present": bool(self.direction),
             "side_present": bool(self.side),
@@ -269,6 +278,7 @@ class AutonomousDecisionCandidate:
             "generated_at": self.generated_at,
             "expires_at": self.expires_at,
             "symbol": self.symbol_reference,
+            "broker_symbol": self.broker_symbol_reference,
             "intent": self.intent,
             "side": self.side,
             "entry_intent": self.entry_intent,
@@ -499,6 +509,7 @@ class AutonomousDecisionOrchestrator:
             expires_at=expires_at,
             operating_mode=inputs.runtime_context.mode,
             symbol_reference=inputs.runtime_context.symbol,
+            broker_symbol_reference=inputs.runtime_context.broker_symbol,
             intent=intent.value,
             direction=_normalized_direction(inputs.direction, intent),
             proposed_semantic_parameter_references=tuple(
@@ -572,6 +583,14 @@ class AutonomousDecisionOrchestrator:
         ):
             if not str(getattr(candidate, name) or "").strip():
                 issues.append("MISSING_" + name.upper())
+        if candidate.schema_version == AUTONOMOUS_DECISION_SCHEMA_VERSION:
+            if not candidate.broker_symbol_reference:
+                issues.append("MISSING_BROKER_SYMBOL_REFERENCE")
+            elif (
+                candidate.symbol_reference in {"XAUUSD", "BTCUSD"}
+                and candidate.broker_symbol_reference != broker_symbol_for(candidate.symbol_reference)
+            ):
+                issues.append("BROKER_SYMBOL_REFERENCE_MISMATCH")
         eligible = (
             candidate.deterministic_eligibility_result
             == AutonomousDecisionEligibility.ELIGIBLE_CANDIDATE.value
@@ -930,6 +949,12 @@ def _resolve_order_proposal(
             blockers.append("SENSITIVE_REFERENCE_NOT_ALLOWED")
         if snapshot.symbol != inputs.runtime_context.symbol:
             blockers.append("MARKET_SNAPSHOT_SYMBOL_MISMATCH")
+        if snapshot.symbol in {"XAUUSD", "BTCUSD"} and (
+            not snapshot.broker_symbol
+            or snapshot.broker_symbol != inputs.runtime_context.broker_symbol
+            or snapshot.broker_symbol != broker_symbol_for(snapshot.symbol)
+        ):
+            blockers.append("MARKET_SNAPSHOT_BROKER_SYMBOL_MISMATCH")
         if not _fresh(snapshot.observed_at, now, maximum_age_seconds):
             blockers.append("MARKET_SNAPSHOT_STALE")
         bid = _decimal_or_none(market_material["bid"])
@@ -955,6 +980,28 @@ def _resolve_order_proposal(
             or snapshot.digits < 0
         ):
             blockers.append("MARKET_DIGITS_INVALID")
+        volume_min = _positive_decimal_or_none(market_material["volume_min"])
+        volume_max = _positive_decimal_or_none(market_material["volume_max"])
+        volume_step = _positive_decimal_or_none(market_material["volume_step"])
+        tick_value = _positive_decimal_or_none(market_material["tick_value"])
+        contract_size = _positive_decimal_or_none(market_material["contract_size"])
+        if snapshot.symbol == "BTCUSD" and any(
+            value is None
+            for value in (
+                point, tick_size, distance_points, volume_min, volume_max,
+                volume_step, tick_value, contract_size,
+            )
+        ):
+            blockers.append("BROKER_SYMBOL_METADATA_MISSING")
+        if volume is not None and volume_min is not None and volume < volume_min:
+            blockers.append("PROPOSED_VOLUME_BELOW_MINIMUM")
+        if volume is not None and volume_max is not None and volume > volume_max:
+            blockers.append("PROPOSED_VOLUME_ABOVE_MAXIMUM")
+        if (
+            volume is not None and volume_min is not None and volume_step is not None
+            and (volume - volume_min) % volume_step != 0
+        ):
+            blockers.append("PROPOSED_VOLUME_STEP_MISMATCH")
         if point is not None and distance_points is not None:
             minimum_distance = point * distance_points
 
@@ -1098,13 +1145,17 @@ def _validate_pending_relation(
 
 def _market_snapshot_material(snapshot: AutonomousOrderMarketSnapshot) -> dict[str, Any]:
     values = {}
-    for name in ("bid", "ask", "point", "tick_size", "minimum_distance_points"):
+    for name in (
+        "bid", "ask", "point", "tick_size", "minimum_distance_points",
+        "volume_min", "volume_max", "volume_step", "tick_value", "contract_size",
+    ):
         text, _, _ = _canonical_decimal(getattr(snapshot, name))
         values[name] = text
     return {
         "snapshot_reference": snapshot.snapshot_reference,
         "observed_at": snapshot.observed_at,
         "symbol": snapshot.symbol,
+        "broker_symbol": snapshot.broker_symbol,
         "provider_name": snapshot.provider_name,
         "bid": values["bid"],
         "ask": values["ask"],
@@ -1112,6 +1163,11 @@ def _market_snapshot_material(snapshot: AutonomousOrderMarketSnapshot) -> dict[s
         "tick_size": values["tick_size"],
         "digits": snapshot.digits,
         "minimum_distance_points": values["minimum_distance_points"],
+        "volume_min": values["volume_min"],
+        "volume_max": values["volume_max"],
+        "volume_step": values["volume_step"],
+        "tick_value": values["tick_value"],
+        "contract_size": values["contract_size"],
         "source_refs": sorted(set(snapshot.source_refs)),
     }
 
@@ -1452,6 +1508,7 @@ def _canonical_provenance(
         "schema": AUTONOMOUS_DECISION_SCHEMA_VERSION,
         "operating_mode": inputs.runtime_context.mode,
         "symbol_reference": inputs.runtime_context.symbol,
+        "broker_symbol_reference": inputs.runtime_context.broker_symbol,
         "requested_intent": inputs.requested_intent.strip().upper(),
         "direction": inputs.direction.strip().upper(),
         "exposure_effect": inputs.exposure_effect.strip().upper(),

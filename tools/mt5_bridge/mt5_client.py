@@ -199,11 +199,13 @@ class MT5Client:
         try:
             _call_mt5(mt5.symbol_select, symbol, True)
             tick = _call_mt5(mt5.symbol_info_tick, symbol)
+            info = _call_mt5(mt5.symbol_info, symbol)
         except TimeoutError as exc:
             return {"status": "UNAVAILABLE", "message": str(exc)}
         if tick is None:
             return {"status": "UNAVAILABLE", "message": f"tick unavailable for {symbol}"}
         data = tick._asdict()
+        info_data = info._asdict() if info is not None else {}
         bid = _safe_float(data.get("bid"))
         ask = _safe_float(data.get("ask"))
         return {
@@ -213,6 +215,15 @@ class MT5Client:
             "ask": ask,
             "spread": (ask - bid) if bid is not None and ask is not None else None,
             "timestamp": _timestamp(data.get("time_msc") or data.get("time")),
+            "digits": info_data.get("digits"),
+            "point": info_data.get("point"),
+            "tick_size": info_data.get("trade_tick_size"),
+            "minimum_distance_points": info_data.get("trade_stops_level"),
+            "volume_min": info_data.get("volume_min"),
+            "volume_max": info_data.get("volume_max"),
+            "volume_step": info_data.get("volume_step"),
+            "tick_value": info_data.get("trade_tick_value"),
+            "contract_size": info_data.get("trade_contract_size"),
             "source": "mt5_terminal",
         }
 

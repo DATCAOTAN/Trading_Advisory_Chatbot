@@ -63,6 +63,15 @@ class TickSnapshot:
     spread: float | None = None
     timestamp: str = ""
     provider_name: str = "mt5_bridge"
+    digits: int | None = None
+    point: float | None = None
+    tick_size: float | None = None
+    minimum_distance_points: float | None = None
+    volume_min: float | None = None
+    volume_max: float | None = None
+    volume_step: float | None = None
+    tick_value: float | None = None
+    contract_size: float | None = None
 
     def as_dict(self) -> Dict[str, Any]:
         return dict(self.__dict__)

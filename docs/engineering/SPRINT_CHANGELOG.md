@@ -711,3 +711,31 @@ Commit: this commit
 
 - No external LLM, bridge, export, submission, reconciliation mutation, or broker mutation was run.
 - Live acceptance remains `DEFERRED_UNTIL_FRESH_XAUUSDM_MARKET_DATA`; next is the separately authorized one-attempt live acceptance after fresh XAUUSDm tick and M15/H1/H4 bars are available.
+
+---
+
+### Post-release Maintenance - Broker-Aligned Multi-Symbol Candidate Flow
+
+Date: 2026-07-26
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Reused the shared symbol resolver for canonical and broker identities across operator generation, market data, candidate integrity, pending dry-run, bridge validation, and reconciliation.
+- Added `BTCUSD -> BTCUSDm`, preserved the existing XAUUSD mapping, and preserved the no-symbol XAUUSD default.
+- Propagated existing broker symbol metadata required for deterministic freshness, spread, volume, pending-order, and terminal checks.
+- Removed XAUUSD/gold fallback leakage from BTCUSD calendar and knowledge selection; BTC spread configuration fails closed by default.
+
+#### Verification
+
+- BTCUSD-focused tests: 10 passed.
+- Focused and neighboring symbol/market/candidate/pending/reconciliation tests: 398 passed.
+- Full regression: 3,008 passed and 156 subtests passed with 3 dependency warnings.
+- External LLM, candidate generation, bridge runtime, export, submission, reconciliation mutation, `order_send`, and broker mutation: NOT RUN.
+
+#### Current state / limitations / next step
+
+- All execution, submission, autonomous execution, and management defaults remain disabled and hard-blocked.
+- BTCUSDm runtime freshness, account/lifecycle health, and one natural candidate result remain unverified.
+- Next: separately authorize one BTCUSDm live-acceptance attempt while execution, export, and submission remain disabled.
