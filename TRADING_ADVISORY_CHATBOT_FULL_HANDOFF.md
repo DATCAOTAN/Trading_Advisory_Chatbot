@@ -2204,3 +2204,18 @@ Post-release maintenance now provides one explicit Streamlit action that connect
 - Static state remains exactly one production `.order_send(` call-site, zero `MetaTrader5` imports under `src/`, one unchanged controlled-submit endpoint, and disabled/hard-blocked autonomous and pending execution defaults.
 - Automatic export, controlled submission, reconciliation mutation, broker mutation, and order submission were NOT RUN.
 - Next after runtime lifecycle authentication is available: generate one typed result explicitly, review it, and only if it is a valid PENDING candidate continue with the existing validation-only pending artifact export.
+
+
+# 38. CURRENT AUTHORITATIVE NON-EXECUTABLE PROPOSAL OWNER STATE
+
+Post-release maintenance now gives the operator candidate flow one explicit upstream owner for typed, non-executable order proposals.
+
+- `AutonomousOrderProposalProvider` consumes the existing typed feature result, current market bundle/tick, runtime context, method selection, score report, and trade-readiness decision.
+- It reuses the project LLM router for one strict structured invocation per explicit operator generation request. It does not parse formatted prose or public serialization, retry for a preferred outcome, or use downstream approval artifacts.
+- Strict output is converted to the existing `AutonomousOrderIntentProposal` and `AutonomousOrderMarketSnapshot` contracts. Side, entry intent, and MARKET/PENDING action are deterministically bound to the selected order type.
+- Every mandatory binding identifier is independently required to be a non-empty, whitespace-free string and must match the current typed source IDs before orchestration. Stale evidence, missing or malformed provenance, symbol conflicts, malformed JSON, incomplete fields, invalid price relationships, unavailable/disabled model access, and source-binding mismatches return ordered blockers.
+- The operator assembler still validates market, structured reasoning, lifecycle, reconciliation, and account context before invoking the proposal owner. The existing orchestrator remains authoritative for final classification and can naturally return NO_ACTION, REQUIRE_HUMAN_REVIEW, MARKET, PENDING, management, or blocked outcomes.
+- Raw model output, hidden reasoning, credentials, and unrestricted provider responses are not persisted or exposed. Normalized proposal fields may appear only in the bounded operator Review Card, while approved references and integrity hashes may appear in redacted/public candidate serialization. Human approval remains downstream, and every execution/submission flag remains false.
+- Verification is currently `FOCUSED_PASS`: 30 provider tests, 36 operator-generation tests, and 18 existing method-selector adapter tests passed after source-binding hardening. The earlier implementation pass also completed neighboring candidate/policy/Review Card tests and Docker/Streamlit health, but live generation and full regression have not been run for this uncommitted revision.
+- Runtime candidate generation, live LLM invocation, protected export, controlled submission, reconciliation mutation, and broker mutation were NOT RUN.
+- The current app-side market contract does not expose point, tick size, digits, or stops level. The proposal owner therefore binds only the authoritative bundle/tick/bid/ask/source metadata currently available; downstream pending validation remains fail-closed where deeper symbol metadata is mandatory.

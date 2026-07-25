@@ -628,3 +628,34 @@ Commit: NOT COMMITTED
 - Implementation and focused verification are complete; a real typed runtime result remains blocked by missing read-only lifecycle authentication.
 - Automatic export, controlled submission, reconciliation mutation, broker mutation, and order submission: NOT RUN.
 - Next: provide the existing lifecycle endpoint authentication to the runtime, click generation once, then use validation-only pending export only if the authoritative result is a valid PENDING candidate.
+
+
+---
+
+### Post-release Maintenance - Authoritative Non-Executable Proposal Owner
+
+Date: 2026-07-25
+Verification: `FOCUSED_PASS`
+Commit: NOT COMMITTED
+
+#### Implemented
+
+- Added one upstream typed owner for non-executable autonomous order proposals; no execution, approval, export, bridge, or UI boundary was added.
+- Reused the existing project model router, typed feature/context/method/score/readiness artifacts, autonomous order contracts, resolver, and lifecycle-gated operator assembler.
+- Strict JSON output is accepted once per explicit generation request; prose, extra or missing fields, incomplete values, stale evidence, malformed or mismatched bindings, symbol conflicts, invalid price relations, and model failures return ordered blockers before orchestration.
+- Raw model output, hidden reasoning, credentials, and full provider responses are not persisted. Normalized proposal fields may appear in the bounded operator Review Card; approved references and integrity hashes may appear in redacted/public candidate serialization. All execution flags remain unchanged.
+
+#### Verification
+
+- Focused proposal-provider tests: 30 passed.
+- Focused operator-generation tests: 36 passed with 2 dependency warnings.
+- Existing method-selector adapter tests: 18 passed; mapping, plain-string, malformed-response, and provider-metadata compatibility are also covered by the provider suite.
+- Changed-path compileall and `git diff --check`: passed.
+- Docker/Streamlit health passed before the binding-only correction; it was not rerun for this focused review-gap pass.
+- Static scan: exactly 1 production `.order_send(` call-site and 0 `MetaTrader5` imports under `src/`.
+
+#### Current state / limitations / next step
+
+- No runtime candidate, live LLM call, artifact export, controlled submission, reconciliation mutation, or broker mutation was run.
+- Current app market ownership provides authoritative tick/bid/ask and source bindings but not point/tick-size/digits/stops-level; downstream pending validation remains fail-closed when those fields are required.
+- Next: review and commit, then perform one explicit post-commit runtime generation with fresh data.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import Protocol
+from typing import Any, Mapping, Protocol
 
 from src.config import Config
 from src.services.trading.reasoning.models import LLMReasoningRequest, LLMReasoningResponse
@@ -27,11 +27,12 @@ class ProjectLLMReasoningProvider:
         from src.core.llm_client import LLMClient
 
         client = LLMClient(provider_override=self.provider_name)
-        return client.chat(
+        response = client.chat(
             [{"role": "user", "content": prompt}],
             stream=False,
             temperature=temperature,
         )
+        return _response_text(response)
 
 
 class LLMReasoningAdapter:
@@ -105,3 +106,13 @@ def _redact(text: str) -> str:
     if len(raw) > 4000:
         raw = raw[:4000] + "...[truncated]"
     return raw.replace("api_key", "api_[redacted]").replace("password", "[redacted]")
+
+
+def _response_text(response: Any) -> str:
+    if isinstance(response, str):
+        return response
+    if isinstance(response, Mapping):
+        message = response.get("message")
+        if isinstance(message, Mapping) and isinstance(message.get("content"), str):
+            return message["content"]
+    raise RuntimeError("trading_reasoning_response_missing_content")

@@ -4,6 +4,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.config import Config
+from src.services.trading.decision.autonomous_proposal_provider import (
+    AutonomousOrderProposalProvider,
+    AutonomousOrderProposalRequest,
+    AutonomousOrderProposalResult,
+    valid_autonomous_order_proposal_bindings,
+)
 from src.services.trading.calendar import CalendarContextBuilder
 from src.services.trading.decision.autonomous_orchestrator import AutonomousDecisionInputs
 from src.services.trading.decision.policy_engine import TradeDecisionPolicyEngine
@@ -26,6 +32,12 @@ AUTONOMOUS_RUNTIME_MODE = "autonomous_live"
 class OperatorCandidateInputError(RuntimeError):
     """Public-safe failure raised before the decision orchestrator is called."""
 
+    def __init__(self, *blockers: str) -> None:
+        self.blockers = tuple(dict.fromkeys(str(item) for item in blockers if item))
+        super().__init__(
+            ",".join(self.blockers) or "STRUCTURED_RUNTIME_INPUT_UNAVAILABLE"
+        )
+
 
 class AuthoritativeAutonomousInputAssembler:
     """Build one decision input from the repository's existing live pipeline."""
@@ -43,6 +55,7 @@ class AuthoritativeAutonomousInputAssembler:
         scoring_engine: Any | None = None,
         decision_engine: Any | None = None,
         lifecycle_supervisor: Any | None = None,
+        proposal_provider: Any | None = None,
         mode: str = AUTONOMOUS_RUNTIME_MODE,
     ) -> None:
         self.live_service = live_service
@@ -59,6 +72,7 @@ class AuthoritativeAutonomousInputAssembler:
         self.scoring_engine = scoring_engine or SignalScoringEngine()
         self.decision_engine = decision_engine or TradeDecisionPolicyEngine()
         self.lifecycle_supervisor = lifecycle_supervisor or MT5PositionLifecycleSupervisor()
+        self.proposal_provider = proposal_provider or AutonomousOrderProposalProvider()
         self.mode = mode
 
     def build(self, *, now: datetime | None = None) -> AutonomousDecisionInputs:
@@ -129,7 +143,29 @@ class AuthoritativeAutonomousInputAssembler:
             now=evaluated_at,
             max_age_seconds=Config.TRADING_AUTONOMOUS_DECISION_INPUT_MAX_AGE_SECONDS,
         )
-        return inputs
+        proposal_result = self.proposal_provider.produce(
+            AutonomousOrderProposalRequest(
+                feature_result=feature_result,
+                runtime_context=context,
+                method_selection=method,
+                score_report=score,
+                risk_decision=risk,
+                evaluated_at=evaluated_at,
+                maximum_age_seconds=Config.TRADING_AUTONOMOUS_DECISION_INPUT_MAX_AGE_SECONDS,
+            )
+        )
+        _validate_proposal_result(proposal_result, feature_result, inputs)
+        return AutonomousDecisionInputs(
+            runtime_context=context,
+            method_selection=method,
+            score_report=score,
+            risk_result=risk,
+            lifecycle_status=lifecycle_status,
+            direction=proposal_result.direction,
+            semantic_parameter_references=proposal_result.semantic_parameter_references,
+            order_proposal=proposal_result.order_proposal,
+            order_market_snapshot=proposal_result.order_market_snapshot,
+        )
 
 
 def _validate_market_sources(
@@ -231,6 +267,34 @@ def _validate_lifecycle(
         status.lifecycle_state_counts.get(state, 0) > 0 for state in unsafe_states
     ):
         raise OperatorCandidateInputError("LIFECYCLE_CONFLICT")
+
+
+def _validate_proposal_result(
+    result: AutonomousOrderProposalResult,
+    feature_result: Any,
+    inputs: AutonomousDecisionInputs,
+) -> None:
+    if not isinstance(result, AutonomousOrderProposalResult):
+        raise OperatorCandidateInputError("STRUCTURED_PROPOSAL_RESULT_INVALID")
+    if result.blockers:
+        raise OperatorCandidateInputError(*result.blockers)
+    expected_bindings = (
+        feature_result.feature_snapshot.feature_snapshot_id,
+        feature_result.bundle.bundle_id,
+        inputs.runtime_context.context_pack_id,
+        inputs.method_selection.result_id,
+        inputs.score_report.score_report_id,
+        inputs.risk_result.decision_id if inputs.risk_result else "",
+    )
+    if not (
+        valid_autonomous_order_proposal_bindings(result.source_bindings)
+        and valid_autonomous_order_proposal_bindings(expected_bindings)
+    ):
+        raise OperatorCandidateInputError("PROPOSAL_PROVENANCE_MISSING")
+    if not result.valid:
+        raise OperatorCandidateInputError("STRUCTURED_PROPOSAL_RESULT_INCOMPLETE")
+    if result.source_bindings != expected_bindings:
+        raise OperatorCandidateInputError("STRUCTURED_PROPOSAL_REFERENCE_MISMATCH")
 
 
 def _fresh(value: Any, now: datetime, max_age_seconds: int) -> bool:

@@ -15,6 +15,9 @@ from scripts.test_autonomous_decision_orchestrator import (
 )
 from scripts.test_structured_market_pending_order_candidate import structured_inputs
 from src.config import Config
+from src.services.trading.decision.autonomous_proposal_provider import (
+    AutonomousOrderProposalResult,
+)
 from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionRunResult,
 )
@@ -22,6 +25,7 @@ from src.services.trading.decision.operator_candidate_generation import (
     AuthoritativeAutonomousInputAssembler,
     OperatorCandidateInputError,
     _validate_market_sources,
+    _validate_proposal_result,
     _validate_structured_inputs,
 )
 from src.ui.autonomous_candidate_review import (
@@ -70,15 +74,22 @@ def market_result(**changes):
     quality_status = changes.pop("quality_status", "COMPLETE")
     broker_symbol = changes.pop("broker_symbol", "XAUUSDm")
     feature = SimpleNamespace(
+        feature_snapshot_id="feature-fixture",
         created_at=changes.pop("feature_created_at", NOW.isoformat()),
         symbol=changes.pop("feature_symbol", Config.MARKET_DEFAULT_SYMBOL),
         broker_symbol=broker_symbol,
         source_snapshot_ids=changes.pop("source_snapshot_ids", ["snapshot-safe-ref"]),
     )
     bundle = SimpleNamespace(
+        bundle_id="market-bundle-fixture",
+        created_at=NOW.isoformat(),
+        symbol=Config.MARKET_DEFAULT_SYMBOL,
+        provider_name="mt5_bridge",
         provider_health=SimpleNamespace(status=changes.pop("health", "OK")),
         errors=changes.pop("errors", []),
-        tick=changes.pop("tick", SimpleNamespace(timestamp=timestamp)),
+        tick=changes.pop(
+            "tick", SimpleNamespace(timestamp=timestamp, bid="100", ask="101")
+        ),
         account_id_hash=changes.pop("account_id_hash", "a" * 64),
         broker_symbol=changes.pop("bundle_broker_symbol", broker_symbol),
     )
@@ -355,9 +366,30 @@ def test_authoritative_assembler_uses_existing_pipeline_in_order():
         def decide(self, *args, **kwargs):
             return self._call()
 
+        def produce(self, *args, **kwargs):
+            return self._call()
+
         def run_once(self):
             return self._call()
 
+    proposal_inputs = structured_inputs("BUY")
+    proposal_result = AutonomousOrderProposalResult(
+        proposal_reference="autonomous_order_proposal_fixture",
+        created_at=NOW.isoformat(),
+        direction="BUY",
+        semantic_parameter_references=("autonomous_order_proposal_fixture",),
+        order_proposal=proposal_inputs.order_proposal,
+        order_market_snapshot=proposal_inputs.order_market_snapshot,
+        source_bindings=(
+            "feature-fixture",
+            "market-bundle-fixture",
+            inputs.runtime_context.context_pack_id,
+            inputs.method_selection.result_id,
+            inputs.score_report.score_report_id,
+            inputs.risk_result.decision_id,
+        ),
+        provenance_hash="a" * 64,
+    )
     assembler = AuthoritativeAutonomousInputAssembler(
         SimpleNamespace(provider=object(), calendar_provider=object()),
         feature_service=Component("feature", feature_result),
@@ -369,15 +401,20 @@ def test_authoritative_assembler_uses_existing_pipeline_in_order():
         scoring_engine=Component("score", inputs.score_report),
         decision_engine=Component("risk", inputs.risk_result),
         lifecycle_supervisor=Component("lifecycle", inputs.lifecycle_status),
+        proposal_provider=Component("proposal", proposal_result),
     )
     assembled = assembler.build(now=NOW)
     assert calls == [
         "feature", "calendar", "regime", "knowledge", "context",
-        "method", "score", "risk", "lifecycle",
+        "method", "score", "risk", "lifecycle", "proposal",
     ]
     assert assembled.runtime_context is inputs.runtime_context
-    assert assembled.order_proposal is None
-    assert assembled.order_market_snapshot is None
+    assert assembled.direction == "BUY"
+    assert assembled.semantic_parameter_references == (
+        "autonomous_order_proposal_fixture",
+    )
+    assert assembled.order_proposal is proposal_inputs.order_proposal
+    assert assembled.order_market_snapshot is proposal_inputs.order_market_snapshot
 
 
 def test_generation_code_has_no_export_submission_or_broker_mutation_calls():
@@ -404,3 +441,42 @@ def test_dashboard_generation_is_explicit_and_export_remains_separate():
     assert source.index('"Generate Autonomous Candidate"') < source.index(
         '"Export Protected Pending Candidate"'
     )
+
+
+@pytest.mark.parametrize(
+    ("proposal_result", "expected_blocker"),
+    [
+        (
+            AutonomousOrderProposalResult(
+                blockers=("STRUCTURED_PROPOSAL_OUTPUT_INVALID_JSON",)
+            ),
+            "STRUCTURED_PROPOSAL_OUTPUT_INVALID_JSON",
+        ),
+        (
+            AutonomousOrderProposalResult(source_bindings=("", "", "", "", "", "")),
+            "PROPOSAL_PROVENANCE_MISSING",
+        ),
+    ],
+)
+def test_provider_result_blockers_stop_before_orchestrator(
+    tmp_path, proposal_result, expected_blocker
+):
+    class ProviderResultAssembler:
+        calls = 0
+
+        def build(self):
+            self.calls += 1
+            _validate_proposal_result(
+                proposal_result,
+                market_result(),
+                make_inputs(),
+            )
+
+    assembler = ProviderResultAssembler()
+    orchestrator = CountingOrchestrator(tmp_path)
+    value = OperatorCandidateGenerationController(assembler, orchestrator)
+    outcome = value.generate({}, "request-proposal-blocked")
+    assert outcome.status == "BLOCKED"
+    assert outcome.blocker == expected_blocker
+    assert assembler.calls == 1
+    assert orchestrator.calls == 0
