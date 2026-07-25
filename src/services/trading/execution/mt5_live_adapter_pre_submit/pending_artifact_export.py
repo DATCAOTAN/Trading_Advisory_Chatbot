@@ -19,6 +19,7 @@ from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionRunResult,
     AutonomousDecisionValidationResult,
     AutonomousOrderMarketSnapshot,
+    autonomous_candidate_has_offline_provenance,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled import (
     MT5ControlledExecutionRequest,
@@ -113,6 +114,8 @@ def write_pending_candidate_handoff(
         raise PendingArtifactExportError("AUTHORITATIVE_TYPED_RUN_RESULT_REQUIRED")
     candidate = run_result.candidate
     snapshot = run_result.order_market_snapshot
+    if autonomous_candidate_has_offline_provenance(candidate):
+        raise PendingArtifactExportError("OFFLINE_PROVENANCE_NOT_EXECUTABLE")
     if snapshot is None:
         raise PendingArtifactExportError("MARKET_SNAPSHOT_REQUIRED")
     if candidate.schema_version != AUTONOMOUS_DECISION_SCHEMA_VERSION:

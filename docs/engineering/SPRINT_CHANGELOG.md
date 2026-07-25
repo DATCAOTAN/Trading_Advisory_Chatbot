@@ -659,3 +659,31 @@ Commit: NOT COMMITTED
 - No runtime candidate, live LLM call, artifact export, controlled submission, reconciliation mutation, or broker mutation was run.
 - Current app market ownership provides authoritative tick/bid/ask and source bindings but not point/tick-size/digits/stops-level; downstream pending validation remains fail-closed when those fields are required.
 - Next: review and commit, then perform one explicit post-commit runtime generation with fresh data.
+
+---
+
+### Post-release Maintenance - Isolated Offline Candidate Acceptance
+
+Date: 2026-07-26
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added one offline-only CLI with eight deterministic scenarios and an injected fixed clock.
+- Reused the authoritative proposal parser/normalizer, market/input validators, candidate orchestrator, readiness classification, and reason ordering.
+- Marked fixture-derived candidates with integrity-bound offline provenance and blocked protected handoff/pending mapping with `OFFLINE_PROVENANCE_NOT_EXECUTABLE`.
+- Added no UI, network adapter, candidate schema, live path, approval artifact, export, submission, retry, or broker mutation.
+
+#### Verification
+
+- Focused offline harness tests: 29 passed.
+- Neighboring proposal/candidate/pending/export/submission/reconciliation/lifecycle tests: 238 passed with 2 dependency warnings.
+- Changed-path compileall and eight scenario smoke runs: passed.
+- Full regression: 2,990 passed and 156 subtests passed with 3 dependency warnings; compileall passed. Ponytail full-mode review passed; no duplicated policy, network boundary, retry, or speculative abstraction was found.
+
+#### Current state / limitations / next step
+
+- Offline MARKET/PENDING results are non-exportable and non-submittable engineering evidence only.
+- Live acceptance remains `DEFERRED_UNTIL_FRESH_XAUUSDM_MARKET_DATA`.
+- Next: complete full regression/static review, retain the harness, then wait for genuinely fresh XAUUSDm tick and M15/H1/H4 data for a separately approved one-attempt live acceptance.

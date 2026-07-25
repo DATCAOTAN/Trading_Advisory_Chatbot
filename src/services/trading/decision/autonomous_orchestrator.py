@@ -28,6 +28,8 @@ from src.services.trading.scoring.models import SignalScoreReport
 
 AUTONOMOUS_DECISION_SCHEMA_VERSION = "autonomous-decision-candidate/v2"
 AUTONOMOUS_DECISION_LEGACY_SCHEMA_VERSION = "autonomous-decision-candidate/v1"
+OFFLINE_FIXTURE_MODE = "offline_fixture"
+OFFLINE_FIXTURE_REFERENCE_PREFIX = "offline_fixture:"
 
 
 class AutonomousDecisionIntent(str, Enum):
@@ -292,6 +294,15 @@ class AutonomousDecisionCandidate:
             "executable": False,
             "order_sent": False,
         }
+
+
+def autonomous_candidate_has_offline_provenance(
+    candidate: AutonomousDecisionCandidate,
+) -> bool:
+    return (
+        candidate.operating_mode == OFFLINE_FIXTURE_MODE
+        or candidate.market_snapshot_reference.startswith(OFFLINE_FIXTURE_REFERENCE_PREFIX)
+    )
 
 
 @dataclass(frozen=True)

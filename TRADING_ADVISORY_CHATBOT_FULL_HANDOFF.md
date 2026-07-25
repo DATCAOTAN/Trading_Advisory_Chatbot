@@ -2219,3 +2219,18 @@ Post-release maintenance now gives the operator candidate flow one explicit upst
 - Verification is currently `FOCUSED_PASS`: 30 provider tests, 36 operator-generation tests, and 18 existing method-selector adapter tests passed after source-binding hardening. The earlier implementation pass also completed neighboring candidate/policy/Review Card tests and Docker/Streamlit health, but live generation and full regression have not been run for this uncommitted revision.
 - Runtime candidate generation, live LLM invocation, protected export, controlled submission, reconciliation mutation, and broker mutation were NOT RUN.
 - The current app-side market contract does not expose point, tick size, digits, or stops level. The proposal owner therefore binds only the authoritative bundle/tick/bid/ask/source metadata currently available; downstream pending validation remains fail-closed where deeper symbol metadata is mandatory.
+
+# 39. OFFLINE AUTONOMOUS-CANDIDATE ACCEPTANCE HARNESS
+
+Post-release maintenance now includes one deterministic developer CLI for candidate acceptance while live XAUUSDm data is unavailable.
+
+- The harness uses typed offline market, symbol, account-context, lifecycle, reconciliation, reasoning, scoring, readiness, and proposal fixtures with an injected fixed timestamp.
+- It reuses `AutonomousOrderProposalProvider`, the operator input validators, and `AutonomousDecisionOrchestrator`; it does not create a parallel candidate schema or policy.
+- Built-in scenarios cover natural NO_ACTION, REQUIRE_HUMAN_REVIEW, MARKET, PENDING, stale market, account mismatch, unresolved reconciliation, and malformed proposal results.
+- Candidate mode is `offline_fixture`; source and market references use `offline_fixture:` and are integrity-bound through existing candidate hashes.
+- Protected handoff and pending dry-run mapping reject offline provenance with `OFFLINE_PROVENANCE_NOT_EXECUTABLE`, including after a superficial mode-only edit.
+- The CLI fails closed when execution, submission, autonomous-policy, pending-family, or position-management permissions are enabled.
+- Focused harness verification: 29 passed. Neighboring proposal, candidate, pending, lifecycle, reconciliation, export, and submission verification: 238 passed with 2 dependency warnings.
+- Full regression passed with 2,990 tests and 156 subtests; compileall passed with 3 dependency warnings from the test suite. Ponytail full-mode review passed with no valid simplification finding.
+- No bridge, Docker, external LLM, protected export, controlled submission, reconciliation mutation, or broker mutation was run.
+- Live acceptance remains `DEFERRED_UNTIL_FRESH_XAUUSDM_MARKET_DATA`.

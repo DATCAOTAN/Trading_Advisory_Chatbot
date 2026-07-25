@@ -13,6 +13,7 @@ from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionCandidate,
     AutonomousDecisionOrchestrator,
     AutonomousOrderMarketSnapshot,
+    autonomous_candidate_has_offline_provenance,
     autonomous_market_snapshot_provenance_hash,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_artifact_capture import (
@@ -395,6 +396,8 @@ class ControlledPendingOrderDryRunMapper:
             candidate, now=evaluated_at
         )
         blockers.extend(candidate_validation.issues)
+        if autonomous_candidate_has_offline_provenance(candidate):
+            blockers.append("OFFLINE_PROVENANCE_NOT_EXECUTABLE")
         if candidate.schema_version != AUTONOMOUS_DECISION_SCHEMA_VERSION:
             blockers.append("PENDING_CANDIDATE_SCHEMA_V2_REQUIRED")
         if candidate.intent != "OPEN_POSITION":
