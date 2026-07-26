@@ -27,6 +27,8 @@ class ProjectLLMReasoningProvider:
     def complete(self, prompt: str, max_tokens: int, temperature: float) -> str:
         from src.core.llm_client import LLMClient
 
+        if str(self.provider_name or "").lower() == "groq" and not Config.GROQ_API_KEY:
+            raise RuntimeError("GROQ_CREDENTIAL_MISSING")
         client = LLMClient(provider_override=self.provider_name)
         options = {}
         if self.structured_json:

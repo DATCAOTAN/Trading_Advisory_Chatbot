@@ -2313,3 +2313,14 @@ Post-release maintenance now requests and consumes the autonomous proposal as bo
 - The exact proposal field set, enum semantics, numeric validation, provenance checks, and candidate-creation boundary are unchanged. Candidate construction still occurs only after parse and schema validation pass.
 - Verification: 42 focused proposal/provider tests and 153 neighboring adapter/orchestrator/offline/hermetic tests passed. Full regression passed with 3,029 tests and 156 subtests; three dependency warnings were unchanged.
 - External LLM calls, live generation, export, controlled submission, reconciliation mutation, `order_send`, and broker mutation were zero. A new live generation attempt requires separate authorization.
+
+# 46. GROQ STRUCTURED-REQUEST DIAGNOSTIC AND WINDOWS-SAFE FAILURE REPORTING
+
+Post-release maintenance now prevents the structured Groq request from failing before transport when a Windows console cannot encode the route-log emoji.
+
+- The verified local failure was `UnicodeEncodeError` in `LLMClient._chat_groq_sync(...)` before the SDK transport call. Client construction, credential loading, model resolution, hermetic guards, and request arguments were valid.
+- The Groq route log is now ASCII-only. Structured JSON calls apply the configured reasoning timeout and SDK `max_retries=0`; fallback remains disabled.
+- Missing Groq credentials fail before client construction. Provider failures are mapped to fixed redacted categories for credential, authentication, authorization, model, request, rate-limit, timeout, connection, and runtime-encoding failures without persisting exception messages.
+- One minimal non-trading JSON probe was attempted before the fix. It received no HTTP response and made no candidate, MT5, export, submission, reconciliation, `order_send`, or broker call. No second probe or candidate generation was run in this task.
+- Verification: 96 focused provider/hermetic/operator tests passed. Full regression passed with 3,039 tests and 156 subtests; three dependency warnings were unchanged.
+- Next: separately authorize one minimal post-fix Groq JSON transport probe. Candidate generation remains blocked until that probe succeeds.

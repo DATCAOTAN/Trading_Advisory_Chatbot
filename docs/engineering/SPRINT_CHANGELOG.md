@@ -844,3 +844,29 @@ Commit: this commit
 
 - The previous live raw response was not persisted, so its exact wrapper remains unknown; repository compatibility defects are fixed and covered offline.
 - Next: separately authorize one new BTCUSDm candidate-generation attempt after the normal fresh-data preflight.
+
+---
+
+### Post-release Maintenance - Groq Windows-Safe Structured Transport
+
+Date: 2026-07-26
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Diagnosed `STRUCTURED_PROPOSAL_MODEL_UNAVAILABLE` as a Windows console `UnicodeEncodeError` before Groq HTTP transport.
+- Replaced the structured Groq route log with ASCII-safe output.
+- Applied the configured timeout and `max_retries=0` to structured JSON calls while preserving no fallback.
+- Added fixed, redacted provider failure categories and fail-fast missing-credential handling.
+
+#### Verification
+
+- Focused provider/hermetic/operator tests: 96 passed.
+- Full regression: 3,039 passed and 156 subtests passed with 3 dependency warnings.
+- Direct non-trading probe: 1; HTTP response: none; candidate generation and all MT5/broker operations: 0.
+
+#### Current state / next step
+
+- Production defaults, proposal schema, execution boundaries, and disabled permissions are unchanged.
+- Next: separately authorize one minimal post-fix Groq JSON transport probe before any candidate generation.

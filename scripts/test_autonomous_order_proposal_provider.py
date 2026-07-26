@@ -9,6 +9,7 @@ import pytest
 
 from scripts.test_autonomous_decision_orchestrator import NOW, make_inputs, service
 from scripts.test_method_selector_llm_reasoning_adapter import valid_llm_json
+from src.config import Config
 from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousOrderIntentProposal,
     AutonomousOrderMarketSnapshot,
@@ -34,6 +35,14 @@ class StaticModel:
         self.calls += 1
         self.prompt = prompt
         return self.output
+
+
+class RaisingModel:
+    def __init__(self, error):
+        self.error = error
+
+    def complete(self, prompt, max_tokens, temperature):
+        raise self.error
 
 
 def feature_result(**changes):
@@ -408,10 +417,11 @@ def test_unsupported_structured_response_format_is_detected():
         client.chat([], response_format={"type": "json_object"})
 
 
-def test_groq_json_mode_reaches_sdk_once_with_bounded_arguments():
+def test_groq_json_mode_reaches_sdk_once_with_bounded_arguments(capsys):
     from src.core.llm_client import LLMClient
 
     calls = []
+    client_options = []
 
     class FakeCompletions:
         def create(self, **kwargs):
@@ -420,12 +430,18 @@ def test_groq_json_mode_reaches_sdk_once_with_bounded_arguments():
                 choices=[SimpleNamespace(message=SimpleNamespace(content=model_output()))]
             )
 
+    class FakeGroqClient:
+        def __init__(self):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+        def with_options(self, **kwargs):
+            client_options.append(kwargs)
+            return self
+
     client = object.__new__(LLMClient)
     client.provider = "groq"
     client.groq_model = "test-model"
-    client.groq_client = SimpleNamespace(
-        chat=SimpleNamespace(completions=FakeCompletions())
-    )
+    client.groq_client = FakeGroqClient()
     response = client.chat(
         [{"role": "user", "content": "{}"}],
         temperature=0.0,
@@ -439,6 +455,48 @@ def test_groq_json_mode_reaches_sdk_once_with_bounded_arguments():
     assert calls[0]["response_format"] == {"type": "json_object"}
     assert calls[0]["max_tokens"] == 200
     assert calls[0]["stream"] is False
+    assert client_options == [{
+        "max_retries": 0,
+        "timeout": float(Config.TRADING_REASONING_TIMEOUT_SECONDS),
+    }]
+    assert capsys.readouterr().out.isascii()
+
+
+def test_project_provider_missing_groq_credential_fails_before_client(monkeypatch):
+    constructed = []
+
+    class UnexpectedClient:
+        def __init__(self, *args, **kwargs):
+            constructed.append(True)
+
+    monkeypatch.setattr(Config, "GROQ_API_KEY", "")
+    monkeypatch.setattr("src.core.llm_client.LLMClient", UnexpectedClient)
+
+    with pytest.raises(RuntimeError, match="^GROQ_CREDENTIAL_MISSING$"):
+        ProjectLLMReasoningProvider("groq", structured_json=True).complete(
+            "{}", 32, 0.0
+        )
+    assert constructed == []
+
+
+@pytest.mark.parametrize(
+    ("error", "blocker"),
+    [
+        (RuntimeError("GROQ_CREDENTIAL_MISSING"), "STRUCTURED_PROPOSAL_CREDENTIAL_MISSING"),
+        (RuntimeError("STRUCTURED_RESPONSE_FORMAT_UNSUPPORTED"), "STRUCTURED_PROPOSAL_REQUEST_UNSUPPORTED"),
+        (type("AuthenticationError", (Exception,), {})(), "STRUCTURED_PROPOSAL_AUTHENTICATION_FAILED"),
+        (type("PermissionDeniedError", (Exception,), {})(), "STRUCTURED_PROPOSAL_AUTHORIZATION_FAILED"),
+        (type("NotFoundError", (Exception,), {})(), "STRUCTURED_PROPOSAL_MODEL_UNAVAILABLE"),
+        (type("BadRequestError", (Exception,), {})(), "STRUCTURED_PROPOSAL_REQUEST_INVALID"),
+        (type("RateLimitError", (Exception,), {})(), "STRUCTURED_PROPOSAL_RATE_LIMITED"),
+        (type("APITimeoutError", (Exception,), {})(), "STRUCTURED_PROPOSAL_REQUEST_TIMEOUT"),
+        (type("APIConnectionError", (Exception,), {})("fixture-key"), "STRUCTURED_PROPOSAL_TRANSPORT_UNAVAILABLE"),
+    ],
+)
+def test_provider_failure_mapping_is_specific_and_redacted(error, blocker):
+    result = AutonomousOrderProposalProvider(RaisingModel(error)).produce(request())
+    assert result.blockers == (blocker,)
+    assert "fixture-key" not in json.dumps(result.blockers)
 
 
 def test_structured_groq_failure_does_not_fallback(monkeypatch):

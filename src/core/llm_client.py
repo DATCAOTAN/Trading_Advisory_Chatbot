@@ -510,13 +510,19 @@ class LLMClient:
         response_format: Dict[str, str] | None = None,
         max_tokens: int | None = None,
     ) -> Dict:
-        print(f"🚀 [LLM_Client] Routing to GROQ (model: {self.groq_model}) - Sync")
+        print(f"[LLM_Client] Routing to GROQ (model: {self.groq_model}) - Sync")
         options = {}
         if response_format is not None:
             options["response_format"] = response_format
         if max_tokens is not None:
             options["max_tokens"] = max_tokens
-        response = self.groq_client.chat.completions.create(
+        groq_client = self.groq_client
+        if response_format is not None:
+            groq_client = groq_client.with_options(
+                max_retries=0,
+                timeout=float(Config.TRADING_REASONING_TIMEOUT_SECONDS),
+            )
+        response = groq_client.chat.completions.create(
             model=self.groq_model,
             messages=messages,
             temperature=temperature,

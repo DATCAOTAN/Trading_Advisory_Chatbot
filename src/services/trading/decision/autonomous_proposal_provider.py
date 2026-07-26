@@ -85,8 +85,8 @@ class AutonomousOrderProposalProvider:
                 _prompt(request), Config.TRADING_REASONING_MAX_TOKENS,
                 Config.TRADING_REASONING_TEMPERATURE,
             )
-        except Exception:
-            return _blocked(request, ["STRUCTURED_PROPOSAL_MODEL_UNAVAILABLE"])
+        except Exception as exc:
+            return _blocked(request, [_provider_failure_blocker(exc)])
         payload, blockers = _parse(raw)
         if blockers:
             return _blocked(request, blockers)
@@ -118,6 +118,34 @@ class AutonomousOrderProposalProvider:
             source_bindings=bindings,
             provenance_hash=digest,
         )
+
+
+def _provider_failure_blocker(exc: Exception) -> str:
+    name = type(exc).__name__
+    status = getattr(exc, "status_code", None)
+    if isinstance(exc, UnicodeEncodeError):
+        return "STRUCTURED_PROPOSAL_RUNTIME_ENCODING_FAILED"
+    if isinstance(exc, RuntimeError):
+        code = str(exc)
+        if code == "GROQ_CREDENTIAL_MISSING":
+            return "STRUCTURED_PROPOSAL_CREDENTIAL_MISSING"
+        if code == "STRUCTURED_RESPONSE_FORMAT_UNSUPPORTED":
+            return "STRUCTURED_PROPOSAL_REQUEST_UNSUPPORTED"
+    if name == "AuthenticationError" or status == 401:
+        return "STRUCTURED_PROPOSAL_AUTHENTICATION_FAILED"
+    if name == "PermissionDeniedError" or status == 403:
+        return "STRUCTURED_PROPOSAL_AUTHORIZATION_FAILED"
+    if name == "NotFoundError" or status == 404:
+        return "STRUCTURED_PROPOSAL_MODEL_UNAVAILABLE"
+    if name in {"BadRequestError", "UnprocessableEntityError"} or status in {400, 422}:
+        return "STRUCTURED_PROPOSAL_REQUEST_INVALID"
+    if name == "RateLimitError" or status == 429:
+        return "STRUCTURED_PROPOSAL_RATE_LIMITED"
+    if name == "APITimeoutError":
+        return "STRUCTURED_PROPOSAL_REQUEST_TIMEOUT"
+    if name == "APIConnectionError":
+        return "STRUCTURED_PROPOSAL_TRANSPORT_UNAVAILABLE"
+    return "STRUCTURED_PROPOSAL_MODEL_UNAVAILABLE"
 
 
 def _input_blockers(request):
