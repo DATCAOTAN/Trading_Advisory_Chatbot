@@ -78,7 +78,10 @@ class AutonomousOrderProposalProvider:
             return _blocked(request, ["STRUCTURED_PROPOSAL_MODEL_DISABLED"])
         snapshot = _market_snapshot(request)
         try:
-            raw = (self.model_provider or ProjectLLMReasoningProvider()).complete(
+            raw = (
+                self.model_provider
+                or ProjectLLMReasoningProvider(structured_json=True)
+            ).complete(
                 _prompt(request), Config.TRADING_REASONING_MAX_TOKENS,
                 Config.TRADING_REASONING_TEMPERATURE,
             )
@@ -235,8 +238,18 @@ def _parse(raw):
     if not isinstance(raw, str):
         return {}, ["STRUCTURED_PROPOSAL_OUTPUT_NOT_TEXT"]
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
+        text = raw.strip()
+        lines = text.splitlines()
+        if (
+            len(lines) >= 3
+            and lines[0].strip().lower() == "```json"
+            and lines[-1].strip() == "```"
+        ):
+            text = "\n".join(lines[1:-1]).strip()
+        payload = json.loads(text, parse_constant=_reject_json_constant)
+        if isinstance(payload, str):
+            payload = json.loads(payload, parse_constant=_reject_json_constant)
+    except (json.JSONDecodeError, ValueError):
         return {}, ["STRUCTURED_PROPOSAL_OUTPUT_INVALID_JSON"]
     if not isinstance(payload, dict) or set(payload) != _FIELDS:
         return {}, ["STRUCTURED_PROPOSAL_OUTPUT_FIELDS_INVALID"]
@@ -255,6 +268,10 @@ def _parse(raw):
         return {}, ["STRUCTURED_PROPOSAL_REASON_CODES_MISSING"]
     payload["reason_codes"] = reasons
     return payload, []
+
+
+def _reject_json_constant(value):
+    raise ValueError(f"invalid JSON constant: {value}")
 
 
 def _make_proposal(payload, request, snapshot):

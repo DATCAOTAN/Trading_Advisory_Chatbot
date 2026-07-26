@@ -110,13 +110,28 @@ class LLMClient:
                 print("⚠️ [LLM_Client] Chưa cài thư viện `openai`. Chạy `pip install openai` để dùng Google. Fallback về Ollama.")
                 self.provider = "ollama"
 
-    def chat(self, messages: List[Dict], stream: bool = False, temperature: float = 0.2) -> Any:
+    def chat(
+        self,
+        messages: List[Dict],
+        stream: bool = False,
+        temperature: float = 0.2,
+        response_format: Dict[str, str] | None = None,
+        max_tokens: int | None = None,
+        allow_fallback: bool = True,
+    ) -> Any:
         """
         Giao diện gọi chung cho tất cả các request.
         Nếu stream=True, trả về Iterator[str] yielding từng chunk (đã lọc thẻ <think>).
         Nếu stream=False, trả về Dict (đã lọc thẻ <think>).
         """
         # Hãm tốc độ 15 giây nếu xài Google Free Tier để tránh lỗi 429
+        if response_format is not None and (
+            response_format != {"type": "json_object"}
+            or stream
+            or self.provider != "groq"
+        ):
+            raise RuntimeError("STRUCTURED_RESPONSE_FORMAT_UNSUPPORTED")
+
         if self.provider == "google":
             print("⏳ [LLM_Client] Nghỉ 15s để tránh dính Rate Limit của Google...")
 
@@ -138,10 +153,14 @@ class LLMClient:
                 return self._filter_think_tags(self._chat_groq_stream(messages, temperature))
             else:
                 try:
-                    resp = self._chat_groq_sync(messages, temperature)
+                    resp = self._chat_groq_sync(
+                        messages, temperature, response_format, max_tokens
+                    )
                     resp["message"]["content"] = self._strip_think_sync(resp["message"]["content"])
                     return resp
                 except Exception as e:
+                    if not allow_fallback:
+                        raise
                     print(f"❌ [LLM_Client] GROQ API Lỗi: {e}")
                     print(f"🔄 [LLM_Client] TỰ ĐỘNG FALLBACK: Đang gọi Ollama ({self.ollama_model})...")
                     pass # Rơi xuống khối gọi Ollama bên dưới
@@ -484,13 +503,25 @@ class LLMClient:
             for fallback_chunk in fallback_stream:
                 yield fallback_chunk
 
-    def _chat_groq_sync(self, messages: List[Dict], temperature: float) -> Dict:
+    def _chat_groq_sync(
+        self,
+        messages: List[Dict],
+        temperature: float,
+        response_format: Dict[str, str] | None = None,
+        max_tokens: int | None = None,
+    ) -> Dict:
         print(f"🚀 [LLM_Client] Routing to GROQ (model: {self.groq_model}) - Sync")
+        options = {}
+        if response_format is not None:
+            options["response_format"] = response_format
+        if max_tokens is not None:
+            options["max_tokens"] = max_tokens
         response = self.groq_client.chat.completions.create(
             model=self.groq_model,
             messages=messages,
             temperature=temperature,
-            stream=False
+            stream=False,
+            **options,
         )
         # Giả lập format trả về của Ollama để các tầng trên không bị gãy (backward compatibility)
         content = response.choices[0].message.content if response.choices else ""

@@ -213,11 +213,33 @@ def test_formatted_prose_is_not_parsed_for_values():
     assert result.blockers == ("STRUCTURED_PROPOSAL_OUTPUT_INVALID_JSON",)
 
 
+def test_one_outer_json_fence_is_normalized():
+    result, _model = produced_raw("```json\n" + model_output() + "\n```")
+    assert result.valid
+
+
+def test_double_encoded_json_object_is_decoded_once():
+    result, _model = produced_raw(json.dumps(model_output()))
+    assert result.valid
+
+
+def test_more_than_one_json_encoding_layer_is_not_decoded():
+    result, _model = produced_raw(json.dumps(json.dumps(model_output())))
+    assert result.blockers == ("STRUCTURED_PROPOSAL_OUTPUT_FIELDS_INVALID",)
+
+
+@pytest.mark.parametrize("raw", ["", "{", '{"status": NaN}', '{"status": Infinity}'])
+def test_empty_malformed_or_non_finite_json_fails_closed(raw):
+    result, _model = produced_raw(raw)
+    assert result.blockers == ("STRUCTURED_PROPOSAL_OUTPUT_INVALID_JSON",)
+
+
 def test_extra_json_key_is_rejected():
     payload = json.loads(model_output())
     payload["unexpected"] = "value"
     result, _model = produced_raw(json.dumps(payload))
     assert result.blockers == ("STRUCTURED_PROPOSAL_OUTPUT_FIELDS_INVALID",)
+    assert result.order_proposal is None
 
 
 def test_required_json_key_missing_is_rejected():
@@ -347,9 +369,110 @@ def test_project_provider_content_reaches_existing_consumer_unchanged(
     assert response.parsed_result.primary_method_id == "al_brooks_trend_pullback"
 
 
+def test_structured_project_provider_requests_supported_json_mode_without_fallback(
+    monkeypatch,
+):
+    calls = []
+
+    class FakeProjectClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def chat(self, *args, **kwargs):
+            calls.append(kwargs)
+            return {"message": {"content": model_output()}}
+
+    monkeypatch.setattr("src.core.llm_client.LLMClient", FakeProjectClient)
+    output = ProjectLLMReasoningProvider(
+        "groq", structured_json=True
+    ).complete("{}", 200, 0.0)
+
+    assert output == model_output()
+    assert calls == [{
+        "stream": False,
+        "temperature": 0.0,
+        "response_format": {"type": "json_object"},
+        "max_tokens": 200,
+        "allow_fallback": False,
+    }]
+
+
+def test_unsupported_structured_response_format_is_detected():
+    from src.core.llm_client import LLMClient
+
+    client = object.__new__(LLMClient)
+    client.provider = "ollama"
+    with pytest.raises(
+        RuntimeError, match="STRUCTURED_RESPONSE_FORMAT_UNSUPPORTED"
+    ):
+        client.chat([], response_format={"type": "json_object"})
+
+
+def test_groq_json_mode_reaches_sdk_once_with_bounded_arguments():
+    from src.core.llm_client import LLMClient
+
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=model_output()))]
+            )
+
+    client = object.__new__(LLMClient)
+    client.provider = "groq"
+    client.groq_model = "test-model"
+    client.groq_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=FakeCompletions())
+    )
+    response = client.chat(
+        [{"role": "user", "content": "{}"}],
+        temperature=0.0,
+        response_format={"type": "json_object"},
+        max_tokens=200,
+        allow_fallback=False,
+    )
+
+    assert response == {"message": {"content": model_output()}}
+    assert len(calls) == 1
+    assert calls[0]["response_format"] == {"type": "json_object"}
+    assert calls[0]["max_tokens"] == 200
+    assert calls[0]["stream"] is False
+
+
+def test_structured_groq_failure_does_not_fallback(monkeypatch):
+    from src.core.llm_client import LLMClient
+
+    client = object.__new__(LLMClient)
+    client.provider = "groq"
+    client.groq_client = object()
+    client.ollama_model = "unused"
+    fallback_calls = []
+    monkeypatch.setattr(
+        client, "_chat_groq_sync", lambda *args: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    monkeypatch.setattr(
+        client, "_chat_ollama_sync", lambda *args: fallback_calls.append(args)
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        client.chat(
+            [],
+            response_format={"type": "json_object"},
+            allow_fallback=False,
+        )
+    assert fallback_calls == []
+
+
 @pytest.mark.parametrize(
     "project_response",
-    [{}, {"message": {}}, {"message": {"content": None}}],
+    [
+        {},
+        {"message": {}},
+        {"message": {"content": None}},
+        {"message": {"reasoning": "PRIVATE_CHAIN"}},
+    ],
 )
 def test_project_provider_missing_content_uses_existing_error_contract(
     monkeypatch, project_response

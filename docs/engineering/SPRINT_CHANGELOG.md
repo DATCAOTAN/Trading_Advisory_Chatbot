@@ -817,3 +817,30 @@ Commit: this commit
 
 - External LLM, candidate generation, export, submission, reconciliation mutation, `order_send`, and broker mutation: 0.
 - Next: run a new read-only BTCUSDm M1/H1/H4 preflight; authorize one generation attempt only if completed bars are fresh.
+
+---
+
+### Post-release Maintenance - Structured Proposal JSON Compatibility
+
+Date: 2026-07-26
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Reproduced the structured proposal failure offline across plain, fenced, prose-wrapped, double-encoded, malformed, empty, non-finite, schema-invalid, and split reasoning/content responses.
+- Requested Groq JSON-object mode for the autonomous proposal through the existing LLM client, bounded tokens, and disabled fallback for that structured call.
+- Added minimal strict normalization for one exact outer JSON fence and one double-encoded JSON string while preserving rejection of prose and malformed or schema-invalid output.
+- Kept response extraction on final `message.content`; proposal schema, candidate authority, execution flags, and all broker boundaries are unchanged.
+
+#### Verification
+
+- Focused proposal/provider tests: 42 passed.
+- Neighboring adapter/orchestrator/offline/hermetic tests: 153 passed with 2 dependency warnings.
+- Full regression: 3,029 passed and 156 subtests passed with 3 dependency warnings.
+- External LLM calls, generation, export, submission, reconciliation mutation, `order_send`, and broker mutation: 0.
+
+#### Current state / next step
+
+- The previous live raw response was not persisted, so its exact wrapper remains unknown; repository compatibility defects are fixed and covered offline.
+- Next: separately authorize one new BTCUSDm candidate-generation attempt after the normal fresh-data preflight.

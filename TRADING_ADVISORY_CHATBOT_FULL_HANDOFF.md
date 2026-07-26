@@ -2300,3 +2300,16 @@ Post-release maintenance now calculates market-data freshness from the completed
 - XAUUSD `M15,H1,H4`, BTCUSD `M1,H1,H4`, symbol mappings, thresholds, reason ordering, and all disabled execution/submission defaults remain unchanged.
 - Verification: 130 focused/neighboring tests passed; full regression passed with 3,017 tests and 156 subtests. Three dependency warnings were unchanged.
 - External LLM calls, candidate generation, export, controlled submission, reconciliation mutation, `order_send`, and broker mutation were zero. Live acceptance was not run.
+
+# 45. STRUCTURED PROPOSAL JSON COMPATIBILITY
+
+Post-release maintenance now requests and consumes the autonomous proposal as bounded structured JSON without weakening its schema or execution boundary.
+
+- The previous one-attempt BTCUSD acceptance reached Groq once and failed closed before orchestration with `STRUCTURED_PROPOSAL_OUTPUT_INVALID_JSON`; the raw provider text was intentionally not persisted, so its exact wrapper cannot be reconstructed.
+- Offline reproduction proved that plain JSON passed, while one outer Markdown JSON fence and one double-encoded JSON object were rejected by the old parser. Leading prose, malformed JSON, non-finite constants, empty content, and schema-invalid objects also failed closed.
+- The autonomous proposal path now requests Groq JSON-object mode through the existing project LLM client, forwards the configured token bound, and disables provider fallback for this structured call. Unsupported structured response-format/provider combinations fail before a request.
+- Response extraction remains authoritative `message.content`; separate reasoning or hidden provider metadata is not parsed or persisted.
+- Parsing accepts a JSON object directly, removes at most one exact outer `json` fence, and decodes at most one JSON-string wrapper. It does not search prose for embedded objects or repair malformed JSON.
+- The exact proposal field set, enum semantics, numeric validation, provenance checks, and candidate-creation boundary are unchanged. Candidate construction still occurs only after parse and schema validation pass.
+- Verification: 42 focused proposal/provider tests and 153 neighboring adapter/orchestrator/offline/hermetic tests passed. Full regression passed with 3,029 tests and 156 subtests; three dependency warnings were unchanged.
+- External LLM calls, live generation, export, controlled submission, reconciliation mutation, `order_send`, and broker mutation were zero. A new live generation attempt requires separate authorization.

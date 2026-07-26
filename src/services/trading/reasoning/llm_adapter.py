@@ -20,17 +20,26 @@ class DisabledReasoningProvider:
 
 
 class ProjectLLMReasoningProvider:
-    def __init__(self, provider_name: str | None = None):
+    def __init__(self, provider_name: str | None = None, *, structured_json: bool = False):
         self.provider_name = provider_name or getattr(Config, "TRADING_REASONING_LLM_PROVIDER", "") or None
+        self.structured_json = structured_json
 
     def complete(self, prompt: str, max_tokens: int, temperature: float) -> str:
         from src.core.llm_client import LLMClient
 
         client = LLMClient(provider_override=self.provider_name)
+        options = {}
+        if self.structured_json:
+            options = {
+                "response_format": {"type": "json_object"},
+                "max_tokens": max_tokens,
+                "allow_fallback": False,
+            }
         response = client.chat(
             [{"role": "user", "content": prompt}],
             stream=False,
             temperature=temperature,
+            **options,
         )
         return _response_text(response)
 
