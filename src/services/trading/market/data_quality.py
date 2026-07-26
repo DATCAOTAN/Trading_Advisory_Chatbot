@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBundle
 from src.services.trading.market.models import MarketSnapshot, OHLCVBar
-from src.services.trading.market.timeframes import stale_seconds_for_timeframe
+from src.services.trading.market.timeframes import (
+    stale_seconds_for_timeframe,
+    timeframe_duration_seconds,
+)
 
 
 QUALITY_ORDER = {"INVALID": 4, "EMPTY": 3, "STALE": 2, "PARTIAL": 1, "COMPLETE": 0}
@@ -116,7 +119,10 @@ class DataQualityGate:
         latest_timestamp = bars[-1].timestamp
         latest_dt = _parse_timestamp(latest_timestamp)
         if latest_dt is not None:
-            age = (datetime.now(timezone.utc) - latest_dt).total_seconds()
+            close_time = latest_dt + timedelta(
+                seconds=timeframe_duration_seconds(timeframe)
+            )
+            age = max((datetime.now(timezone.utc) - close_time).total_seconds(), 0)
             if age > stale_seconds_for_timeframe(timeframe):
                 issues.append(DataQualityIssue("STALE_LATEST_BAR", "Latest candle is stale", timeframe, "WARN"))
 

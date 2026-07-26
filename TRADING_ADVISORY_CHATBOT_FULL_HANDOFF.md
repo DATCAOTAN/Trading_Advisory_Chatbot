@@ -2283,8 +2283,20 @@ Post-release maintenance now exposes only completed MT5 bars to the application 
 - Raw read-only MT5 diagnostics confirmed that `copy_rates_from_pos` position `0` is the currently forming bar and position `1` is the latest completed bar for M1, H1, and H4. Returned epochs already represent UTC and are normalized exactly once.
 - The host bridge previously requested position `0`, so the application could treat a current H4 bar as complete while other timeframes reflected stale terminal history.
 - `MT5Client.ohlcv(...)` now starts at position `1` for every supported timeframe. No new provider, snapshot path, synchronization mechanism, or threshold was introduced.
-- Existing stale-bar thresholds continue to evaluate the completed bar's open timestamp and retain their timeframe-specific duration/tolerance behavior.
+- Completed-bar freshness now derives close time from the shared timeframe duration and compares age since close against the unchanged timeframe-specific threshold.
 - The earlier stale M1/H1 history synchronized at the terminal before the final comparison. No timezone conversion defect was found. After correction, M1 and H1 completed bars were available while H4 correctly remained stale rather than using its current bar.
 - The BTCUSD `M1,H1,H4` task-scoped profile, default XAUUSD `M15,H1,H4` profile, symbol mappings, and all disabled execution/export/submission/management defaults remain unchanged.
 - Verification: 45 focused/neighboring market-data tests passed; full regression passed with 3,016 tests and 156 subtests. Three dependency warnings were unchanged.
 - External LLM calls, candidate generation, protected export, controlled submission, reconciliation mutation, `order_send`, and broker mutation were zero. Live candidate acceptance remains pending.
+
+# 44. COMPLETED-BAR CLOSE-TIME FRESHNESS
+
+Post-release maintenance now calculates market-data freshness from the completed bar's close time rather than its open time.
+
+- `timeframe_duration_seconds(...)` is the shared duration source for M1, M5, M15, H1, H4, and D1.
+- `DataQualityGate._evaluate_snapshot(...)` computes `close_time = open_time + timeframe_duration` and clamps future/negative age to zero before applying the existing stale threshold.
+- MT5 position `0` remains excluded by the host bridge; no current forming bar is accepted as completed.
+- M1, M15, H1, and H4 therefore use the same completed-bar and close-time semantics without a BTC-specific branch.
+- XAUUSD `M15,H1,H4`, BTCUSD `M1,H1,H4`, symbol mappings, thresholds, reason ordering, and all disabled execution/submission defaults remain unchanged.
+- Verification: 130 focused/neighboring tests passed; full regression passed with 3,017 tests and 156 subtests. Three dependency warnings were unchanged.
+- External LLM calls, candidate generation, export, controlled submission, reconciliation mutation, `order_send`, and broker mutation were zero. Live acceptance was not run.

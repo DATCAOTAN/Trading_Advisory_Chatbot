@@ -792,3 +792,28 @@ Commit: this commit
 - The earlier stale M1/H1 terminal history synchronized before the final comparison; no timestamp conversion defect was found.
 - External LLM calls, candidate generation, export, submission, reconciliation mutation, `order_send`, and broker mutation: 0.
 - Next: wait until the completed M1/H1/H4 set passes existing freshness gates, then authorize a separate one-attempt candidate acceptance.
+
+---
+
+### Post-release Maintenance - Completed-Bar Close-Time Freshness
+
+Date: 2026-07-26
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added one shared duration mapping for the existing supported timeframes.
+- Changed the existing quality gate to measure completed-bar age from close time, not open time.
+- Preserved MT5 current-bar exclusion, freshness thresholds, timeframe profiles, and ordered stale reason behavior.
+
+#### Verification
+
+- Focused freshness/provider/candidate-readiness tests: 130 passed with 2 dependency warnings.
+- Full regression: 3,017 passed and 156 subtests passed with 3 dependency warnings.
+- Documentation, compile, diff, safety, and Ponytail checks passed.
+
+#### Current state / next step
+
+- External LLM, candidate generation, export, submission, reconciliation mutation, `order_send`, and broker mutation: 0.
+- Next: run a new read-only BTCUSDm M1/H1/H4 preflight; authorize one generation attempt only if completed bars are fresh.

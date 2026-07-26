@@ -7,6 +7,15 @@ from src.config import Config
 
 SUPPORTED_TIMEFRAMES = ("M1", "M5", "M15", "H1", "H4", "D1")
 
+_DURATION_SECONDS = {
+    "M1": 60,
+    "M5": 300,
+    "M15": 900,
+    "H1": 3600,
+    "H4": 14400,
+    "D1": 86400,
+}
+
 _ALIASES = {
     "1M": "M1",
     "M1": "M1",
@@ -42,6 +51,10 @@ def normalize_timeframes(timeframes: Iterable[str] | None = None) -> List[str]:
 def stale_seconds_for_timeframe(timeframe: str) -> int:
     normalized = normalize_timeframe(timeframe)
     return int(getattr(Config, f"MARKET_STALE_BAR_SECONDS_{normalized}", 7200))
+
+
+def timeframe_duration_seconds(timeframe: str) -> int:
+    return _DURATION_SECONDS.get(normalize_timeframe(timeframe), 0)
 
 
 def default_symbol() -> str:

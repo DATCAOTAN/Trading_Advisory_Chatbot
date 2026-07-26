@@ -14,6 +14,7 @@ from src.services.live_data_service import MarketDataService  # noqa: E402
 from src.services.trading.market import MT5BridgeMarketDataProvider, ProviderRegistry  # noqa: E402
 from src.services.trading.market.data_quality import DataQualityGate  # noqa: E402
 from src.services.trading.market.models import AccountSnapshot, MarketSnapshot, OHLCVBar, TickSnapshot  # noqa: E402
+from src.services.trading.market.timeframes import timeframe_duration_seconds  # noqa: E402
 from tools.mt5_bridge import mt5_client  # noqa: E402
 
 
@@ -95,8 +96,44 @@ class MT5BridgeMarketDataBoundaryTests(unittest.TestCase):
             )
             return DataQualityGate()._evaluate_snapshot(snapshot)[0]
 
-        self.assertEqual(quality(240), "COMPLETE")
-        self.assertEqual(quality(360), "STALE")
+        self.assertEqual(quality(350), "COMPLETE")
+        self.assertEqual(quality(370), "STALE")
+
+    def test_timeframe_durations_and_recent_h4_close_time(self):
+        self.assertEqual(
+            {
+                timeframe: timeframe_duration_seconds(timeframe)
+                for timeframe in ("M1", "M15", "H1", "H4")
+            },
+            {"M1": 60, "M15": 900, "H1": 3600, "H4": 14400},
+        )
+
+        now = datetime.now(timezone.utc)
+
+        def h4_quality(open_age):
+            snapshot = MarketSnapshot(
+                symbol="BTCUSD",
+                timeframe="H4",
+                bars=[
+                    OHLCVBar(
+                        timestamp=(
+                            now - timedelta(seconds=open_age + (34 - index) * 14400)
+                        ).isoformat(),
+                        open=100.0,
+                        high=102.0,
+                        low=99.0,
+                        close=101.0,
+                        volume=12,
+                        timeframe="H4",
+                        symbol="BTCUSD",
+                    )
+                    for index in range(35)
+                ],
+            )
+            return DataQualityGate()._evaluate_snapshot(snapshot)[0]
+
+        self.assertEqual(h4_quality(6 * 3600), "COMPLETE")
+        self.assertEqual(h4_quality(10 * 3600 + 900), "STALE")
 
     def test_default_provider_is_mt5_bridge_and_oanda_not_required(self):
         self.assertEqual(Config.MARKET_DATA_PROVIDER, "mt5_bridge")
