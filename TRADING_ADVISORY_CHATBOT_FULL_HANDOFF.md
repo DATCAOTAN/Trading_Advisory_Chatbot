@@ -2275,3 +2275,16 @@ Post-release maintenance now allows one explicit BTCUSD operator request to subs
 - Verification: `FULL_REGRESSION_PASS`; 16 focused tests, 164 neighboring tests, and 3,014 full-regression tests plus 156 subtests passed with 3 unchanged dependency warnings.
 - Execution, export, controlled submission, reconciliation mutation, `order_send`, and broker mutation were NOT RUN during implementation verification.
 - A separately authorized post-commit BTCUSDm live acceptance remains pending.
+
+# 43. MT5 COMPLETED-BAR NORMALIZATION
+
+Post-release maintenance now exposes only completed MT5 bars to the application market-data pipeline.
+
+- Raw read-only MT5 diagnostics confirmed that `copy_rates_from_pos` position `0` is the currently forming bar and position `1` is the latest completed bar for M1, H1, and H4. Returned epochs already represent UTC and are normalized exactly once.
+- The host bridge previously requested position `0`, so the application could treat a current H4 bar as complete while other timeframes reflected stale terminal history.
+- `MT5Client.ohlcv(...)` now starts at position `1` for every supported timeframe. No new provider, snapshot path, synchronization mechanism, or threshold was introduced.
+- Existing stale-bar thresholds continue to evaluate the completed bar's open timestamp and retain their timeframe-specific duration/tolerance behavior.
+- The earlier stale M1/H1 history synchronized at the terminal before the final comparison. No timezone conversion defect was found. After correction, M1 and H1 completed bars were available while H4 correctly remained stale rather than using its current bar.
+- The BTCUSD `M1,H1,H4` task-scoped profile, default XAUUSD `M15,H1,H4` profile, symbol mappings, and all disabled execution/export/submission/management defaults remain unchanged.
+- Verification: 45 focused/neighboring market-data tests passed; full regression passed with 3,016 tests and 156 subtests. Three dependency warnings were unchanged.
+- External LLM calls, candidate generation, protected export, controlled submission, reconciliation mutation, `order_send`, and broker mutation were zero. Live candidate acceptance remains pending.

@@ -765,3 +765,30 @@ Commit: this commit
 
 - Implementation and regression verification are complete; runtime acceptance is pending.
 - Next: run the separately authorized BTCUSDm M1/H1/H4 preflight and make at most one natural candidate-generation attempt.
+
+---
+
+### Post-release Maintenance - MT5 Completed-Bar Normalization
+
+Date: 2026-07-26
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Corrected the existing host bridge OHLCV read to start at MT5 position `1`, the latest completed bar, instead of position `0`, the currently forming bar.
+- Applied the same existing bridge path to M1, M15, H1, H4, and other supported timeframes without adding a market-data pipeline or changing freshness thresholds.
+- Preserved the BTCUSD `M1,H1,H4` acceptance profile and the default XAUUSD `M15,H1,H4` profile.
+
+#### Verification
+
+- Raw read-only MT5 evidence confirmed position `0` is current and position `1` is completed for M1, H1, and H4; epoch timestamps normalized to UTC once.
+- Focused and neighboring market-data tests: 45 passed with 2 dependency warnings.
+- Full regression: 3,016 passed and 156 subtests passed with 3 dependency warnings.
+- Live bridge/provider comparison exposed completed bars only; the current H4 bar was no longer incorrectly classified as complete.
+
+#### Current state / next step
+
+- The earlier stale M1/H1 terminal history synchronized before the final comparison; no timestamp conversion defect was found.
+- External LLM calls, candidate generation, export, submission, reconciliation mutation, `order_send`, and broker mutation: 0.
+- Next: wait until the completed M1/H1/H4 set passes existing freshness gates, then authorize a separate one-attempt candidate acceptance.

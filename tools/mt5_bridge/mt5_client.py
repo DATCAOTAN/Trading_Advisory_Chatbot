@@ -238,7 +238,7 @@ class MT5Client:
         tf_name = TIMEFRAME_MAP.get(str(timeframe).upper(), "TIMEFRAME_M15")
         tf = getattr(mt5, tf_name)
         try:
-            rates = _call_mt5(mt5.copy_rates_from_pos, symbol, tf, 0, max(1, int(count or 1)))
+            rates = _call_mt5(mt5.copy_rates_from_pos, symbol, tf, 1, max(1, int(count or 1)))
         except TimeoutError as exc:
             return {"status": "UNAVAILABLE", "message": str(exc), "bars": [], "data_quality": "EMPTY"}
         if rates is None or len(rates) == 0:

@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,10 +12,92 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.config import Config  # noqa: E402
 from src.services.live_data_service import MarketDataService  # noqa: E402
 from src.services.trading.market import MT5BridgeMarketDataProvider, ProviderRegistry  # noqa: E402
-from src.services.trading.market.models import AccountSnapshot, MarketSnapshot, TickSnapshot  # noqa: E402
+from src.services.trading.market.data_quality import DataQualityGate  # noqa: E402
+from src.services.trading.market.models import AccountSnapshot, MarketSnapshot, OHLCVBar, TickSnapshot  # noqa: E402
+from tools.mt5_bridge import mt5_client  # noqa: E402
 
 
 class MT5BridgeMarketDataBoundaryTests(unittest.TestCase):
+    def test_mt5_bridge_uses_latest_completed_bar_for_all_intraday_timeframes(self):
+        calls = []
+
+        class FakeMT5:
+            TIMEFRAME_M1 = 1
+            TIMEFRAME_M15 = 15
+            TIMEFRAME_H1 = 16385
+            TIMEFRAME_H4 = 16388
+
+            @staticmethod
+            def symbol_select(symbol, selected):
+                return True
+
+            @staticmethod
+            def copy_rates_from_pos(symbol, timeframe, start_pos, count):
+                calls.append((symbol, timeframe, start_pos, count))
+                return [
+                    {
+                        "time": 1785060180,
+                        "open": 100.0,
+                        "high": 102.0,
+                        "low": 99.0,
+                        "close": 101.0,
+                        "tick_volume": 12,
+                    }
+                ]
+
+        client = mt5_client.MT5Client()
+        client._initialized = True
+        with patch.object(mt5_client, "mt5", FakeMT5), patch.object(
+            client,
+            "tick",
+            return_value={"bid": 100.0, "ask": 101.0, "spread": 1.0},
+        ):
+            results = {
+                timeframe: client.ohlcv("BTCUSDm", timeframe, 1)
+                for timeframe in ("M1", "M15", "H1", "H4")
+            }
+
+        self.assertEqual([call[2] for call in calls], [1, 1, 1, 1])
+        self.assertEqual(
+            [call[1] for call in calls],
+            [FakeMT5.TIMEFRAME_M1, FakeMT5.TIMEFRAME_M15, FakeMT5.TIMEFRAME_H1, FakeMT5.TIMEFRAME_H4],
+        )
+        self.assertTrue(
+            all(
+                result["bars"][0]["timestamp"] == "2026-07-26T10:03:00+00:00"
+                for result in results.values()
+            )
+        )
+
+    def test_completed_bar_freshness_preserves_fresh_and_stale_history(self):
+        now = datetime.now(timezone.utc)
+
+        def quality(age_seconds):
+            snapshot = MarketSnapshot(
+                symbol="BTCUSD",
+                timeframe="M1",
+                bars=[
+                    OHLCVBar(
+                        timestamp=(
+                            now
+                            - timedelta(seconds=age_seconds + (34 - index) * 60)
+                        ).isoformat(),
+                        open=100.0,
+                        high=102.0,
+                        low=99.0,
+                        close=101.0,
+                        volume=12,
+                        timeframe="M1",
+                        symbol="BTCUSD",
+                    )
+                    for index in range(35)
+                ]
+            )
+            return DataQualityGate()._evaluate_snapshot(snapshot)[0]
+
+        self.assertEqual(quality(240), "COMPLETE")
+        self.assertEqual(quality(360), "STALE")
+
     def test_default_provider_is_mt5_bridge_and_oanda_not_required(self):
         self.assertEqual(Config.MARKET_DATA_PROVIDER, "mt5_bridge")
         provider = ProviderRegistry.build_provider()
