@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+import src.services.trading.decision.operator_candidate_generation as generation_module
 
 from scripts.test_autonomous_decision_orchestrator import (
     NOW,
@@ -415,6 +418,164 @@ def test_authoritative_assembler_uses_existing_pipeline_in_order():
     )
     assert assembled.order_proposal is proposal_inputs.order_proposal
     assert assembled.order_market_snapshot is proposal_inputs.order_market_snapshot
+
+
+def test_normal_reasoning_latency_uses_current_handoff_clock(monkeypatch):
+    handoff_at = NOW + timedelta(seconds=10)
+    inputs = make_inputs()
+    for artifact in (
+        inputs.runtime_context,
+        inputs.method_selection,
+        inputs.score_report,
+        inputs.risk_result,
+    ):
+        artifact.created_at = handoff_at.isoformat()
+    inputs = replace(
+        inputs,
+        lifecycle_status=replace(
+            inputs.lifecycle_status,
+            last_successful_cycle=handoff_at.isoformat(),
+        ),
+    )
+    with pytest.raises(
+        OperatorCandidateInputError,
+        match="STRUCTURED_RUNTIME_INPUT_STALE",
+    ):
+        _validate_structured_inputs(inputs, now=NOW, max_age_seconds=300)
+    feature_result = market_result(
+        timestamp=NOW.isoformat(), feature_created_at=NOW.isoformat()
+    )
+    proposal_inputs = structured_inputs("BUY")
+    proposal_result = AutonomousOrderProposalResult(
+        proposal_reference="autonomous_order_proposal_fixture",
+        created_at=handoff_at.isoformat(),
+        direction="BUY",
+        semantic_parameter_references=("autonomous_order_proposal_fixture",),
+        order_proposal=proposal_inputs.order_proposal,
+        order_market_snapshot=proposal_inputs.order_market_snapshot,
+        source_bindings=(
+            feature_result.feature_snapshot.feature_snapshot_id,
+            feature_result.bundle.bundle_id,
+            inputs.runtime_context.context_pack_id,
+            inputs.method_selection.result_id,
+            inputs.score_report.score_report_id,
+            inputs.risk_result.decision_id,
+        ),
+        provenance_hash="a" * 64,
+    )
+
+    class Clock(datetime):
+        values = iter((NOW, handoff_at))
+
+        @classmethod
+        def now(cls, tz=None):
+            value = next(cls.values)
+            return value if tz is None else value.astimezone(tz)
+
+    class ProposalProvider:
+        calls = 0
+        request = None
+
+        def produce(self, request):
+            self.calls += 1
+            self.request = request
+            return proposal_result
+
+    provider = ProposalProvider()
+    monkeypatch.setattr(generation_module, "datetime", Clock)
+    assembler = AuthoritativeAutonomousInputAssembler(
+        SimpleNamespace(provider=object(), calendar_provider=object()),
+        feature_service=SimpleNamespace(
+            build_features=lambda *args, **kwargs: feature_result
+        ),
+        calendar_builder=SimpleNamespace(build=lambda *args, **kwargs: object()),
+        regime_detector=SimpleNamespace(detect=lambda *args, **kwargs: object()),
+        knowledge_router=SimpleNamespace(route=lambda *args, **kwargs: object()),
+        context_builder=SimpleNamespace(
+            build=lambda *args, **kwargs: inputs.runtime_context
+        ),
+        method_selector=SimpleNamespace(
+            select=lambda *args, **kwargs: inputs.method_selection
+        ),
+        scoring_engine=SimpleNamespace(
+            score=lambda *args, **kwargs: inputs.score_report
+        ),
+        decision_engine=SimpleNamespace(
+            decide=lambda *args, **kwargs: inputs.risk_result
+        ),
+        lifecycle_supervisor=SimpleNamespace(
+            run_once=lambda: inputs.lifecycle_status
+        ),
+        proposal_provider=provider,
+    )
+
+    assembled = assembler.build()
+
+    assert provider.calls == 1
+    assert provider.request.evaluated_at == handoff_at
+    assert provider.request.feature_result is feature_result
+    assert provider.request.runtime_context is inputs.runtime_context
+    assert provider.request.score_report.source_feature_snapshot_id == (
+        feature_result.feature_snapshot.feature_snapshot_id
+    )
+    assert assembled.runtime_context is inputs.runtime_context
+
+
+def test_structured_freshness_uses_utc_and_blocks_genuinely_stale_input():
+    inputs = make_inputs()
+    stale_at = NOW - timedelta(seconds=301)
+    for artifact in (
+        inputs.runtime_context,
+        inputs.method_selection,
+        inputs.score_report,
+        inputs.risk_result,
+    ):
+        artifact.created_at = stale_at.replace(tzinfo=None).isoformat()
+    with pytest.raises(OperatorCandidateInputError, match="STRUCTURED_RUNTIME_INPUT_STALE"):
+        _validate_structured_inputs(inputs, now=NOW, max_age_seconds=300)
+
+
+@pytest.mark.parametrize(
+    "created_at",
+    (NOW.isoformat(), NOW.replace(tzinfo=None).isoformat()),
+)
+def test_structured_freshness_treats_naive_timestamps_as_utc(created_at):
+    inputs = make_inputs()
+    for artifact in (
+        inputs.runtime_context,
+        inputs.method_selection,
+        inputs.score_report,
+        inputs.risk_result,
+    ):
+        artifact.created_at = created_at
+    _validate_structured_inputs(inputs, now=NOW, max_age_seconds=300)
+
+
+def test_proposal_snapshot_identity_mismatch_fails_closed():
+    inputs = make_inputs()
+    proposal_inputs = structured_inputs("BUY")
+    result = AutonomousOrderProposalResult(
+        proposal_reference="autonomous_order_proposal_fixture",
+        created_at=NOW.isoformat(),
+        direction="BUY",
+        semantic_parameter_references=("autonomous_order_proposal_fixture",),
+        order_proposal=proposal_inputs.order_proposal,
+        order_market_snapshot=proposal_inputs.order_market_snapshot,
+        source_bindings=(
+            "different-feature",
+            "market-bundle-fixture",
+            inputs.runtime_context.context_pack_id,
+            inputs.method_selection.result_id,
+            inputs.score_report.score_report_id,
+            inputs.risk_result.decision_id,
+        ),
+        provenance_hash="a" * 64,
+    )
+    with pytest.raises(
+        OperatorCandidateInputError,
+        match="STRUCTURED_PROPOSAL_REFERENCE_MISMATCH",
+    ):
+        _validate_proposal_result(result, market_result(), inputs)
 
 
 def test_generation_code_has_no_export_submission_or_broker_mutation_calls():

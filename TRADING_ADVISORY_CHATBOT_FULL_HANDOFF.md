@@ -2337,3 +2337,17 @@ Post-release maintenance now makes the natural `NO_PROPOSAL` response contract e
 - No fields are inserted, renamed, coerced, repaired, or ignored. A valid `NO_PROPOSAL` maps deterministically to `STRUCTURED_PROPOSAL_NOT_AVAILABLE` and stops before candidate creation.
 - Verification: 63 focused provider/contract tests and 118 neighboring operator, candidate, multi-symbol, offline, and hermetic tests passed. Full regression passed with 3,050 tests and 156 subtests; three dependency warnings were unchanged.
 - External LLM calls, candidate generation, MT5 calls, market-data calls, retries, fallback, export, submission, controlled-submit, runtime `order_send`, and broker mutation were zero during this offline fix.
+
+# 48. RUNTIME INPUT HANDOFF REFERENCE CLOCK
+
+Post-release maintenance now validates freshly assembled structured reasoning artifacts against a post-reasoning handoff clock instead of the earlier market-preflight clock.
+
+- `AuthoritativeAutonomousInputAssembler.build(...)` previously captured one reference time before market and reasoning work, then reused it after reasoning to validate `RuntimeContextPack`, `MethodSelectionResult`, `SignalScoreReport`, and `TradeReadinessDecision` creation timestamps.
+- When reasoning lasted more than the existing five-second future-skew allowance, those newly created artifacts produced a negative age below `-5` seconds and incorrectly emitted `STRUCTURED_RUNTIME_INPUT_STALE` before the structured proposal provider.
+- The market snapshot still uses the original preflight reference time. After reasoning and lifecycle checks, the assembler now captures a handoff reference time for structured-input validation and the proposal request.
+- The exact feature snapshot, bundle, context, method, score, and risk references remain bound through the same objects and source identifiers. Streamlit session state is not an input source for assembly.
+- The 300-second maximum age, five-second clock-skew allowance, completed-bar semantics, BTCUSD `M1,H1,H4` profile, XAUUSD defaults, Groq JSON contract, retry policy, and all execution safety gates are unchanged.
+- Hermetic reproduction proved that a ten-second post-start artifact was rejected as `STRUCTURED_RUNTIME_INPUT_STALE` by the old reference clock even though it was newly created. The corrected handoff clock reaches the proposal provider once, while a genuinely 301-second-old input remains blocked.
+- Verification: 177 focused/neighboring tests passed; full regression passed with 3,055 tests and 156 subtests. Three dependency warnings were unchanged.
+- MT5, live market data, Streamlit generation, external LLM, candidate generation, retries, fallback, export, submission, controlled-submit, runtime `order_send`, and broker mutation were zero during diagnosis and verification.
+- Next: separately authorize one fresh BTCUSD acceptance attempt. Do not retry the previous attempt or run acceptance as part of this maintenance fix.

@@ -897,3 +897,29 @@ Commit: this commit
 - The earlier live key set was not persisted; the three-field no-proposal fixture is only the minimal deterministic reproducer.
 - A valid no-proposal response stops before candidate creation as `STRUCTURED_PROPOSAL_NOT_AVAILABLE`.
 - Next: separately authorize one fresh BTCUSD acceptance attempt; do not retry within this maintenance task.
+
+---
+
+### Post-release Maintenance - Runtime Input Handoff Reference Clock
+
+Date: 2026-07-27
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Reproduced `STRUCTURED_RUNTIME_INPUT_STALE` hermetically with fresh structured artifacts created ten seconds after the pre-reasoning reference time.
+- Confirmed no Streamlit session/cache reuse and no snapshot-reference loss in the authoritative assembler path.
+- Kept the market-preflight clock and captured a current post-reasoning handoff clock for structured-input and proposal validation.
+- Preserved the 300-second TTL, five-second skew allowance, snapshot/provenance bindings, completed-bar rules, profiles, provider contract, and disabled execution gates.
+
+#### Verification
+
+- Focused and neighboring runtime-input, proposal, snapshot, session, hermetic, and offline tests: 177 passed with 2 dependency warnings.
+- Full regression: 3,055 passed and 156 subtests passed with 3 dependency warnings.
+- MT5, market data, Streamlit generation, external LLM, candidate generation, retry, fallback, export, submission, controlled-submit, `order_send`, and broker mutation: 0.
+
+#### Current state / next step
+
+- Fresh structured inputs remain valid after normal reasoning latency; genuinely stale inputs and mismatched proposal snapshot bindings still fail closed.
+- Next: separately authorize one fresh BTCUSD acceptance attempt. No live acceptance was run in this maintenance task.

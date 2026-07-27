@@ -83,7 +83,7 @@ class AuthoritativeAutonomousInputAssembler:
         timeframes: Iterable[str] | None = None,
         now: datetime | None = None,
     ) -> AutonomousDecisionInputs:
-        evaluated_at = _utc(now)
+        market_evaluated_at = _utc(now)
         symbol = str(symbol or Config.MARKET_DEFAULT_SYMBOL).strip().upper()
         try:
             feature_result = self.feature_service.build_features(
@@ -97,12 +97,12 @@ class AuthoritativeAutonomousInputAssembler:
         _validate_market_sources(
             feature_result,
             symbol=symbol,
-            now=evaluated_at,
+            now=market_evaluated_at,
             max_age_seconds=Config.TRADING_AUTONOMOUS_DECISION_INPUT_MAX_AGE_SECONDS,
         )
 
         try:
-            calendar = self.calendar_builder.build(symbol=symbol, now=evaluated_at)
+            calendar = self.calendar_builder.build(symbol=symbol, now=market_evaluated_at)
             feature = feature_result.feature_snapshot
             regime = self.regime_detector.detect(feature, calendar)
             knowledge = self.knowledge_router.route(
@@ -145,9 +145,12 @@ class AuthoritativeAutonomousInputAssembler:
             risk_result=risk,
             lifecycle_status=lifecycle_status,
         )
+        handoff_evaluated_at = (
+            _utc(now) if now is not None else datetime.now(timezone.utc)
+        )
         _validate_structured_inputs(
             inputs,
-            now=evaluated_at,
+            now=handoff_evaluated_at,
             max_age_seconds=Config.TRADING_AUTONOMOUS_DECISION_INPUT_MAX_AGE_SECONDS,
         )
         proposal_result = self.proposal_provider.produce(
@@ -157,7 +160,7 @@ class AuthoritativeAutonomousInputAssembler:
                 method_selection=method,
                 score_report=score,
                 risk_decision=risk,
-                evaluated_at=evaluated_at,
+                evaluated_at=handoff_evaluated_at,
                 maximum_age_seconds=Config.TRADING_AUTONOMOUS_DECISION_INPUT_MAX_AGE_SECONDS,
             )
         )
