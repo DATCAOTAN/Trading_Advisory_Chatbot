@@ -135,6 +135,23 @@ def model_output(order_type="BUY_LIMIT", **changes):
     return json.dumps(values)
 
 
+def no_proposal_output(**changes):
+    values = {
+        "status": "NO_PROPOSAL",
+        "order_type": None,
+        "entry_price": None,
+        "trigger_price": None,
+        "limit_price": None,
+        "stop_loss": None,
+        "take_profit": None,
+        "proposed_volume": None,
+        "reason_codes": ["NO_PROPOSAL"],
+        "blockers": [],
+    }
+    values.update(changes)
+    return json.dumps(values)
+
+
 def produced_raw(raw, proposal_request=None):
     model = StaticModel(raw)
     result = AutonomousOrderProposalProvider(model).produce(
@@ -167,6 +184,24 @@ def test_provider_receives_typed_authoritative_inputs_once():
     assert prompt["market"]["bid"] == "100"
     assert prompt["analysis"]["method_id"] == "method-fixture"
     assert prompt["analysis"]["readiness_action"] == "REVIEW_READY"
+
+
+def test_prompt_field_and_enum_contract_matches_authoritative_validator():
+    _result, model = produced()
+    prompt = json.loads(model.prompt)
+    expected_fields = {
+        "status", "order_type", "entry_price", "trigger_price", "limit_price",
+        "stop_loss", "take_profit", "proposed_volume", "reason_codes", "blockers",
+    }
+    assert set(prompt["required_json_schema"]) == expected_fields
+    assert set(prompt["required_fields"]) == expected_fields
+    assert set(prompt["no_proposal_example"]) == expected_fields
+    assert prompt["required_json_schema"]["status"] == "PROPOSE|NO_PROPOSAL"
+    assert prompt["required_json_schema"]["order_type"] == (
+        "BUY|SELL|BUY_LIMIT|SELL_LIMIT|BUY_STOP|SELL_STOP|"
+        "BUY_STOP_LIMIT|SELL_STOP_LIMIT|null"
+    )
+    assert prompt["no_proposal_example"] == json.loads(no_proposal_output())
 
 
 def test_valid_structured_output_becomes_complete_typed_result():
@@ -258,20 +293,63 @@ def test_required_json_key_missing_is_rejected():
     assert result.blockers == ("STRUCTURED_PROPOSAL_OUTPUT_FIELDS_INVALID",)
 
 
+def test_live_no_proposal_field_set_failure_is_reproduced_without_provider_call():
+    raw = json.dumps({
+        "status": "NO_PROPOSAL",
+        "reason_codes": ["NO_PROPOSAL"],
+        "blockers": [],
+    })
+    result, model = produced_raw(raw)
+    assert result.blockers == ("STRUCTURED_PROPOSAL_OUTPUT_FIELDS_INVALID",)
+    assert model.calls == 1
+
+
 def test_no_proposal_uses_deterministic_blocker_without_fallback():
-    payload = json.loads(model_output())
-    payload.update(
-        status="NO_PROPOSAL",
-        order_type=None,
-        entry_price=None,
-        stop_loss=None,
-        take_profit=None,
-        reason_codes=[],
-    )
-    result, model = produced_raw(json.dumps(payload))
+    result, model = produced_raw(no_proposal_output())
     assert result.blockers == ("STRUCTURED_PROPOSAL_NOT_AVAILABLE",)
     assert result.order_proposal is None
     assert model.calls == 1
+
+
+@pytest.mark.parametrize(
+    ("changes", "blocker"),
+    [
+        ({"order_type": "BUY"}, "STRUCTURED_PROPOSAL_NO_PROPOSAL_ORDER_TYPE_NOT_NULL"),
+        ({"entry_price": "100"}, "STRUCTURED_PROPOSAL_NO_PROPOSAL_ENTRY_PRICE_NOT_NULL"),
+        ({"stop_loss": "99"}, "STRUCTURED_PROPOSAL_NO_PROPOSAL_STOP_LOSS_NOT_NULL"),
+        ({"reason_codes": []}, "STRUCTURED_PROPOSAL_NO_PROPOSAL_REASON_CODES_MISSING"),
+    ],
+)
+def test_no_proposal_requires_complete_neutral_trade_fields(changes, blocker):
+    result, _model = produced_raw(no_proposal_output(**changes))
+    assert result.blockers[0] == blocker
+
+
+def test_no_action_status_is_not_an_alias_for_no_proposal():
+    result, _model = produced_raw(no_proposal_output(status="NO_ACTION"))
+    assert result.blockers == ("STRUCTURED_PROPOSAL_STATUS_INVALID",)
+
+
+def test_wrong_numeric_container_type_remains_rejected():
+    result, _model = produced(entry_price=["99"])
+    assert result.blockers[0] == "STRUCTURED_PROPOSAL_ENTRY_PRICE_INVALID"
+
+
+@pytest.mark.parametrize(
+    ("field", "blocker"),
+    [
+        ("reason_codes", "STRUCTURED_PROPOSAL_REASON_CODES_INVALID"),
+        ("blockers", "STRUCTURED_PROPOSAL_BLOCKERS_INVALID"),
+    ],
+)
+def test_code_collections_reject_non_string_items(field, blocker):
+    result, _model = produced(**{field: [True]})
+    assert result.blockers == (blocker,)
+
+
+def test_invalid_actionable_market_relationship_remains_rejected():
+    result, _model = produced("BUY_LIMIT", entry_price="102")
+    assert result.blockers == ("STRUCTURED_PROPOSAL_MARKET_RELATION_INVALID",)
 
 
 def test_invalid_direction_field_is_rejected():

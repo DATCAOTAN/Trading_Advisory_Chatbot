@@ -214,6 +214,8 @@ def _prompt(request):
         "role": "non_executable_autonomous_order_proposal",
         "instructions": [
             "Return strict JSON matching required_json_schema.",
+            "Return every required field exactly once, including for NO_PROPOSAL.",
+            "For NO_PROPOSAL, use null for every trade field and follow no_proposal_example.",
             "This advisory output grants no execution authority.",
             "Return NO_PROPOSAL when typed evidence is insufficient.",
             "No prose, chain-of-thought, account data, credentials, or extra fields.",
@@ -258,6 +260,19 @@ def _prompt(request):
             "proposed_volume": "positive number|string|null",
             "reason_codes": ["UPPERCASE_CODE"], "blockers": ["UPPERCASE_CODE"],
         },
+        "required_fields": sorted(_FIELDS),
+        "no_proposal_example": {
+            "status": "NO_PROPOSAL",
+            "order_type": None,
+            "entry_price": None,
+            "trigger_price": None,
+            "limit_price": None,
+            "stop_loss": None,
+            "take_profit": None,
+            "proposed_volume": None,
+            "reason_codes": ["NO_PROPOSAL"],
+            "blockers": [],
+        },
     }
     return json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
@@ -285,13 +300,30 @@ def _parse(raw):
     if blockers is None:
         return {}, ["STRUCTURED_PROPOSAL_BLOCKERS_INVALID"]
     status = str(payload.get("status") or "").upper()
+    reasons = _codes(payload.get("reason_codes"))
+    if reasons is None:
+        return {}, ["STRUCTURED_PROPOSAL_REASON_CODES_INVALID"]
     if status == "NO_PROPOSAL":
+        invalid = []
+        if payload.get("order_type") is not None:
+            invalid.append("STRUCTURED_PROPOSAL_NO_PROPOSAL_ORDER_TYPE_NOT_NULL")
+        for name in (
+            "entry_price", "trigger_price", "limit_price", "stop_loss",
+            "take_profit", "proposed_volume",
+        ):
+            if payload.get(name) is not None:
+                invalid.append(
+                    "STRUCTURED_PROPOSAL_NO_PROPOSAL_" + name.upper() + "_NOT_NULL"
+                )
+        if not reasons:
+            invalid.append("STRUCTURED_PROPOSAL_NO_PROPOSAL_REASON_CODES_MISSING")
+        if invalid:
+            return {}, invalid
         return {}, blockers or ["STRUCTURED_PROPOSAL_NOT_AVAILABLE"]
     if status != "PROPOSE":
         return {}, ["STRUCTURED_PROPOSAL_STATUS_INVALID"]
     if blockers:
         return {}, blockers
-    reasons = _codes(payload.get("reason_codes"))
     if not reasons:
         return {}, ["STRUCTURED_PROPOSAL_REASON_CODES_MISSING"]
     payload["reason_codes"] = reasons
@@ -439,7 +471,9 @@ def _codes(value):
         return None
     output = []
     for item in value:
-        code = str(item or "").strip().upper()
+        if not isinstance(item, str):
+            return None
+        code = item.strip().upper()
         if not _CODE.fullmatch(code):
             return None
         if code not in output:

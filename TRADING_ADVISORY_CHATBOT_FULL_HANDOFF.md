@@ -2324,3 +2324,16 @@ Post-release maintenance now prevents the structured Groq request from failing b
 - One minimal non-trading JSON probe was attempted before the fix. It received no HTTP response and made no candidate, MT5, export, submission, reconciliation, `order_send`, or broker call. No second probe or candidate generation was run in this task.
 - Verification: 96 focused provider/hermetic/operator tests passed. Full regression passed with 3,039 tests and 156 subtests; three dependency warnings were unchanged.
 - Next: separately authorize one minimal post-fix Groq JSON transport probe. Candidate generation remains blocked until that probe succeeds.
+
+# 47. STRUCTURED PROPOSAL FIELD-CONTRACT ALIGNMENT
+
+Post-release maintenance now makes the natural `NO_PROPOSAL` response contract explicit without weakening exact-field validation.
+
+- The post-fix transport probe passed with one direct JSON object. A later separately authorized BTCUSD acceptance passed fresh M1/H1/H4, account, lifecycle, reconciliation, mapping, and metadata preflight, then received one direct JSON object whose status was `NO_PROPOSAL` but whose top-level field set was incomplete.
+- Raw provider content and the exact live key set were intentionally not persisted. An offline minimal reproducer containing only `status`, `reason_codes`, and `blockers` reproduces `STRUCTURED_PROPOSAL_OUTPUT_FIELDS_INVALID`; it is not represented as the exact historical response.
+- The authoritative proposal contract remains one exact ten-field object. The prompt now lists every required field and includes one complete `NO_PROPOSAL` example with all trade fields set to `null`.
+- `NO_PROPOSAL` remains the only natural no-trade provider status. `NO_ACTION` is still an orchestrator intent, not a provider-status alias.
+- The parser still rejects missing fields, extra fields, unknown statuses, invalid code collections, malformed numeric inputs, and invalid actionable relationships. It now also requires non-empty no-proposal reason codes and rejects any non-null order type or trade value in a `NO_PROPOSAL` object with field-specific redacted blockers.
+- No fields are inserted, renamed, coerced, repaired, or ignored. A valid `NO_PROPOSAL` maps deterministically to `STRUCTURED_PROPOSAL_NOT_AVAILABLE` and stops before candidate creation.
+- Verification: 63 focused provider/contract tests and 118 neighboring operator, candidate, multi-symbol, offline, and hermetic tests passed. Full regression passed with 3,050 tests and 156 subtests; three dependency warnings were unchanged.
+- External LLM calls, candidate generation, MT5 calls, market-data calls, retries, fallback, export, submission, controlled-submit, runtime `order_send`, and broker mutation were zero during this offline fix.

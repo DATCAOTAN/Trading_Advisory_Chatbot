@@ -870,3 +870,30 @@ Commit: this commit
 
 - Production defaults, proposal schema, execution boundaries, and disabled permissions are unchanged.
 - Next: separately authorize one minimal post-fix Groq JSON transport probe before any candidate generation.
+
+---
+
+### Post-release Maintenance - Structured Proposal Field Contract
+
+Date: 2026-07-27
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Kept the exact ten-field proposal schema and made the complete `NO_PROPOSAL` shape explicit in the existing structured prompt.
+- Required null order/trade fields and a non-empty reason-code list for natural no-proposal output, with field-specific redacted blockers.
+- Preserved strict rejection of missing/extra fields, unsupported statuses, malformed values, invalid relationships, retries, fallback, and field repair.
+
+#### Verification
+
+- Focused provider/contract tests: 63 passed.
+- Neighboring operator/candidate/multi-symbol/offline/hermetic tests: 118 passed with 2 dependency warnings.
+- Full regression: 3,050 passed and 156 subtests passed with 3 dependency warnings.
+- External LLM, generation, MT5, market data, retries, fallback, export, submission, controlled-submit, `order_send`, and broker mutation: 0.
+
+#### Current state / next step
+
+- The earlier live key set was not persisted; the three-field no-proposal fixture is only the minimal deterministic reproducer.
+- A valid no-proposal response stops before candidate creation as `STRUCTURED_PROPOSAL_NOT_AVAILABLE`.
+- Next: separately authorize one fresh BTCUSD acceptance attempt; do not retry within this maintenance task.
