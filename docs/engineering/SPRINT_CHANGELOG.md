@@ -950,3 +950,29 @@ Commit: this commit
 
 - Offline actionable candidate lifecycle: verified complete through authoritative persistence and duplicate-safe admission.
 - Next: offline operator review and human-confirmation lifecycle acceptance using the persisted actionable candidate; execution remains disabled.
+
+---
+
+### Post-release Maintenance - Operator Review and Human Confirmation Lifecycle
+
+Date: 2026-07-28
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Reused the existing autonomous decision and proposal-intent journals to reload protected actionable candidates and persist one confirm/reject transition.
+- Expanded the existing Review Card with candidate, broker symbol, timeframe, method, market, account-binding, expiry, and integrity details.
+- Bound confirmation to the exact candidate/proposal hashes and references, protected account context and fingerprint hash, symbol/order/timeframes, phrase, nonce, timestamps, and disabled permissions.
+- Added fail-closed duplicate, tamper, switching, wrong-account, expiry, partial-journal, and Streamlit rerun handling without a parallel approval path.
+
+#### Verification
+
+- Focused lifecycle tests: 24 passed; focused Review Card/confirmation group: 98 passed.
+- Full regression: 3,105 passed and 156 subtests passed in 175.47 seconds with 3 dependency warnings.
+- External LLM, MT5, market data, live generation, export, submission, controlled-submit, runtime `order_send`, and broker mutation: 0.
+
+#### Current state / next step
+
+- MARKET and PENDING candidate review, explicit confirmation/rejection, protected persistence, and idempotent reload are complete while candidates remain non-executable.
+- Next: approval integrity, final validation, and pre-submit gate verification as a separate milestone; execution remains disabled.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -9,6 +10,7 @@ from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionCandidate,
     AutonomousDecisionValidationResult,
 )
+from src.services.trading.review.models import HumanReviewArtifact
 
 
 UNAVAILABLE = "UNAVAILABLE"
@@ -20,6 +22,13 @@ class AutonomousCandidateReviewView:
     schema_version: str
     structured_details_available: bool
     symbol: str
+    candidate_reference: str
+    broker_symbol: str
+    timeframe_profile: tuple[str, ...]
+    method_selection_summary: str
+    market_snapshot_reference: str
+    account_context_status: str
+    integrity_status: str
     intent: str
     side: str
     order_type: str
@@ -49,6 +58,13 @@ class AutonomousCandidateReviewView:
             "schema_version": self.schema_version,
             "structured_details_available": self.structured_details_available,
             "symbol": self.symbol,
+            "candidate_reference": self.candidate_reference,
+            "broker_symbol": self.broker_symbol,
+            "timeframe_profile": list(self.timeframe_profile),
+            "method_selection_summary": self.method_selection_summary,
+            "market_snapshot_reference": self.market_snapshot_reference,
+            "account_context_status": self.account_context_status,
+            "integrity_status": self.integrity_status,
             "intent": self.intent,
             "side": self.side,
             "order_type": self.order_type,
@@ -130,6 +146,28 @@ def present_autonomous_candidate_review(
         schema_version=schema,
         structured_details_available=structured,
         symbol=str(review_payload.get("symbol") or UNAVAILABLE),
+        candidate_reference=str(
+            review_payload.get("candidate_reference") or UNAVAILABLE
+        ),
+        broker_symbol=str(review_payload.get("broker_symbol") or UNAVAILABLE),
+        timeframe_profile=tuple(review_payload.get("timeframe_profile") or ()),
+        method_selection_summary=str(
+            review_payload.get("method_selection_summary") or UNAVAILABLE
+        ),
+        market_snapshot_reference=str(
+            candidate.market_snapshot_reference or UNAVAILABLE
+        ),
+        account_context_status=(
+            "BOUND:" + candidate.account_context_reference[:20] + "..."
+            if candidate.account_context_reference
+            else UNAVAILABLE
+        ),
+        integrity_status=(
+            "VALID"
+            if validation and validation.valid and candidate.provenance_hash
+            and candidate.structured_order_hash
+            else "BLOCKED"
+        ),
         intent=str(review_payload.get("intent") or UNAVAILABLE),
         side=_operator_value(review_payload.get("side")),
         order_type=order_type or UNAVAILABLE,
@@ -160,6 +198,56 @@ def present_autonomous_candidate_review(
         freshness_status=freshness,
         non_executable=non_executable,
         safety_status="NON_EXECUTABLE" if non_executable else "BLOCKED_UNSAFE_FLAGS",
+    )
+
+
+def build_autonomous_candidate_review_artifact(
+    candidate: AutonomousDecisionCandidate,
+    validation: AutonomousDecisionValidationResult,
+    *,
+    now: datetime | None = None,
+) -> HumanReviewArtifact:
+    reviewed_at = now or datetime.now(timezone.utc)
+    if reviewed_at.tzinfo is None:
+        reviewed_at = reviewed_at.replace(tzinfo=timezone.utc)
+    view = present_autonomous_candidate_review(candidate, validation, now=reviewed_at)
+    binding_refs = tuple(
+        dict.fromkeys(
+            (
+                candidate.candidate_reference,
+                candidate.provenance_hash,
+                candidate.structured_order_hash,
+                candidate.market_snapshot_reference,
+                candidate.market_snapshot_provenance_hash,
+                candidate.account_context_reference,
+                candidate.reasoning_result_reference,
+                candidate.score_result_reference,
+                candidate.risk_result_reference,
+                *candidate.proposed_semantic_parameter_references,
+                *candidate.knowledge_evidence_references,
+            )
+        )
+    )
+    artifact_id = "candidate_review_" + hashlib.sha256(
+        f"{candidate.candidate_reference}|{reviewed_at.isoformat()}".encode("utf-8")
+    ).hexdigest()[:24]
+    ready = view.status == "VALID"
+    return HumanReviewArtifact(
+        artifact_id=artifact_id,
+        created_at=reviewed_at.isoformat(),
+        mode=candidate.operating_mode,
+        symbol=candidate.symbol_reference,
+        broker_symbol=candidate.broker_symbol_reference,
+        review_status="READY_FOR_REVIEW" if ready else "BLOCKED",
+        readiness_action=candidate.deterministic_eligibility_result,
+        primary_method_id=candidate.reasoning_result_reference,
+        reasons=[candidate.method_selection_summary] if candidate.method_selection_summary else [],
+        blockers=[{"code": code} for code in view.validation_blockers],
+        source_refs=[item for item in binding_refs if item],
+        source_readiness_decision_id=candidate.risk_result_reference,
+        source_score_report_id=candidate.score_result_reference,
+        source_method_selection_id=candidate.reasoning_result_reference,
+        source_context_pack_id=candidate.market_context_reference,
     )
 
 
@@ -273,6 +361,13 @@ def _unavailable_view() -> AutonomousCandidateReviewView:
         schema_version=UNAVAILABLE,
         structured_details_available=False,
         symbol=UNAVAILABLE,
+        candidate_reference=UNAVAILABLE,
+        broker_symbol=UNAVAILABLE,
+        timeframe_profile=(),
+        method_selection_summary=UNAVAILABLE,
+        market_snapshot_reference=UNAVAILABLE,
+        account_context_status=UNAVAILABLE,
+        integrity_status=UNAVAILABLE,
         intent=UNAVAILABLE,
         side=UNAVAILABLE,
         order_type=UNAVAILABLE,

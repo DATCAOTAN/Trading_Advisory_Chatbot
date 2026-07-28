@@ -12,6 +12,7 @@ PROPOSAL_BOUNDARY_STATUSES = {
     "EXPIRED",
     "DUPLICATE",
     "INVALID",
+    "REJECTED",
     "UNKNOWN",
 }
 
@@ -31,6 +32,7 @@ PROPOSAL_INTENT_EVENT_TYPES = {
     "PROPOSAL_INTENT_EXPIRED",
     "PROPOSAL_INTENT_DUPLICATE",
     "PROPOSAL_INTENT_INVALID",
+    "PROPOSAL_INTENT_REJECTED",
     "JOURNAL_WRITE_FAILED",
     "UNKNOWN",
 }
@@ -64,6 +66,17 @@ class HumanConfirmedProposalIntent:
     source_gate_decision_id: str = ""
     source_dry_run_receipt_id: str = ""
     source_execution_journal_record_id: str = ""
+    candidate_reference: str = ""
+    candidate_provenance_hash: str = ""
+    candidate_structured_order_hash: str = ""
+    account_context_reference: str = ""
+    account_fingerprint_hash: str = ""
+    order_type: str = ""
+    timeframe_profile: List[str] = field(default_factory=list)
+    operator_action: str = ""
+    confirmation_nonce: str = ""
+    confirmation_expires_at: str = ""
+    confirmation_binding_hash: str = ""
     source_refs: List[str] = field(default_factory=list)
     blockers: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
@@ -102,6 +115,17 @@ class HumanConfirmedProposalIntent:
             "source_gate_decision_id": self.source_gate_decision_id,
             "source_dry_run_receipt_id": self.source_dry_run_receipt_id,
             "source_execution_journal_record_id": self.source_execution_journal_record_id,
+            "candidate_reference": self.candidate_reference,
+            "candidate_provenance_hash": self.candidate_provenance_hash,
+            "candidate_structured_order_hash": self.candidate_structured_order_hash,
+            "account_context_reference": self.account_context_reference,
+            "account_fingerprint_hash": self.account_fingerprint_hash,
+            "order_type": self.order_type,
+            "timeframe_profile": list(dict.fromkeys(self.timeframe_profile)),
+            "operator_action": self.operator_action,
+            "confirmation_nonce": self.confirmation_nonce,
+            "confirmation_expires_at": self.confirmation_expires_at,
+            "confirmation_binding_hash": self.confirmation_binding_hash,
             "source_refs": list(dict.fromkeys(self.source_refs)),
             "blockers": list(dict.fromkeys(self.blockers)),
             "warnings": list(dict.fromkeys(self.warnings)),
@@ -125,11 +149,25 @@ class ProposalIntentJournalRecord:
     artifact_hash: str
     dry_run_receipt_id: str
     idempotency_key: str
+    candidate_reference: str = ""
+    candidate_provenance_hash: str = ""
+    candidate_structured_order_hash: str = ""
+    account_context_reference: str = ""
+    account_fingerprint_hash: str = ""
+    symbol: str = ""
+    broker_symbol: str = ""
+    order_type: str = ""
+    timeframe_profile: List[str] = field(default_factory=list)
+    operator_action: str = ""
+    confirmation_nonce: str = ""
+    confirmation_expires_at: str = ""
+    confirmation_binding_hash: str = ""
     blockers: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     source_refs: List[str] = field(default_factory=list)
     payload_size_chars: int = 0
     metadata_redacted: Dict[str, Any] = field(default_factory=dict)
+    record_hash: str = ""
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -146,11 +184,25 @@ class ProposalIntentJournalRecord:
             "artifact_hash": self.artifact_hash,
             "dry_run_receipt_id": self.dry_run_receipt_id,
             "idempotency_key": self.idempotency_key,
+            "candidate_reference": self.candidate_reference,
+            "candidate_provenance_hash": self.candidate_provenance_hash,
+            "candidate_structured_order_hash": self.candidate_structured_order_hash,
+            "account_context_reference": self.account_context_reference,
+            "account_fingerprint_hash": self.account_fingerprint_hash,
+            "symbol": self.symbol,
+            "broker_symbol": self.broker_symbol,
+            "order_type": self.order_type,
+            "timeframe_profile": list(dict.fromkeys(self.timeframe_profile)),
+            "operator_action": self.operator_action,
+            "confirmation_nonce": self.confirmation_nonce,
+            "confirmation_expires_at": self.confirmation_expires_at,
+            "confirmation_binding_hash": self.confirmation_binding_hash,
             "blockers": list(dict.fromkeys(self.blockers)),
             "warnings": list(dict.fromkeys(self.warnings)),
             "source_refs": list(dict.fromkeys(self.source_refs)),
             "payload_size_chars": int(self.payload_size_chars),
             "metadata_redacted": dict(self.metadata_redacted),
+            "record_hash": self.record_hash,
         }
 
 

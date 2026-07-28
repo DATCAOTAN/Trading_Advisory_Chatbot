@@ -2365,3 +2365,18 @@ The first incomplete post-reasoning milestone is now verified deterministically 
 - Verification: 95 focused offline/operator tests passed; the combined proposal, candidate, policy, review, operator, lifecycle, reconciliation, hermetic, and offline suites passed 327 tests. Full regression passed with 3,080 tests and 156 subtests in 220.78 seconds with 3 unchanged dependency warnings.
 - Compile and diff checks passed. External LLM requests, live candidate generation, MT5 calls, export, submission, `order_send`, and broker mutation were zero.
 - Next critical milestone: verify the existing operator review and human-confirmation lifecycle from an authoritative persisted offline actionable candidate, without enabling execution or creating a parallel acceptance path.
+
+# 50. OPERATOR REVIEW AND HUMAN CONFIRMATION LIFECYCLE
+
+The authoritative persisted offline MARKET and PENDING candidates now continue through one shared non-executable operator review and confirmation lifecycle.
+
+- `AutonomousDecisionJournal` retains a protected candidate payload inside the existing integrity-checked JSONL record and keeps `records()` redacted. Confirmation reloads by candidate reference and never trusts the editable Streamlit candidate object.
+- The existing Review Card now exposes candidate identity, canonical/broker symbols, MARKET or pending price semantics, protection, volume, method summary, reason codes, market reference, timeframe profile, expiry, redacted account binding, integrity status, and the unchanged non-executable state.
+- `HumanProposalConfirmationService` now handles explicit `CONFIRM` and `REJECT` actions using the existing `HumanConfirmedProposalIntent`, `ProposalIntentJournalRecord`, policy, validator, and journal store. No second approval schema, repository, or UI flow was added.
+- A valid confirmation binds the candidate reference, provenance hash, structured-order hash, all proposal/source references, protected account context, fingerprint hash, canonical/broker symbols, order type, timeframe profile, phrase, nonce, confirmation time, expiry, and disabled permission state.
+- Candidate tampering, switched references, wrong account context/fingerprint, stale candidate/account/confirmation, invalid phrase, modified source bindings, and corrupt or partial journals fail closed before a confirmation artifact is persisted.
+- Candidate-level journal idempotency permits one authoritative confirm or reject transition. Double-clicks and reruns return the existing record without adding another artifact; Streamlit session state stores only the safe outcome summary.
+- Confirmed candidates remain dry-run-only and non-executable. Rejection creates no confirmation binding hash. No execution contract, export artifact, submission, reconciliation mutation, bridge call, runtime `order_send`, or broker mutation is created.
+- Verification: 24 focused lifecycle tests and 98 focused Review Card/confirmation tests passed; full regression passed with 3,105 tests and 156 subtests in 175.47 seconds with 3 unchanged dependency warnings.
+- External LLM, MT5, live market data, live Streamlit generation, export, submission, controlled-submit, runtime `order_send`, and broker mutation counts were all zero.
+- Verification level: `FULL_REGRESSION_PASS`. Next critical milestone: `APPROVAL INTEGRITY + FINAL VALIDATION + PRE-SUBMIT GATE`, as a separate task with execution still disabled by default.

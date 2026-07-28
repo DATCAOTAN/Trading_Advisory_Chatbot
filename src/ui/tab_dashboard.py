@@ -13,6 +13,7 @@ from src.config import Config
 
 import json
 import secrets
+from datetime import datetime, timezone
 import streamlit as st
 from src.config import Config
 from src.services.trading.calendar import CalendarContextBuilder
@@ -77,6 +78,13 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.pending_artifact
     PendingArtifactExportError,
     write_pending_candidate_handoff,
 )
+from src.services.trading.execution.mt5_live_adapter_pre_submit.adapter import (
+    MT5LiveAdapterDisabled,
+)
+from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_artifact_capture import (
+    ProtectedAccountContextCapture,
+)
+from src.services.trading.decision.autonomous_orchestrator import AutonomousDecisionJournal
 from src.services.trading.market.live_feature_service import LiveFeatureService
 from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBundleBuilder
 from src.services.trading.market.regime_detector import MarketRegimeDetector
@@ -89,9 +97,11 @@ from src.services.trading.proposal import (
     ProposalIntentJournalStore,
 )
 from src.ui.autonomous_candidate_review import (
+    OperatorCandidateReviewController,
     get_autonomous_decision_run_result,
     clear_autonomous_decision_run_result,
     render_autonomous_candidate_review_card,
+    render_autonomous_candidate_confirmation_controls,
 )
 from src.ui.operator_candidate_generation import (
     OperatorCandidateGenerationController,
@@ -297,7 +307,31 @@ def _render_autonomous_decision_review_card(orchestrator):
     candidate = run_result.candidate if run_result else None
     validation = run_result.validation if run_result else None
     render_autonomous_candidate_review_card(candidate, validation)
+    if candidate is not None:
+        render_autonomous_candidate_confirmation_controls(
+            candidate.candidate_reference,
+            _operator_candidate_review_controller(),
+        )
     _render_pending_candidate_handoff(run_result)
+
+
+def _operator_candidate_review_controller() -> OperatorCandidateReviewController:
+    candidate_journal = AutonomousDecisionJournal(
+        Config.TRADING_AUTONOMOUS_DECISION_JOURNAL_PATH,
+        Config.TRADING_AUTONOMOUS_DECISION_MAX_READ_RECORDS,
+    )
+
+    def account_context_provider():
+        payload = MT5LiveAdapterDisabled().capture_account_context()
+        payload["status"] = "OK"
+        capture = ProtectedAccountContextCapture.from_read_only_payload(
+            payload, datetime.now(timezone.utc)
+        )
+        return capture, capture.account_context_fingerprint
+
+    return OperatorCandidateReviewController(
+        HumanProposalConfirmationService(), candidate_journal, account_context_provider
+    )
 
 
 def _render_pending_candidate_handoff(run_result):

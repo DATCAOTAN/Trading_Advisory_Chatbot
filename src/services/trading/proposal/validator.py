@@ -22,7 +22,7 @@ class ProposalBoundaryValidator:
         payload = intent.as_dict()
         if not intent.source_review_artifact_id:
             issues.append("source_review_artifact_id_required")
-        if not intent.source_dry_run_receipt_id:
+        if not intent.candidate_reference and not intent.source_dry_run_receipt_id:
             issues.append("source_dry_run_receipt_id_required")
         if not intent.source_refs:
             issues.append("source_refs_required")
@@ -32,6 +32,10 @@ class ProposalBoundaryValidator:
             issues.append("executable_must_be_false")
         if intent.proposal_workflow_allowed and intent.executable:
             issues.append("proposal_workflow_must_not_imply_live_execution")
+        if intent.candidate_reference:
+            issues.extend(_candidate_binding_issues(intent))
+            payload = dict(payload)
+            payload.pop("order_type", None)
         issues.extend(_forbidden_payload_issues(payload))
         serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         if len(serialized) > self.max_payload_chars:
@@ -43,7 +47,7 @@ class ProposalBoundaryValidator:
         payload = record.as_dict()
         if not record.intent_id:
             issues.append("intent_id_required")
-        if not record.dry_run_receipt_id:
+        if not record.candidate_reference and not record.dry_run_receipt_id:
             issues.append("dry_run_receipt_id_required")
         if not record.source_refs:
             issues.append("source_refs_required")
@@ -51,6 +55,10 @@ class ProposalBoundaryValidator:
             issues.append("dry_run_only_must_be_true")
         if record.executable is not False:
             issues.append("executable_must_be_false")
+        if record.candidate_reference:
+            issues.extend(_candidate_record_issues(record))
+            payload = dict(payload)
+            payload.pop("order_type", None)
         issues.extend(_forbidden_payload_issues(payload))
         try:
             serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
@@ -60,6 +68,54 @@ class ProposalBoundaryValidator:
         if len(serialized) > self.max_payload_chars:
             issues.append("payload_too_large")
         return ProposalBoundaryValidationResult(passed=not issues, issues=list(dict.fromkeys(issues)))
+
+
+def _candidate_binding_issues(intent: HumanConfirmedProposalIntent) -> list[str]:
+    issues: list[str] = []
+    for name in (
+        "candidate_reference",
+        "candidate_provenance_hash",
+        "candidate_structured_order_hash",
+        "account_context_reference",
+        "account_fingerprint_hash",
+        "order_type",
+        "operator_action",
+        "confirmation_nonce",
+        "confirmation_expires_at",
+    ):
+        if not str(getattr(intent, name) or "").strip():
+            issues.append(name + "_required")
+    if not intent.timeframe_profile:
+        issues.append("timeframe_profile_required")
+    if intent.operator_action == "CONFIRM" and not intent.confirmation_binding_hash:
+        issues.append("confirmation_binding_hash_required")
+    if intent.operator_action not in {"CONFIRM", "REJECT"}:
+        issues.append("operator_action_invalid")
+    return issues
+
+
+def _candidate_record_issues(record: ProposalIntentJournalRecord) -> list[str]:
+    issues: list[str] = []
+    for name in (
+        "candidate_provenance_hash",
+        "candidate_structured_order_hash",
+        "account_context_reference",
+        "account_fingerprint_hash",
+        "symbol",
+        "broker_symbol",
+        "order_type",
+        "operator_action",
+        "confirmation_nonce",
+        "confirmation_expires_at",
+        "record_hash",
+    ):
+        if not str(getattr(record, name) or "").strip():
+            issues.append(name + "_required")
+    if not record.timeframe_profile:
+        issues.append("timeframe_profile_required")
+    if record.operator_action == "CONFIRM" and not record.confirmation_binding_hash:
+        issues.append("confirmation_binding_hash_required")
+    return issues
 
 
 def _forbidden_payload_issues(payload: dict[str, Any]) -> list[str]:

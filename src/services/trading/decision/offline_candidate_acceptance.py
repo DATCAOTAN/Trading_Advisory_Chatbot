@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,6 +16,7 @@ from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionConfig,
     AutonomousDecisionInputs,
     AutonomousDecisionOrchestrator,
+    autonomous_account_context_reference,
 )
 from src.services.trading.decision.autonomous_proposal_provider import (
     AutonomousOrderProposalProvider,
@@ -160,11 +162,13 @@ def load_offline_scenario(scenario_or_path: str | Path) -> tuple[OfflineScenario
     return SCENARIOS[payload["scenario"]], _timestamp(payload["reference_timestamp"])
 
 
-def run_offline_candidate_acceptance(scenario_or_path: str | Path) -> dict[str, Any]:
+def run_offline_candidate_acceptance(
+    scenario_or_path: str | Path, *, journal_path: str | Path | None = None
+) -> dict[str, Any]:
     previous = os.environ.get("TRADING_OFFLINE_ACCEPTANCE")
     os.environ["TRADING_OFFLINE_ACCEPTANCE"] = "true"
     try:
-        return _run_offline_candidate_acceptance(scenario_or_path)
+        return _run_offline_candidate_acceptance(scenario_or_path, journal_path=journal_path)
     finally:
         if previous is None:
             os.environ.pop("TRADING_OFFLINE_ACCEPTANCE", None)
@@ -172,7 +176,9 @@ def run_offline_candidate_acceptance(scenario_or_path: str | Path) -> dict[str, 
             os.environ["TRADING_OFFLINE_ACCEPTANCE"] = previous
 
 
-def _run_offline_candidate_acceptance(scenario_or_path: str | Path) -> dict[str, Any]:
+def _run_offline_candidate_acceptance(
+    scenario_or_path: str | Path, *, journal_path: str | Path | None = None
+) -> dict[str, Any]:
     _require_execution_disabled()
     scenario, reference_time = load_offline_scenario(scenario_or_path)
     feature_result = _feature_result(scenario, reference_time)
@@ -208,12 +214,22 @@ def _run_offline_candidate_acceptance(scenario_or_path: str | Path) -> dict[str,
             order_proposal=proposal.order_proposal,
             order_market_snapshot=proposal.order_market_snapshot,
         )
-        with tempfile.TemporaryDirectory(prefix="offline-candidate-") as temporary:
+        context = (
+            nullcontext("")
+            if journal_path is not None
+            else tempfile.TemporaryDirectory(prefix="offline-candidate-")
+        )
+        with context as temporary:
+            selected_journal_path = (
+                Path(journal_path)
+                if journal_path is not None
+                else Path(temporary) / "offline-decisions.jsonl"
+            )
             orchestrator = AutonomousDecisionOrchestrator(
                 AutonomousDecisionConfig(
                     ttl_seconds=300,
                     input_max_age_seconds=300,
-                    journal_path=str(Path(temporary) / "offline-decisions.jsonl"),
+                    journal_path=str(selected_journal_path),
                 )
             )
             run = orchestrator.run_once(inputs, now=reference_time)
@@ -460,6 +476,8 @@ def _decision_inputs(
         reconciliation_result=reconciliation,
         requested_intent="OPEN_POSITION",
         exposure_effect="NONE",
+        timeframe_profile=("M15", "H1", "H4"),
+        account_context_reference=autonomous_account_context_reference("c" * 64),
     )
 
 
@@ -518,7 +536,7 @@ def _feature_result(
             tick_value=1.0,
             contract_size=100.0,
         ),
-        account_id_hash=prefix + "account-context",
+        account_id_hash="c" * 64,
         source=OFFLINE_FIXTURE_MODE,
         data_quality_summary="COMPLETE",
         provider_health=ProviderHealth(

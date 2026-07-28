@@ -162,6 +162,8 @@ class AutonomousDecisionInputs:
     exposure_effect: str = "NONE"
     order_proposal: AutonomousOrderIntentProposal | None = None
     order_market_snapshot: AutonomousOrderMarketSnapshot | None = None
+    timeframe_profile: tuple[str, ...] = ()
+    account_context_reference: str = ""
 
 
 @dataclass(frozen=True)
@@ -216,6 +218,9 @@ class AutonomousDecisionCandidate:
     order_sent: bool = False
     metadata_redacted: bool = True
     broker_symbol_reference: str = ""
+    timeframe_profile: tuple[str, ...] = ()
+    method_selection_summary: str = field(default="", repr=False)
+    account_context_reference: str = ""
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -275,10 +280,14 @@ class AutonomousDecisionCandidate:
         """Return the bounded local projection used for human proposal review."""
         return {
             "schema_version": self.schema_version,
+            "candidate_reference": self.candidate_reference,
             "generated_at": self.generated_at,
             "expires_at": self.expires_at,
             "symbol": self.symbol_reference,
             "broker_symbol": self.broker_symbol_reference,
+            "timeframe_profile": list(self.timeframe_profile),
+            "method_selection_summary": self.method_selection_summary,
+            "account_context_reference": self.account_context_reference,
             "intent": self.intent,
             "side": self.side,
             "entry_intent": self.entry_intent,
@@ -305,6 +314,13 @@ class AutonomousDecisionCandidate:
             "order_sent": False,
         }
 
+    def to_protected_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for item in fields(self):
+            value = getattr(self, item.name)
+            payload[item.name] = list(value) if isinstance(value, tuple) else value
+        return payload
+
 
 def autonomous_candidate_has_offline_provenance(
     candidate: AutonomousDecisionCandidate,
@@ -313,6 +329,11 @@ def autonomous_candidate_has_offline_provenance(
         candidate.operating_mode == OFFLINE_FIXTURE_MODE
         or candidate.market_snapshot_reference.startswith(OFFLINE_FIXTURE_REFERENCE_PREFIX)
     )
+
+
+def autonomous_account_context_reference(account_id_hash: str) -> str:
+    value = str(account_id_hash or "").strip()
+    return "account_context_" + _sha256(value)[:24] if value else ""
 
 
 @dataclass(frozen=True)
@@ -381,6 +402,9 @@ class AutonomousDecisionJournal:
         self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
 
     def records(self) -> list[dict[str, Any]]:
+        return self._records(include_protected=False)
+
+    def _records(self, *, include_protected: bool) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
         try:
@@ -396,7 +420,11 @@ class AutonomousDecisionJournal:
                 row = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise AutonomousDecisionJournalError("DECISION_JOURNAL_CORRUPT") from exc
-            if not isinstance(row, dict) or set(row) != self._required_keys:
+            if (
+                not isinstance(row, dict)
+                or not self._required_keys.issubset(row)
+                or set(row).difference(self._required_keys) - {"protected_candidate"}
+            ):
                 raise AutonomousDecisionJournalError("DECISION_JOURNAL_CORRUPT")
             if not _journal_row_valid(row):
                 raise AutonomousDecisionJournalError("DECISION_JOURNAL_CORRUPT")
@@ -405,8 +433,39 @@ class AutonomousDecisionJournal:
             if key in seen and not hmac.compare_digest(seen[key], provenance):
                 raise AutonomousDecisionJournalError("DECISION_JOURNAL_CONFLICT")
             seen[key] = provenance
+            if not include_protected:
+                row = dict(row)
+                row.pop("protected_candidate", None)
             records.append(row)
         return records[-self.max_read_records :]
+
+    def load_candidate(self, candidate_reference: str) -> AutonomousDecisionCandidate | None:
+        matches = [
+            row
+            for row in self._records(include_protected=True)
+            if hmac.compare_digest(
+                str(row.get("candidate_reference", "")), str(candidate_reference or "")
+            )
+        ]
+        if not matches:
+            return None
+        payload = matches[-1].get("protected_candidate")
+        if not isinstance(payload, Mapping):
+            return None
+        try:
+            candidate = _candidate_from_protected_dict(payload)
+        except (TypeError, ValueError) as exc:
+            raise AutonomousDecisionJournalError("DECISION_JOURNAL_CORRUPT") from exc
+        row = matches[-1]
+        if not (
+            hmac.compare_digest(candidate.candidate_reference, str(row["candidate_reference"]))
+            and hmac.compare_digest(candidate.provenance_hash, str(row["provenance_hash"]))
+            and hmac.compare_digest(
+                candidate.decision_idempotency_key, str(row["decision_idempotency_key"])
+            )
+        ):
+            raise AutonomousDecisionJournalError("DECISION_JOURNAL_CONFLICT")
+        return candidate
 
     def append_idempotent(self, candidate: AutonomousDecisionCandidate) -> bool:
         with self._exclusive_lock():
@@ -551,6 +610,9 @@ class AutonomousDecisionOrchestrator:
             ],
             market_recommendation=structured_order["market_recommendation"],
             structured_order_hash=structured_order["structured_order_hash"],
+            timeframe_profile=tuple(inputs.timeframe_profile),
+            method_selection_summary=str(inputs.method_selection.reasoning_summary or "")[:500],
+            account_context_reference=_safe_or_empty(inputs.account_context_reference),
         )
 
     def validate_candidate(
@@ -781,6 +843,8 @@ def autonomous_inputs_from_mapping(payload: Mapping[str, Any]) -> AutonomousDeci
         exposure_effect=str(payload.get("exposure_effect", "NONE")),
         order_proposal=proposal,
         order_market_snapshot=snapshot,
+        timeframe_profile=tuple(str(item) for item in payload.get("timeframe_profile", ())),
+        account_context_reference=str(payload.get("account_context_reference", "")),
     )
 
 
@@ -1509,6 +1573,9 @@ def _canonical_provenance(
         "operating_mode": inputs.runtime_context.mode,
         "symbol_reference": inputs.runtime_context.symbol,
         "broker_symbol_reference": inputs.runtime_context.broker_symbol,
+        "timeframe_profile": list(inputs.timeframe_profile),
+        "method_selection_summary": str(inputs.method_selection.reasoning_summary or "")[:500],
+        "account_context_reference": inputs.account_context_reference,
         "requested_intent": inputs.requested_intent.strip().upper(),
         "direction": inputs.direction.strip().upper(),
         "exposure_effect": inputs.exposure_effect.strip().upper(),
@@ -1638,6 +1705,7 @@ def _journal_row(candidate: AutonomousDecisionCandidate) -> dict[str, Any]:
         "executable": False,
         "order_sent": False,
         "metadata_redacted": True,
+        "protected_candidate": candidate.to_protected_dict(),
     }
     row["record_hash"] = _sha256(_canonical_json(row))
     return row
@@ -1670,6 +1738,25 @@ def _journal_row_valid(row: Mapping[str, Any]) -> bool:
     return _valid_hash(actual_hash) and hmac.compare_digest(
         actual_hash, _sha256(_canonical_json(expected))
     )
+
+
+def _candidate_from_protected_dict(payload: Mapping[str, Any]) -> AutonomousDecisionCandidate:
+    allowed = {item.name for item in fields(AutonomousDecisionCandidate)}
+    if set(payload) != allowed:
+        raise ValueError("candidate payload fields do not match")
+    values = dict(payload)
+    for name in (
+        "proposed_semantic_parameter_references",
+        "knowledge_evidence_references",
+        "blocked_reason_codes",
+        "structured_reasoning",
+        "timeframe_profile",
+    ):
+        raw = values.get(name)
+        if not isinstance(raw, (list, tuple)):
+            raise ValueError("candidate tuple field is invalid")
+        values[name] = tuple(str(item) for item in raw)
+    return AutonomousDecisionCandidate(**values)
 
 
 def _construct(cls, payload: Mapping[str, Any]):

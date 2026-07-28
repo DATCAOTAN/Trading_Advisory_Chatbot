@@ -180,8 +180,6 @@ def test_operator_projection_hides_sensitive_and_protected_values(tmp_path):
         "risk-policy-fixture",
         value.provenance_hash,
         value.structured_order_hash,
-        value.candidate_reference,
-        value.market_snapshot_reference,
         value.market_snapshot_provenance_hash,
         "account_login",
         "ticket_id",
@@ -191,6 +189,8 @@ def test_operator_projection_hides_sensitive_and_protected_values(tmp_path):
         "execution_token",
     ):
         assert forbidden not in payload
+    assert value.candidate_reference in payload
+    assert value.market_snapshot_reference in payload
 
 
 def test_operator_projection_redacts_sensitive_reasoning_text(tmp_path):
@@ -224,10 +224,8 @@ def test_public_serialization_remains_unchanged_and_redacted(tmp_path):
         "risk-reviewed",
     ]
     for forbidden_key in (
-        "candidate_reference",
         "provenance_hash",
         "structured_order_hash",
-        "market_snapshot_reference",
         "market_snapshot_provenance_hash",
         "decision_idempotency_key",
         "account_login",
@@ -238,6 +236,7 @@ def test_public_serialization_remains_unchanged_and_redacted(tmp_path):
         "execution_token",
     ):
         assert forbidden_key not in review
+    assert review["candidate_reference"] == value.candidate_reference
 
 
 def test_runtime_owner_preserves_typed_result_without_refresh_side_effects(
@@ -309,15 +308,12 @@ def test_unavailable_candidate_renders_clear_empty_state(monkeypatch):
     assert any("No autonomous decision candidate" in message for message in fake.infos)
 
 
-def test_review_component_has_no_mutation_or_generation_path():
-    paths = [
-        Path("src/services/trading/decision/candidate_review.py"),
-        Path("src/ui/autonomous_candidate_review.py"),
-    ]
-    source = "\n".join(path.read_text(encoding="utf-8") for path in paths)
+def test_review_projection_has_no_mutation_or_generation_path():
+    source = Path("src/services/trading/decision/candidate_review.py").read_text(
+        encoding="utf-8"
+    )
     lowered = source.lower()
     for forbidden in (
-        "st.button",
         "autonomousdecisionorchestrator",
         "append_idempotent",
         "controlled" + "-submit",
@@ -328,6 +324,14 @@ def test_review_component_has_no_mutation_or_generation_path():
     ):
         assert forbidden not in lowered
     assert "candidate.to_public_dict()" in source
+
+
+def test_review_ui_only_exposes_explicit_non_executable_actions():
+    source = Path("src/ui/autonomous_candidate_review.py").read_text(encoding="utf-8")
+    assert "Confirm Candidate (Non-Executable)" in source
+    assert "Reject Candidate" in source
+    for forbidden in ("controlled-submit", "controlled-manage", ".order" + "_send("):
+        assert forbidden not in source
 
 
 class FakeColumn:

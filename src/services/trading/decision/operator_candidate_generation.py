@@ -11,7 +11,10 @@ from src.services.trading.decision.autonomous_proposal_provider import (
     valid_autonomous_order_proposal_bindings,
 )
 from src.services.trading.calendar import CalendarContextBuilder
-from src.services.trading.decision.autonomous_orchestrator import AutonomousDecisionInputs
+from src.services.trading.decision.autonomous_orchestrator import (
+    AutonomousDecisionInputs,
+    autonomous_account_context_reference,
+)
 from src.services.trading.decision.policy_engine import TradeDecisionPolicyEngine
 from src.services.trading.execution.mt5_live_adapter_pre_submit.lifecycle_supervisor import (
     MT5LifecycleState,
@@ -144,6 +147,14 @@ class AuthoritativeAutonomousInputAssembler:
             score_report=score,
             risk_result=risk,
             lifecycle_status=lifecycle_status,
+            timeframe_profile=tuple(
+                getattr(feature_result.feature_snapshot, "timeframes", ())
+                or timeframes
+                or Config.MARKET_DEFAULT_TIMEFRAMES
+            ),
+            account_context_reference=autonomous_account_context_reference(
+                feature_result.bundle.account_id_hash
+            ),
         )
         handoff_evaluated_at = (
             _utc(now) if now is not None else datetime.now(timezone.utc)
@@ -175,6 +186,8 @@ class AuthoritativeAutonomousInputAssembler:
             semantic_parameter_references=proposal_result.semantic_parameter_references,
             order_proposal=proposal_result.order_proposal,
             order_market_snapshot=proposal_result.order_market_snapshot,
+            timeframe_profile=inputs.timeframe_profile,
+            account_context_reference=inputs.account_context_reference,
         )
 
 
