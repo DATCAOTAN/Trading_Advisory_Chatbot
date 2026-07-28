@@ -923,3 +923,30 @@ Commit: this commit
 
 - Fresh structured inputs remain valid after normal reasoning latency; genuinely stale inputs and mismatched proposal snapshot bindings still fail closed.
 - Next: separately authorize one fresh BTCUSD acceptance attempt. No live acceptance was run in this maintenance task.
+
+---
+
+### Post-release Maintenance - Offline Actionable Candidate Lifecycle
+
+Date: 2026-07-28
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Extended the existing deterministic harness through authoritative proposal validation, candidate admission, journal persistence, integrity/provenance checks, and idempotent duplicate rejection.
+- Added valid natural no-proposal, MARKET, and PENDING outcomes plus price, volume, freshness, source, account, lifecycle, malformed JSON, and schema-invalid failures.
+- Classified valid `NO_PROPOSAL` as operator `NO_ACTION` before orchestration; no candidate or journal record is created.
+- Preserved offline provenance, non-executable candidates, protected-handoff rejection, and every disabled execution boundary.
+
+#### Verification
+
+- Focused offline/operator tests: 95 passed.
+- Combined neighboring suites: 327 passed with 2 dependency warnings.
+- Full regression: 3,080 passed and 156 subtests passed in 220.78 seconds with 3 dependency warnings.
+- External LLM, MT5, export, submission, reconciliation mutation, `order_send`, and broker mutation: 0.
+
+#### Current state / next step
+
+- Offline actionable candidate lifecycle: verified complete through authoritative persistence and duplicate-safe admission.
+- Next: offline operator review and human-confirmation lifecycle acceptance using the persisted actionable candidate; execution remains disabled.

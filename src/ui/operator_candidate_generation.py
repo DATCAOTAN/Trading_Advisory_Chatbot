@@ -90,6 +90,10 @@ class OperatorCandidateGenerationController:
                 stored=True,
             )
         except OperatorCandidateInputError as exc:
+            if exc.blockers == ("STRUCTURED_PROPOSAL_NOT_AVAILABLE",):
+                return OperatorCandidateGenerationOutcome(
+                    "NO_ACTION", "STRUCTURED_PROPOSAL_NOT_AVAILABLE"
+                )
             return OperatorCandidateGenerationOutcome("BLOCKED", str(exc))
         except Exception:
             return OperatorCandidateGenerationOutcome(

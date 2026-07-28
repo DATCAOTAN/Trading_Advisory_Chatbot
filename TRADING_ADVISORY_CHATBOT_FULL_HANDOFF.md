@@ -2351,3 +2351,17 @@ Post-release maintenance now validates freshly assembled structured reasoning ar
 - Verification: 177 focused/neighboring tests passed; full regression passed with 3,055 tests and 156 subtests. Three dependency warnings were unchanged.
 - MT5, live market data, Streamlit generation, external LLM, candidate generation, retries, fallback, export, submission, controlled-submit, runtime `order_send`, and broker mutation were zero during diagnosis and verification.
 - Next: separately authorize one fresh BTCUSD acceptance attempt. Do not retry the previous attempt or run acceptance as part of this maintenance fix.
+
+# 49. OFFLINE ACTIONABLE CANDIDATE LIFECYCLE ACCEPTANCE
+
+The first incomplete post-reasoning milestone is now verified deterministically without another live provider or market attempt.
+
+- The existing offline harness now covers natural `NO_PROPOSAL`, valid MARKET and PENDING proposals, invalid market-price relation, invalid volume, stale evidence, source-reference mismatch, account-context mismatch, lifecycle discrepancy, malformed JSON, and schema-invalid output.
+- Valid actionable fixtures use complete broker metadata and a volume aligned with minimum, maximum, and step constraints. They pass the existing proposal parser, source binding, orchestrator validation, structured-order hash, and provenance hash checks.
+- Candidate admission uses the existing `AutonomousDecisionJournal`. MARKET and PENDING each append exactly one valid record; a second admission of the same candidate is rejected idempotently without adding another record.
+- Natural `NO_PROPOSAL` is now exposed by the operator controller as `NO_ACTION`, stops before the decision orchestrator, and creates no candidate or journal record.
+- Every invalid fixture stops at its authoritative blocker before candidate persistence. No approval, export, submission, reconciliation mutation, bridge mutation, runtime `order_send`, or broker mutation occurs.
+- Offline candidates remain explicitly non-executable and retain offline provenance; the existing protected-handoff rejection remains unchanged.
+- Verification: 95 focused offline/operator tests passed; the combined proposal, candidate, policy, review, operator, lifecycle, reconciliation, hermetic, and offline suites passed 327 tests. Full regression passed with 3,080 tests and 156 subtests in 220.78 seconds with 3 unchanged dependency warnings.
+- Compile and diff checks passed. External LLM requests, live candidate generation, MT5 calls, export, submission, `order_send`, and broker mutation were zero.
+- Next critical milestone: verify the existing operator review and human-confirmation lifecycle from an authoritative persisted offline actionable candidate, without enabling execution or creating a parallel acceptance path.

@@ -34,14 +34,19 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_export
 @pytest.mark.parametrize(
     ("scenario", "intent", "eligibility", "proposal_calls", "generation_count"),
     [
-        ("fresh_no_action", "NO_ACTION", "NOT_ELIGIBLE", 1, 1),
+        ("fresh_no_action", "NO_PROPOSAL", "NOT_ELIGIBLE", 1, 0),
         ("fresh_human_review", "REQUIRE_HUMAN_REVIEW", "HUMAN_REVIEW_REQUIRED", 1, 1),
         ("fresh_market", "MARKET", "ELIGIBLE_CANDIDATE", 1, 1),
         ("fresh_pending", "PENDING", "ELIGIBLE_CANDIDATE", 1, 1),
+        ("invalid_price_relation", "BLOCKED", "NOT_ELIGIBLE", 1, 0),
+        ("invalid_volume", "BLOCKED", "NOT_ELIGIBLE", 1, 0),
         ("stale_market", "BLOCKED", "NOT_ELIGIBLE", 0, 0),
+        ("source_reference_mismatch", "BLOCKED", "NOT_ELIGIBLE", 0, 0),
         ("account_context_mismatch", "BLOCKED", "NOT_ELIGIBLE", 0, 0),
         ("lifecycle_discrepancy", "BLOCKED", "NOT_ELIGIBLE", 0, 0),
+        ("reconciliation_discrepancy", "BLOCKED", "NOT_ELIGIBLE", 0, 0),
         ("malformed_proposal", "BLOCKED", "NOT_ELIGIBLE", 1, 0),
+        ("schema_invalid_proposal", "BLOCKED", "NOT_ELIGIBLE", 1, 0),
     ],
 )
 def test_natural_scenarios_are_deterministic_and_non_executable(
@@ -68,6 +73,53 @@ def test_same_fixture_and_clock_produce_identical_output():
     assert first == second
 
 
+@pytest.mark.parametrize("scenario", ["fresh_market", "fresh_pending"])
+def test_actionable_candidate_is_persisted_once_with_stable_integrity(scenario):
+    result = offline.run_offline_candidate_acceptance(scenario)
+    assert result["candidate_admission_count"] == 1
+    assert result["candidate_persistence_count"] == 1
+    assert result["candidate_integrity_result"] == "VALID"
+    assert result["candidate_provenance_result"] == "VALID"
+    assert result["duplicate_admission_result"] == "REJECTED_IDEMPOTENTLY"
+
+
+@pytest.mark.parametrize(
+    ("scenario", "action", "order_type"),
+    [("fresh_market", "MARKET", "BUY"), ("fresh_pending", "PENDING", "BUY_LIMIT")],
+)
+def test_actionable_candidate_uses_valid_volume_and_broker_metadata(
+    monkeypatch, scenario, action, order_type
+):
+    captured = []
+    original = AutonomousDecisionOrchestrator.run_once
+
+    def spy(self, *args, **kwargs):
+        run = original(self, *args, **kwargs)
+        captured.append(run)
+        return run
+
+    monkeypatch.setattr(AutonomousDecisionOrchestrator, "run_once", spy)
+    offline.run_offline_candidate_acceptance(scenario)
+    run = captured[0]
+    assert run.validation.valid is True
+    assert run.candidate.action == action
+    assert run.candidate.order_type == order_type
+    assert run.candidate.proposed_volume == "0.01"
+    assert run.order_market_snapshot.volume_min == 0.01
+    assert run.order_market_snapshot.volume_max == 10.0
+    assert run.order_market_snapshot.volume_step == 0.01
+    assert run.candidate.structured_order_hash
+    assert run.candidate.provenance_hash
+
+
+def test_no_proposal_is_successful_and_creates_no_candidate():
+    result = offline.run_offline_candidate_acceptance("fresh_no_action")
+    assert result["validation_result"] is True
+    assert result["ordered_blockers"] == []
+    assert result["generation_count"] == 0
+    assert result["candidate_persistence_count"] == 0
+
+
 def test_fixed_clock_drives_generation_expiry_and_freshness():
     result = offline.run_offline_candidate_acceptance("fresh_market")
     assert result["reference_timestamp"] == offline.DEFAULT_REFERENCE_TIME
@@ -80,10 +132,15 @@ def test_fixed_clock_drives_generation_expiry_and_freshness():
 @pytest.mark.parametrize(
     ("scenario", "blockers"),
     [
+        ("invalid_price_relation", ["STRUCTURED_PROPOSAL_MARKET_RELATION_INVALID"]),
+        ("invalid_volume", ["STRUCTURED_PROPOSAL_PROPOSED_VOLUME_INVALID"]),
         ("stale_market", ["MARKET_SNAPSHOT_STALE"]),
+        ("source_reference_mismatch", ["STRUCTURED_RUNTIME_REFERENCE_MISMATCH"]),
         ("account_context_mismatch", ["ACCOUNT_CONTEXT_MISMATCH"]),
-        ("lifecycle_discrepancy", ["RECONCILIATION_UNRESOLVED"]),
+        ("lifecycle_discrepancy", ["LIFECYCLE_CONFLICT"]),
+        ("reconciliation_discrepancy", ["RECONCILIATION_UNRESOLVED"]),
         ("malformed_proposal", ["STRUCTURED_PROPOSAL_OUTPUT_INVALID_JSON"]),
+        ("schema_invalid_proposal", ["STRUCTURED_PROPOSAL_OUTPUT_FIELDS_INVALID"]),
     ],
 )
 def test_blocker_order_is_stable(scenario, blockers):
@@ -103,6 +160,26 @@ def test_malformed_proposal_has_no_retry():
     result = offline.run_offline_candidate_acceptance("malformed_proposal")
     assert result["deterministic_proposal_adapter_invocation_count"] == 1
     assert result["generation_count"] == 0
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "invalid_price_relation",
+        "invalid_volume",
+        "stale_market",
+        "source_reference_mismatch",
+        "account_context_mismatch",
+        "lifecycle_discrepancy",
+        "reconciliation_discrepancy",
+        "malformed_proposal",
+        "schema_invalid_proposal",
+    ],
+)
+def test_invalid_fixture_never_persists_candidate(scenario):
+    result = offline.run_offline_candidate_acceptance(scenario)
+    assert result["candidate_admission_count"] == 0
+    assert result["candidate_persistence_count"] == 0
 
 
 def test_strict_fixture_path_uses_explicit_reference_timestamp(tmp_path):

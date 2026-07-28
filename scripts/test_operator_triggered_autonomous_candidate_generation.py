@@ -641,3 +641,15 @@ def test_provider_result_blockers_stop_before_orchestrator(
     assert outcome.blocker == expected_blocker
     assert assembler.calls == 1
     assert orchestrator.calls == 0
+
+
+def test_no_proposal_is_natural_no_action_before_orchestrator(tmp_path):
+    value, assembler, orchestrator = controller(
+        tmp_path, error="STRUCTURED_PROPOSAL_NOT_AVAILABLE"
+    )
+    outcome = value.generate({}, "request-no-proposal")
+    assert outcome.status == "NO_ACTION"
+    assert outcome.blocker == "STRUCTURED_PROPOSAL_NOT_AVAILABLE"
+    assert outcome.stored is False
+    assert assembler.calls == 1
+    assert orchestrator.calls == 0

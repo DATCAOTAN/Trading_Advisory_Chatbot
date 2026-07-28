@@ -88,23 +88,34 @@ class OfflineScenario:
     name: str
     risk_action: str = "REVIEW_READY"
     order_type: str = "BUY"
+    proposal_status: str = "PROPOSE"
     stale_market: bool = False
     account_context_match: bool = True
     reconciliation_unresolved: bool = False
+    lifecycle_discrepancy: bool = False
+    source_reference_mismatch: bool = False
+    invalid_price_relation: bool = False
+    invalid_volume: bool = False
     malformed_proposal: bool = False
+    schema_invalid_proposal: bool = False
 
 
 SCENARIOS = {
     item.name: item
     for item in (
-        OfflineScenario("fresh_no_action", risk_action="WAIT"),
+        OfflineScenario("fresh_no_action", risk_action="WAIT", proposal_status="NO_PROPOSAL"),
         OfflineScenario("fresh_human_review", risk_action="REQUIRE_HUMAN_REVIEW"),
         OfflineScenario("fresh_market"),
         OfflineScenario("fresh_pending", order_type="BUY_LIMIT"),
+        OfflineScenario("invalid_price_relation", order_type="BUY_LIMIT", invalid_price_relation=True),
+        OfflineScenario("invalid_volume", invalid_volume=True),
         OfflineScenario("stale_market", stale_market=True),
+        OfflineScenario("source_reference_mismatch", source_reference_mismatch=True),
         OfflineScenario("account_context_mismatch", account_context_match=False),
-        OfflineScenario("lifecycle_discrepancy", reconciliation_unresolved=True),
+        OfflineScenario("lifecycle_discrepancy", lifecycle_discrepancy=True),
+        OfflineScenario("reconciliation_discrepancy", reconciliation_unresolved=True),
         OfflineScenario("malformed_proposal", malformed_proposal=True),
+        OfflineScenario("schema_invalid_proposal", schema_invalid_proposal=True),
     )
 }
 
@@ -206,15 +217,30 @@ def _run_offline_candidate_acceptance(scenario_or_path: str | Path) -> dict[str,
                 )
             )
             run = orchestrator.run_once(inputs, now=reference_time)
-        candidate = run.candidate
+            candidate = run.candidate
+            records = orchestrator.journal.records()
+            duplicate_appended = orchestrator.journal.append_idempotent(candidate)
+            records_after_duplicate = orchestrator.journal.records()
+        persisted = (
+            run.journal_appended
+            and len(records) == 1
+            and records[0]["candidate_reference"] == candidate.candidate_reference
+            and records[0]["provenance_hash"] == candidate.provenance_hash
+        )
         if (
-            candidate.operating_mode != OFFLINE_FIXTURE_MODE
+            not run.validation.valid
+            or not run.persistence_safe
+            or not persisted
+            or duplicate_appended
+            or len(records_after_duplicate) != 1
+            or candidate.operating_mode != OFFLINE_FIXTURE_MODE
             or not candidate.market_snapshot_reference.startswith(
                 OFFLINE_FIXTURE_REFERENCE_PREFIX
             )
             or any(
                 (
                     candidate.execution_authority,
+                    candidate.human_confirmation_present,
                     candidate.execution_permission_requested,
                     candidate.live_submission_allowed,
                     candidate.live_execution_allowed,
@@ -228,6 +254,11 @@ def _run_offline_candidate_acceptance(scenario_or_path: str | Path) -> dict[str,
             raise RuntimeError("OFFLINE_PROVENANCE_INVARIANT_FAILED")
         result.update(
             generation_count=1,
+            candidate_admission_count=1,
+            candidate_persistence_count=1,
+            candidate_integrity_result="VALID",
+            candidate_provenance_result="VALID",
+            duplicate_admission_result="REJECTED_IDEMPOTENTLY",
             candidate_reference=candidate.candidate_reference,
             natural_intent=(
                 candidate.action if candidate.intent == "OPEN_POSITION" else candidate.intent
@@ -243,6 +274,16 @@ def _run_offline_candidate_acceptance(scenario_or_path: str | Path) -> dict[str,
         )
     except OperatorCandidateInputError as exc:
         blockers = list(exc.blockers)
+        if blockers == ["STRUCTURED_PROPOSAL_NOT_AVAILABLE"]:
+            result.update(
+                natural_intent="NO_PROPOSAL",
+                eligibility="NOT_ELIGIBLE",
+                validation_result=True,
+                ordered_reason_codes=blockers,
+                ordered_blockers=[],
+            )
+            result["deterministic_proposal_adapter_invocation_count"] = adapter.invocation_count
+            return result
         result.update(
             natural_intent="BLOCKED",
             validation_result=False,
@@ -277,6 +318,11 @@ def _base_report(
         "external_proposal_provider_invocation_count": 0,
         "deterministic_proposal_adapter_invocation_count": 0,
         "generation_count": 0,
+        "candidate_admission_count": 0,
+        "candidate_persistence_count": 0,
+        "candidate_integrity_result": "NOT_CREATED",
+        "candidate_provenance_result": "NOT_CREATED",
+        "duplicate_admission_result": "NOT_APPLICABLE",
         "candidate_reference": "",
         "natural_intent": "BLOCKED",
         "candidate_intent": "",
@@ -356,6 +402,11 @@ def _decision_inputs(
         source_method_selection_id=method.result_id,
         source_refs=[source_ref],
     )
+    if scenario.source_reference_mismatch:
+        score = replace(
+            score,
+            source_method_selection_id=OFFLINE_FIXTURE_REFERENCE_PREFIX + "wrong-method",
+        )
     risk = TradeReadinessDecision(
         decision_id=OFFLINE_FIXTURE_REFERENCE_PREFIX + "risk",
         created_at=created_at,
@@ -379,7 +430,7 @@ def _decision_inputs(
         supervisor_status="HEALTHY",
         last_successful_cycle=created_at,
         lifecycle_state_counts={},
-        discrepancy_count=0,
+        discrepancy_count=1 if scenario.lifecycle_discrepancy else 0,
         bridge_available=True,
         account_context_match=scenario.account_context_match,
         records_inspected=0,
@@ -457,6 +508,15 @@ def _feature_result(
             spread=1.0,
             timestamp=observed_at.isoformat(),
             provider_name=OFFLINE_FIXTURE_MODE,
+            digits=2,
+            point=0.01,
+            tick_size=0.01,
+            minimum_distance_points=10.0,
+            volume_min=0.01,
+            volume_max=10.0,
+            volume_step=0.01,
+            tick_value=1.0,
+            contract_size=100.0,
         ),
         account_id_hash=prefix + "account-context",
         source=OFFLINE_FIXTURE_MODE,
@@ -513,6 +573,23 @@ def _feature_result(
 def _proposal_response(scenario: OfflineScenario) -> str:
     if scenario.malformed_proposal:
         return '{"status":"PROPOSE","order_type":'
+    if scenario.proposal_status == "NO_PROPOSAL":
+        return json.dumps(
+            {
+                "status": "NO_PROPOSAL",
+                "order_type": None,
+                "entry_price": None,
+                "trigger_price": None,
+                "limit_price": None,
+                "stop_loss": None,
+                "take_profit": None,
+                "proposed_volume": None,
+                "reason_codes": ["NO_PROPOSAL"],
+                "blockers": [],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
     payload: dict[str, Any] = {
         "status": "PROPOSE",
         "order_type": scenario.order_type,
@@ -521,12 +598,18 @@ def _proposal_response(scenario: OfflineScenario) -> str:
         "limit_price": None,
         "stop_loss": "99",
         "take_profit": "102",
-        "proposed_volume": None,
+        "proposed_volume": "0" if scenario.invalid_volume else "0.01",
         "reason_codes": ["OFFLINE_METHOD_ALIGNED"],
         "blockers": [],
     }
     if scenario.order_type == "BUY_LIMIT":
-        payload.update(entry_price="99", stop_loss="98", take_profit="103")
+        payload.update(
+            entry_price="102" if scenario.invalid_price_relation else "99",
+            stop_loss="98",
+            take_profit="103",
+        )
+    if scenario.schema_invalid_proposal:
+        payload["unexpected"] = True
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
