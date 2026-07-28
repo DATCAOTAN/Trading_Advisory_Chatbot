@@ -136,6 +136,7 @@ def _record_from_dict(data: dict) -> ProposalIntentJournalRecord:
         timeframe_profile=list(data.get("timeframe_profile", []) or []),
         operator_action=str(data.get("operator_action", "")),
         confirmation_nonce=str(data.get("confirmation_nonce", "")),
+        confirmation_timestamp=str(data.get("confirmation_timestamp", "")),
         confirmation_expires_at=str(data.get("confirmation_expires_at", "")),
         confirmation_binding_hash=str(data.get("confirmation_binding_hash", "")),
         blockers=list(data.get("blockers", []) or []),
@@ -148,6 +149,21 @@ def _record_from_dict(data: dict) -> ProposalIntentJournalRecord:
     if record.candidate_reference and not _record_hash_valid(record):
         raise ValueError("candidate confirmation record hash is invalid")
     return record
+
+
+def load_candidate_confirmation(
+    store: ProposalIntentJournalStore, candidate_reference: str
+) -> ProposalIntentJournalRecord | None:
+    records = store.read_latest(2**31 - 1)
+    if any(item != "proposal_intent_journal_missing" for item in store.warnings):
+        raise RuntimeError("PROPOSAL_INTENT_JOURNAL_CORRUPT")
+    matches = [
+        record
+        for record in records
+        if record.candidate_reference
+        and hmac.compare_digest(record.candidate_reference, str(candidate_reference or ""))
+    ]
+    return matches[-1] if matches else None
 
 
 def proposal_record_hash(record: ProposalIntentJournalRecord) -> str:

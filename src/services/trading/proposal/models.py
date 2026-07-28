@@ -160,6 +160,7 @@ class ProposalIntentJournalRecord:
     timeframe_profile: List[str] = field(default_factory=list)
     operator_action: str = ""
     confirmation_nonce: str = ""
+    confirmation_timestamp: str = ""
     confirmation_expires_at: str = ""
     confirmation_binding_hash: str = ""
     blockers: List[str] = field(default_factory=list)
@@ -195,6 +196,7 @@ class ProposalIntentJournalRecord:
             "timeframe_profile": list(dict.fromkeys(self.timeframe_profile)),
             "operator_action": self.operator_action,
             "confirmation_nonce": self.confirmation_nonce,
+            "confirmation_timestamp": self.confirmation_timestamp,
             "confirmation_expires_at": self.confirmation_expires_at,
             "confirmation_binding_hash": self.confirmation_binding_hash,
             "blockers": list(dict.fromkeys(self.blockers)),

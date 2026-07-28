@@ -21,6 +21,9 @@ AUTONOMOUS_DECISION_RUN_RESULT_SESSION_KEY = "autonomous_decision_run_result"
 AUTONOMOUS_CANDIDATE_REVIEW_OUTCOME_SESSION_KEY = (
     "autonomous_candidate_review_outcome"
 )
+AUTONOMOUS_CANDIDATE_PRE_SUBMIT_OUTCOME_SESSION_KEY = (
+    "autonomous_candidate_pre_submit_outcome"
+)
 
 
 @dataclass(frozen=True)
@@ -32,11 +35,30 @@ class OperatorCandidateReviewOutcome:
     blocker: str = ""
 
 
+@dataclass(frozen=True)
+class OperatorCandidatePreSubmitOutcome:
+    candidate_reference: str
+    status: str
+    final_validation_valid: bool
+    pre_submit_ready: bool
+    journal_record_id: str
+    blocker: str = ""
+
+
 class OperatorCandidateReviewController:
-    def __init__(self, confirmation_service, candidate_journal, account_context_provider):
+    def __init__(
+        self,
+        confirmation_service,
+        candidate_journal,
+        account_context_provider,
+        pre_submit_service=None,
+        pre_submit_evidence_provider=None,
+    ):
         self.confirmation_service = confirmation_service
         self.candidate_journal = candidate_journal
         self.account_context_provider = account_context_provider
+        self.pre_submit_service = pre_submit_service
+        self.pre_submit_evidence_provider = pre_submit_evidence_provider
 
     def act(
         self,
@@ -70,6 +92,49 @@ class OperatorCandidateReviewController:
             blocker=(result.intent.blockers[0] if result.intent.blockers else ""),
         )
         session_state[AUTONOMOUS_CANDIDATE_REVIEW_OUTCOME_SESSION_KEY] = outcome
+        return outcome
+
+    def advance_to_pre_submit(
+        self,
+        session_state: Any,
+        candidate_reference: str,
+        *,
+        now: datetime | None = None,
+    ) -> OperatorCandidatePreSubmitOutcome:
+        if self.pre_submit_service is None or self.pre_submit_evidence_provider is None:
+            outcome = OperatorCandidatePreSubmitOutcome(
+                candidate_reference,
+                "BLOCKED",
+                False,
+                False,
+                "",
+                "PRE_SUBMIT_SERVICE_UNAVAILABLE",
+            )
+        else:
+            evidence = dict(self.pre_submit_evidence_provider(candidate_reference))
+            result = self.pre_submit_service.run(
+                candidate_reference, now=now, **evidence
+            )
+            blockers = (
+                result.final_validation.blockers
+                if result.final_validation is not None
+                else result.approval.blockers
+            )
+            outcome = OperatorCandidatePreSubmitOutcome(
+                candidate_reference=candidate_reference,
+                status=(result.report.status if result.report else "BLOCKED"),
+                final_validation_valid=bool(
+                    result.final_validation and result.final_validation.valid
+                ),
+                pre_submit_ready=bool(result.report and result.report.pre_submit_ready),
+                journal_record_id=(
+                    result.journal_record.journal_record_id
+                    if result.journal_record
+                    else ""
+                ),
+                blocker=(blockers[0] if blockers else ""),
+            )
+        session_state[AUTONOMOUS_CANDIDATE_PRE_SUBMIT_OUTCOME_SESSION_KEY] = outcome
         return outcome
 
 

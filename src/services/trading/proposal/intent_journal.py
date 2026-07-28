@@ -55,6 +55,7 @@ class ProposalIntentJournalService:
             timeframe_profile=list(intent.timeframe_profile),
             operator_action=intent.operator_action,
             confirmation_nonce=intent.confirmation_nonce,
+            confirmation_timestamp=intent.created_at,
             confirmation_expires_at=intent.confirmation_expires_at,
             confirmation_binding_hash=intent.confirmation_binding_hash,
             blockers=list(intent.blockers),

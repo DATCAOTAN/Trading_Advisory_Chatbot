@@ -5,7 +5,7 @@ import hmac
 import json
 import os
 import threading
-from dataclasses import dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
@@ -423,7 +423,12 @@ class AutonomousDecisionJournal:
             if (
                 not isinstance(row, dict)
                 or not self._required_keys.issubset(row)
-                or set(row).difference(self._required_keys) - {"protected_candidate"}
+                or set(row).difference(self._required_keys)
+                - {
+                    "protected_candidate",
+                    "protected_market_snapshot",
+                    "protected_runtime_evidence",
+                }
             ):
                 raise AutonomousDecisionJournalError("DECISION_JOURNAL_CORRUPT")
             if not _journal_row_valid(row):
@@ -436,6 +441,8 @@ class AutonomousDecisionJournal:
             if not include_protected:
                 row = dict(row)
                 row.pop("protected_candidate", None)
+                row.pop("protected_market_snapshot", None)
+                row.pop("protected_runtime_evidence", None)
             records.append(row)
         return records[-self.max_read_records :]
 
@@ -467,20 +474,72 @@ class AutonomousDecisionJournal:
             raise AutonomousDecisionJournalError("DECISION_JOURNAL_CONFLICT")
         return candidate
 
-    def append_idempotent(self, candidate: AutonomousDecisionCandidate) -> bool:
+    def load_market_snapshot(
+        self, candidate_reference: str
+    ) -> AutonomousOrderMarketSnapshot | None:
+        row = self._protected_row(candidate_reference)
+        payload = row.get("protected_market_snapshot") if row else None
+        if payload is None:
+            return None
+        if not isinstance(payload, Mapping):
+            raise AutonomousDecisionJournalError("DECISION_JOURNAL_CORRUPT")
+        try:
+            return _market_snapshot_from_protected_dict(payload)
+        except (TypeError, ValueError) as exc:
+            raise AutonomousDecisionJournalError("DECISION_JOURNAL_CORRUPT") from exc
+
+    def load_runtime_evidence(self, candidate_reference: str) -> dict[str, Any] | None:
+        row = self._protected_row(candidate_reference)
+        payload = row.get("protected_runtime_evidence") if row else None
+        if payload is None:
+            return None
+        if not isinstance(payload, Mapping):
+            raise AutonomousDecisionJournalError("DECISION_JOURNAL_CORRUPT")
+        return dict(payload)
+
+    def _protected_row(self, candidate_reference: str) -> dict[str, Any] | None:
+        matches = [
+            row
+            for row in self._records(include_protected=True)
+            if hmac.compare_digest(
+                str(row.get("candidate_reference", "")), str(candidate_reference or "")
+            )
+        ]
+        return matches[-1] if matches else None
+
+    def append_idempotent(
+        self,
+        candidate: AutonomousDecisionCandidate,
+        market_snapshot: AutonomousOrderMarketSnapshot | None = None,
+        lifecycle_status: MT5RuntimeSupervisorStatus | None = None,
+        reconciliation_result: MT5ReconciliationReceipt | None = None,
+    ) -> bool:
         with self._exclusive_lock():
-            for row in self.records():
+            protected_row = _journal_row(
+                candidate,
+                market_snapshot=market_snapshot,
+                lifecycle_status=lifecycle_status,
+                reconciliation_result=reconciliation_result,
+            )
+            for row in self._records(include_protected=True):
                 if hmac.compare_digest(
                     str(row["decision_idempotency_key"]), candidate.decision_idempotency_key
                 ):
                     if not hmac.compare_digest(str(row["provenance_hash"]), candidate.provenance_hash):
                         raise AutonomousDecisionJournalError("DECISION_JOURNAL_CONFLICT")
+                    for key in (
+                        "protected_market_snapshot",
+                        "protected_runtime_evidence",
+                    ):
+                        if key in protected_row and row.get(key) != protected_row.get(key):
+                            raise AutonomousDecisionJournalError("DECISION_JOURNAL_CONFLICT")
                     return False
-            row = _journal_row(candidate)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             try:
                 with self.path.open("a", encoding="utf-8") as handle:
-                    handle.write(json.dumps(row, ensure_ascii=True, sort_keys=True) + "\n")
+                    handle.write(
+                        json.dumps(protected_row, ensure_ascii=True, sort_keys=True) + "\n"
+                    )
                     handle.flush()
                     os.fsync(handle.fileno())
             except OSError as exc:
@@ -750,7 +809,15 @@ class AutonomousDecisionOrchestrator:
         appended = False
         if validation.valid and persistence_safe:
             try:
-                appended = self.journal.append_idempotent(candidate)
+                if inputs.order_market_snapshot is None:
+                    appended = self.journal.append_idempotent(candidate)
+                else:
+                    appended = self.journal.append_idempotent(
+                        candidate,
+                        market_snapshot=inputs.order_market_snapshot,
+                        lifecycle_status=inputs.lifecycle_status,
+                        reconciliation_result=inputs.reconciliation_result,
+                    )
             except AutonomousDecisionJournalError as exc:
                 persistence_safe = False
                 journal_warning = str(exc)
@@ -906,6 +973,123 @@ def autonomous_market_snapshot_provenance_hash(
 ) -> str:
     """Return the canonical provenance hash used by structured order candidates."""
     return _sha256(_canonical_json(_market_snapshot_material(snapshot)))
+
+
+def autonomous_symbol_metadata_hash(snapshot: AutonomousOrderMarketSnapshot) -> str:
+    material = {
+        key: value
+        for key, value in _market_snapshot_material(snapshot).items()
+        if key
+        in {
+            "symbol",
+            "broker_symbol",
+            "point",
+            "tick_size",
+            "digits",
+            "minimum_distance_points",
+            "volume_min",
+            "volume_max",
+            "volume_step",
+            "tick_value",
+            "contract_size",
+        }
+    }
+    return _sha256(_canonical_json(material))
+
+
+def validate_autonomous_candidate_order_snapshot(
+    candidate: AutonomousDecisionCandidate,
+    snapshot: AutonomousOrderMarketSnapshot,
+    *,
+    now: datetime,
+    maximum_age_seconds: int,
+) -> AutonomousDecisionValidationResult:
+    """Independently recheck the protected order against its bound snapshot."""
+    issues: list[str] = []
+    if not hmac.compare_digest(
+        candidate.market_snapshot_reference, snapshot.snapshot_reference
+    ):
+        issues.append("MARKET_SNAPSHOT_REFERENCE_MISMATCH")
+    snapshot_hash = autonomous_market_snapshot_provenance_hash(snapshot)
+    if not hmac.compare_digest(candidate.market_snapshot_provenance_hash, snapshot_hash):
+        issues.append("MARKET_SNAPSHOT_HASH_MISMATCH")
+    if candidate.symbol_reference != snapshot.symbol:
+        issues.append("MARKET_SNAPSHOT_SYMBOL_MISMATCH")
+    if (
+        candidate.broker_symbol_reference != snapshot.broker_symbol
+        or candidate.broker_symbol_reference != broker_symbol_for(candidate.symbol_reference)
+    ):
+        issues.append("BROKER_SYMBOL_REFERENCE_MISMATCH")
+    if not snapshot.source_refs:
+        issues.append("MARKET_SNAPSHOT_SOURCE_REFS_MISSING")
+    if not _fresh(snapshot.observed_at, _utc(now), maximum_age_seconds):
+        issues.append("MARKET_SNAPSHOT_STALE")
+
+    material = _market_snapshot_material(snapshot)
+    bid = _positive_decimal_or_none(material["bid"])
+    ask = _positive_decimal_or_none(material["ask"])
+    point = _positive_decimal_or_none(material["point"])
+    tick_size = _positive_decimal_or_none(material["tick_size"])
+    minimum_points = _positive_decimal_or_none(
+        material["minimum_distance_points"], allow_zero=True
+    )
+    volume_min = _positive_decimal_or_none(material["volume_min"])
+    volume_max = _positive_decimal_or_none(material["volume_max"])
+    volume_step = _positive_decimal_or_none(material["volume_step"])
+    tick_value = _positive_decimal_or_none(material["tick_value"])
+    contract_size = _positive_decimal_or_none(material["contract_size"])
+    if bid is None or ask is None or ask < bid:
+        issues.append("MARKET_BID_ASK_INVALID")
+    if any(
+        value is None
+        for value in (
+            point,
+            tick_size,
+            minimum_points,
+            volume_min,
+            volume_max,
+            volume_step,
+            tick_value,
+            contract_size,
+        )
+    ) or not isinstance(snapshot.digits, int) or isinstance(snapshot.digits, bool):
+        issues.append("SYMBOL_METADATA_MISSING_OR_INVALID")
+
+    volume = _positive_decimal_or_none(candidate.proposed_volume)
+    if volume is None:
+        issues.append("PROPOSED_VOLUME_INVALID")
+    elif volume_min is not None and volume_max is not None and volume_step is not None:
+        if volume < volume_min:
+            issues.append("PROPOSED_VOLUME_BELOW_MINIMUM")
+        if volume > volume_max:
+            issues.append("PROPOSED_VOLUME_ABOVE_MAXIMUM")
+        if (volume - volume_min) % volume_step != 0:
+            issues.append("PROPOSED_VOLUME_STEP_MISMATCH")
+
+    resolved = {
+        "order_type": candidate.order_type,
+        "side": candidate.side,
+        "action": candidate.action,
+        "entry_price": candidate.entry_price,
+        "trigger_price": candidate.trigger_price,
+        "limit_price": candidate.limit_price,
+        "stop_loss": candidate.stop_loss,
+        "take_profit": candidate.take_profit,
+        "market_recommendation": candidate.market_recommendation,
+    }
+    if bid is not None and ask is not None and point is not None and minimum_points is not None:
+        _validate_order_prices(
+            resolved,
+            bid=bid,
+            ask=ask,
+            minimum_distance=point * minimum_points,
+            tick_size=tick_size,
+            digits=snapshot.digits,
+            blockers=issues,
+        )
+    return AutonomousDecisionValidationResult(
+        valid=not issues, issues=tuple(dict.fromkeys(issues))
+    )
 
 
 def _empty_structured_order() -> dict[str, Any]:
@@ -1659,14 +1843,17 @@ def _lifecycle_reference(inputs: AutonomousDecisionInputs) -> tuple[str, str]:
             inputs.lifecycle_observation.observation_id,
             inputs.lifecycle_observation.lifecycle_state,
         )
-    status = inputs.lifecycle_status
+    return autonomous_lifecycle_status_reference(inputs.lifecycle_status), "NO_ACTIVE_TARGET"
+
+
+def autonomous_lifecycle_status_reference(status: MT5RuntimeSupervisorStatus) -> str:
     reference_material = {
         "last_successful_cycle": status.last_successful_cycle,
         "records_inspected": status.records_inspected,
         "state_counts": dict(sorted(status.lifecycle_state_counts.items())),
         "health_reason": status.health_reason,
     }
-    return "runtime_lifecycle_" + _sha256(_canonical_json(reference_material))[:24], "NO_ACTIVE_TARGET"
+    return "runtime_lifecycle_" + _sha256(_canonical_json(reference_material))[:24]
 
 
 def _normalized_direction(direction: str, intent: AutonomousDecisionIntent) -> str:
@@ -1675,7 +1862,13 @@ def _normalized_direction(direction: str, intent: AutonomousDecisionIntent) -> s
     return direction.strip().upper()
 
 
-def _journal_row(candidate: AutonomousDecisionCandidate) -> dict[str, Any]:
+def _journal_row(
+    candidate: AutonomousDecisionCandidate,
+    *,
+    market_snapshot: AutonomousOrderMarketSnapshot | None = None,
+    lifecycle_status: MT5RuntimeSupervisorStatus | None = None,
+    reconciliation_result: MT5ReconciliationReceipt | None = None,
+) -> dict[str, Any]:
     row = {
         "record_type": "AUTONOMOUS_DECISION_CANDIDATE",
         "candidate_reference": candidate.candidate_reference,
@@ -1707,6 +1900,15 @@ def _journal_row(candidate: AutonomousDecisionCandidate) -> dict[str, Any]:
         "metadata_redacted": True,
         "protected_candidate": candidate.to_protected_dict(),
     }
+    if market_snapshot is not None:
+        row["protected_market_snapshot"] = asdict(market_snapshot)
+    if lifecycle_status is not None:
+        row["protected_runtime_evidence"] = {
+            "lifecycle_status": asdict(lifecycle_status),
+            "reconciliation_result": (
+                asdict(reconciliation_result) if reconciliation_result is not None else None
+            ),
+        }
     row["record_hash"] = _sha256(_canonical_json(row))
     return row
 
@@ -1757,6 +1959,20 @@ def _candidate_from_protected_dict(payload: Mapping[str, Any]) -> AutonomousDeci
             raise ValueError("candidate tuple field is invalid")
         values[name] = tuple(str(item) for item in raw)
     return AutonomousDecisionCandidate(**values)
+
+
+def _market_snapshot_from_protected_dict(
+    payload: Mapping[str, Any],
+) -> AutonomousOrderMarketSnapshot:
+    allowed = {item.name for item in fields(AutonomousOrderMarketSnapshot)}
+    if set(payload) != allowed:
+        raise ValueError("market snapshot payload fields do not match")
+    values = dict(payload)
+    raw_refs = values.get("source_refs")
+    if not isinstance(raw_refs, (list, tuple)):
+        raise ValueError("market snapshot source refs are invalid")
+    values["source_refs"] = tuple(str(item) for item in raw_refs)
+    return AutonomousOrderMarketSnapshot(**values)
 
 
 def _construct(cls, payload: Mapping[str, Any]):

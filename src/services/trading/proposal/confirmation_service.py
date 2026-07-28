@@ -127,17 +127,7 @@ class HumanProposalConfirmationService:
         fingerprint_hash = _sha256(
             str(account_context.account_context_fingerprint).strip().lower()
         )
-        source_refs = list(
-            dict.fromkeys(
-                (
-                    *review.source_refs,
-                    candidate.candidate_reference,
-                    candidate.provenance_hash,
-                    candidate.structured_order_hash,
-                    candidate.account_context_reference,
-                )
-            )
-        )
+        source_refs = list(candidate_confirmation_source_refs(candidate))
         binding_hash = (
             _candidate_confirmation_binding_hash(
                 candidate,
@@ -279,20 +269,7 @@ class HumanProposalConfirmationService:
                 blockers.append("CONFIRMATION_CANDIDATE_BINDING_MISMATCH")
             if tuple(intent.timeframe_profile) != candidate.timeframe_profile:
                 blockers.append("CONFIRMATION_TIMEFRAME_MISMATCH")
-            required_refs = {
-                candidate.candidate_reference,
-                candidate.provenance_hash,
-                candidate.structured_order_hash,
-                candidate.market_snapshot_reference,
-                candidate.market_snapshot_provenance_hash,
-                candidate.account_context_reference,
-                candidate.reasoning_result_reference,
-                candidate.score_result_reference,
-                candidate.risk_result_reference,
-                *candidate.proposed_semantic_parameter_references,
-                *candidate.knowledge_evidence_references,
-            } - {""}
-            if not required_refs.issubset(set(intent.source_refs)):
+            if tuple(intent.source_refs) != candidate_confirmation_source_refs(candidate):
                 blockers.append("CONFIRMATION_SOURCE_BINDING_MISMATCH")
         blockers.extend(
             _account_context_blockers(
@@ -568,19 +545,7 @@ def _candidate_confirmation_binding_hash(
         "candidate_reference": candidate.candidate_reference,
         "candidate_provenance_hash": candidate.provenance_hash,
         "candidate_structured_order_hash": candidate.structured_order_hash,
-        "proposal_source_references": sorted(
-            {
-                candidate.market_context_reference,
-                candidate.market_snapshot_reference,
-                candidate.market_snapshot_provenance_hash,
-                candidate.reasoning_result_reference,
-                candidate.score_result_reference,
-                candidate.risk_result_reference,
-                *candidate.proposed_semantic_parameter_references,
-                *candidate.knowledge_evidence_references,
-            }
-            - {""}
-        ),
+        "source_references": list(candidate_confirmation_source_refs(candidate)),
         "account_context_reference": candidate.account_context_reference,
         "account_fingerprint_hash": account_fingerprint_hash,
         "symbol": candidate.symbol_reference,
@@ -601,6 +566,34 @@ def _candidate_confirmation_binding_hash(
     }
     return _sha256(
         json.dumps(material, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    )
+
+
+candidate_confirmation_binding_hash = _candidate_confirmation_binding_hash
+
+
+def candidate_confirmation_source_refs(candidate) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            str(value)
+            for value in (
+                candidate.candidate_reference,
+                candidate.provenance_hash,
+                candidate.structured_order_hash,
+                candidate.market_context_reference,
+                candidate.market_snapshot_reference,
+                candidate.market_snapshot_provenance_hash,
+                candidate.reasoning_result_reference,
+                candidate.score_result_reference,
+                candidate.risk_result_reference,
+                candidate.lifecycle_observation_reference,
+                candidate.reconciliation_reference,
+                candidate.account_context_reference,
+                *candidate.proposed_semantic_parameter_references,
+                *candidate.knowledge_evidence_references,
+            )
+            if str(value)
+        )
     )
 
 

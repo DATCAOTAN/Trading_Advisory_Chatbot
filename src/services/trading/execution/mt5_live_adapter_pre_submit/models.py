@@ -20,6 +20,7 @@ MT5_PRE_SUBMIT_GATE_STATUSES = {
     "NOT_REQUESTED",
     "PASSED_DISABLED_PRE_SUBMIT_CHECK",
     "READY_FOR_CONTROLLED_DEMO_INTEGRATION",
+    "PRE_SUBMIT_READY_NON_EXECUTABLE",
     "BLOCKED",
     "INVALID",
     "DUPLICATE",
@@ -186,6 +187,17 @@ class MT5PreSubmitGateReport:
     warnings: List[str] = field(default_factory=list)
     source_refs: List[str] = field(default_factory=list)
     payload_size_chars: int = 0
+    approval_integrity_valid: bool = False
+    final_validation_valid: bool = False
+    pre_submit_ready: bool = False
+    submission_disabled: bool = True
+    source_candidate_reference: str = ""
+    source_confirmation_intent_id: str = ""
+    terminal_capability_reference: str = ""
+    lifecycle_reference: str = ""
+    reconciliation_reference: str = ""
+    intent_hash: str = ""
+    idempotency_key_hash: str = ""
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -217,6 +229,17 @@ class MT5PreSubmitGateReport:
             "warnings": _dedupe(self.warnings),
             "source_refs": _dedupe(self.source_refs),
             "payload_size_chars": int(self.payload_size_chars or 0),
+            "approval_integrity_valid": bool(self.approval_integrity_valid),
+            "final_validation_valid": bool(self.final_validation_valid),
+            "pre_submit_ready": bool(self.pre_submit_ready),
+            "submission_disabled": True,
+            "source_candidate_reference": self.source_candidate_reference,
+            "source_confirmation_intent_id": self.source_confirmation_intent_id,
+            "terminal_capability_reference": self.terminal_capability_reference,
+            "lifecycle_reference": self.lifecycle_reference,
+            "reconciliation_reference": self.reconciliation_reference,
+            "intent_hash": self.intent_hash,
+            "idempotency_key_hash": self.idempotency_key_hash,
         }
 
 
@@ -248,6 +271,12 @@ class MT5PreSubmitJournalRecord:
     idempotency_key_hash: str
     payload_size_chars: int
     metadata_redacted: bool = True
+    source_candidate_reference: str = ""
+    source_confirmation_intent_id: str = ""
+    approval_integrity_hash: str = ""
+    pre_submit_state: str = ""
+    protected_intent: Dict[str, Any] = field(default_factory=dict, repr=False)
+    record_hash: str = ""
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -277,6 +306,12 @@ class MT5PreSubmitJournalRecord:
             "idempotency_key_hash": self.idempotency_key_hash,
             "payload_size_chars": int(self.payload_size_chars or 0),
             "metadata_redacted": True,
+            "source_candidate_reference": self.source_candidate_reference,
+            "source_confirmation_intent_id": self.source_confirmation_intent_id,
+            "approval_integrity_hash": self.approval_integrity_hash,
+            "pre_submit_state": self.pre_submit_state,
+            "protected_intent": dict(self.protected_intent),
+            "record_hash": self.record_hash,
         }
 
 

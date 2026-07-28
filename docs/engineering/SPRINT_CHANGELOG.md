@@ -976,3 +976,29 @@ Commit: this commit
 
 - MARKET and PENDING candidate review, explicit confirmation/rejection, protected persistence, and idempotent reload are complete while candidates remain non-executable.
 - Next: approval integrity, final validation, and pre-submit gate verification as a separate milestone; execution remains disabled.
+
+---
+
+### Post-release Maintenance - Approval Integrity and Pre-Submit Lifecycle
+
+Date: 2026-07-28
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Extended the existing protected candidate and confirmation journals with the market/runtime evidence and confirmation timestamp required for authoritative reload.
+- Added exact candidate-confirmation-source binding, independent account/order/metadata/capability/lifecycle/reconciliation/permission validation, and protected intent construction in the existing pre-submit package.
+- Reused the existing pre-submit report, journal record, store, and controller; exact duplicates are idempotent and confirmation reuse or journal corruption fails closed.
+- MARKET and `BUY_LIMIT` PENDING reach `PRE_SUBMIT_READY_NON_EXECUTABLE`; all execution and submission permissions remain disabled.
+
+#### Verification
+
+- Focused milestone tests: 24 passed; directly affected confirmation/proposal tests: 100 passed.
+- Full regression: 3,129 passed and 156 subtests passed in 215.32 seconds with 3 dependency warnings.
+- Compileall passed. External LLM, MT5, market data, live generation, export, controlled-submit, runtime `order_send`, and broker mutation: 0.
+
+#### Current state / next step
+
+- Approval integrity, final validation, persistent idempotency, and non-submitting pre-submit readiness are complete for authoritative MARKET and PENDING candidates.
+- Next: a separately authorized controlled demo submission acceptance. No submission permission was enabled in this milestone.

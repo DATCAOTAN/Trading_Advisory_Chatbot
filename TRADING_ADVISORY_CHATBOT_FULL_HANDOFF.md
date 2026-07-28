@@ -2380,3 +2380,20 @@ The authoritative persisted offline MARKET and PENDING candidates now continue t
 - Verification: 24 focused lifecycle tests and 98 focused Review Card/confirmation tests passed; full regression passed with 3,105 tests and 156 subtests in 175.47 seconds with 3 unchanged dependency warnings.
 - External LLM, MT5, live market data, live Streamlit generation, export, submission, controlled-submit, runtime `order_send`, and broker mutation counts were all zero.
 - Verification level: `FULL_REGRESSION_PASS`. Next critical milestone: `APPROVAL INTEGRITY + FINAL VALIDATION + PRE-SUBMIT GATE`, as a separate task with execution still disabled by default.
+
+# 51. APPROVAL INTEGRITY, FINAL VALIDATION, AND PRE-SUBMIT LIFECYCLE
+
+The confirmed authoritative MARKET and PENDING candidates now reach one protected, idempotent pre-submit-ready state without broker submission.
+
+- `AutonomousDecisionJournal` persists the protected market snapshot and lifecycle/reconciliation evidence in the existing integrity-checked candidate record while keeping public reads redacted.
+- `ProposalIntentJournalRecord` persists confirmation time. Candidate confirmation now uses one exact source-reference contract covering candidate, structured-order, market/context, reasoning, score, risk, lifecycle, reconciliation, account, semantic, and knowledge bindings.
+- `ApprovalPreSubmitLifecycleService` reloads candidate, market snapshot, runtime evidence, and confirmation from protected persistence. Editable Streamlit/session candidate data is not accepted as authority.
+- Approval integrity independently verifies candidate and confirmation hashes, exact source bindings, account context/fingerprint, symbol/order/timeframes, nonce, confirmation time, and candidate/confirmation expiry.
+- Final validation independently rechecks MARKET/PENDING price semantics, stop/target relationships, tick normalization, minimum stop distance, volume limits/step, metadata, terminal capability, lifecycle health, reconciliation state, and the current disabled permission state.
+- The existing `MT5PreSubmitGateReport`, `MT5PreSubmitJournalRecord`, and `MT5PreSubmitJournalStore` now represent and persist `PRE_SUBMIT_READY_NON_EXECUTABLE`. The protected intent contains no ticket or deal and keeps live submission, execution, `order_send`, executable, and order-sent flags false.
+- Persistent idempotency returns the same record for an exact repeat, blocks conflicting use of the key, and blocks reuse of one confirmation for a different intent. Corrupt or partial journals fail closed.
+- The existing Review Card controller can transition by candidate identifier only and stores only a redacted outcome summary. It does not expose controlled submission or broker mutation.
+- Valid MARKET and `BUY_LIMIT` PENDING flows pass. Rejection, candidate/confirmation tampering, source-ref injection, candidate switching, wrong account, expiry, permission changes, lifecycle/reconciliation conflicts, unresolved state, capability/metadata/volume/price errors, duplicate conflicts, approval reuse, and corrupt journals block before a new pre-submit record.
+- Verification: 24 focused milestone tests and 100 directly affected confirmation/proposal tests passed. Full regression passed with 3,129 tests and 156 subtests in 215.32 seconds with 3 unchanged dependency warnings. Compileall passed.
+- External LLM, MT5, live market data, Streamlit generation, export, controlled-submit, runtime `order_send`, and broker mutation counts were zero.
+- Verification level: `FULL_REGRESSION_PASS`. Next critical milestone: separately authorized controlled demo submission acceptance using this protected pre-submit artifact; permissions remain disabled until that task explicitly authorizes them.

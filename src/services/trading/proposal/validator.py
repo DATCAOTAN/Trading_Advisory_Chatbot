@@ -106,6 +106,7 @@ def _candidate_record_issues(record: ProposalIntentJournalRecord) -> list[str]:
         "order_type",
         "operator_action",
         "confirmation_nonce",
+        "confirmation_timestamp",
         "confirmation_expires_at",
         "record_hash",
     ):
