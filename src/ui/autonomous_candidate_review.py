@@ -180,7 +180,8 @@ def render_autonomous_candidate_review_card(
     columns[3].metric("Safety", view.safety_status)
 
     st.caption(
-        f"Candidate={view.candidate_reference} | broker={view.broker_symbol} | "
+        f"Candidate={view.candidate_reference} | source={view.proposal_source} | "
+        f"broker={view.broker_symbol} | "
         f"timeframes={','.join(view.timeframe_profile) or 'UNAVAILABLE'}"
     )
     st.caption(

@@ -76,7 +76,7 @@ class AutonomousOrderProposalProvider:
             return _blocked(request, blockers)
         if self.model_provider is None and not Config.TRADING_REASONING_LLM_ENABLED:
             return _blocked(request, ["STRUCTURED_PROPOSAL_MODEL_DISABLED"])
-        snapshot = _market_snapshot(request)
+        snapshot = market_snapshot_from_feature_result(request.feature_result)
         try:
             raw = (
                 self.model_provider
@@ -404,8 +404,8 @@ def _relation_blockers(order_type, values, snapshot):
     return blockers
 
 
-def _market_snapshot(request):
-    feature, bundle = request.feature_result.feature_snapshot, request.feature_result.bundle
+def market_snapshot_from_feature_result(feature_result: LiveFeatureResult):
+    feature, bundle = feature_result.feature_snapshot, feature_result.bundle
     return AutonomousOrderMarketSnapshot(
         snapshot_reference=bundle.bundle_id, observed_at=bundle.tick.timestamp,
         symbol=feature.symbol, broker_symbol=feature.broker_symbol,

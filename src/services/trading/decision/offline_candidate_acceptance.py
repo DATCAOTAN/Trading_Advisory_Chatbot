@@ -12,6 +12,7 @@ from typing import Any
 from src.config import Config
 from src.services.trading.decision.autonomous_orchestrator import (
     OFFLINE_FIXTURE_MODE,
+    OFFLINE_FIXTURE_PROPOSAL_SOURCE,
     OFFLINE_FIXTURE_REFERENCE_PREFIX,
     AutonomousDecisionConfig,
     AutonomousDecisionInputs,
@@ -213,6 +214,8 @@ def _run_offline_candidate_acceptance(
             semantic_parameter_references=proposal.semantic_parameter_references,
             order_proposal=proposal.order_proposal,
             order_market_snapshot=proposal.order_market_snapshot,
+            proposal_source=OFFLINE_FIXTURE_PROPOSAL_SOURCE,
+            proposal_source_reference=proposal.proposal_reference,
         )
         context = (
             nullcontext("")

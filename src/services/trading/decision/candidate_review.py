@@ -23,6 +23,7 @@ class AutonomousCandidateReviewView:
     structured_details_available: bool
     symbol: str
     candidate_reference: str
+    proposal_source: str
     broker_symbol: str
     timeframe_profile: tuple[str, ...]
     method_selection_summary: str
@@ -59,6 +60,7 @@ class AutonomousCandidateReviewView:
             "structured_details_available": self.structured_details_available,
             "symbol": self.symbol,
             "candidate_reference": self.candidate_reference,
+            "proposal_source": self.proposal_source,
             "broker_symbol": self.broker_symbol,
             "timeframe_profile": list(self.timeframe_profile),
             "method_selection_summary": self.method_selection_summary,
@@ -149,6 +151,7 @@ def present_autonomous_candidate_review(
         candidate_reference=str(
             review_payload.get("candidate_reference") or UNAVAILABLE
         ),
+        proposal_source=str(review_payload.get("proposal_source") or UNAVAILABLE),
         broker_symbol=str(review_payload.get("broker_symbol") or UNAVAILABLE),
         timeframe_profile=tuple(review_payload.get("timeframe_profile") or ()),
         method_selection_summary=str(
@@ -362,6 +365,7 @@ def _unavailable_view() -> AutonomousCandidateReviewView:
         structured_details_available=False,
         symbol=UNAVAILABLE,
         candidate_reference=UNAVAILABLE,
+        proposal_source=UNAVAILABLE,
         broker_symbol=UNAVAILABLE,
         timeframe_profile=(),
         method_selection_summary=UNAVAILABLE,

@@ -8,6 +8,7 @@ from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionRunResult,
 )
 from src.services.trading.decision.operator_candidate_generation import (
+    ManualOperatorProposalInput,
     OperatorCandidateInputError,
 )
 from src.ui.autonomous_candidate_review import store_autonomous_decision_run_result
@@ -40,6 +41,7 @@ class OperatorCandidateGenerationController:
         *,
         symbol: str | None = None,
         timeframes: Iterable[str] | None = None,
+        operator_proposal: ManualOperatorProposalInput | None = None,
     ) -> OperatorCandidateGenerationOutcome:
         normalized_request = str(request_id or "").strip()
         if not normalized_request:
@@ -61,8 +63,14 @@ class OperatorCandidateGenerationController:
                 build_kwargs["symbol"] = symbol
             if timeframes is not None:
                 build_kwargs["timeframes"] = timeframes
+            if operator_proposal is not None:
+                build_kwargs["operator_proposal"] = operator_proposal
             inputs = self.input_assembler.build(**build_kwargs)
-            run_result = self.decision_orchestrator.run_once(inputs)
+            run_result = (
+                self.decision_orchestrator.run_once(inputs, require_actionable=True)
+                if operator_proposal is not None
+                else self.decision_orchestrator.run_once(inputs)
+            )
             if not isinstance(run_result, AutonomousDecisionRunResult):
                 return OperatorCandidateGenerationOutcome(
                     "BLOCKED", "INVALID_ORCHESTRATOR_RESULT", orchestrator_called=True
@@ -79,6 +87,34 @@ class OperatorCandidateGenerationController:
                     intent=run_result.candidate.intent,
                     validation_valid=run_result.validation.valid,
                     orchestrator_called=True,
+                )
+            if operator_proposal is not None and (
+                run_result.candidate.intent != "OPEN_POSITION"
+                or run_result.candidate.deterministic_eligibility_result
+                != "ELIGIBLE_CANDIDATE"
+            ):
+                blocker = (
+                    run_result.candidate.blocked_reason_codes[0]
+                    if run_result.candidate.blocked_reason_codes
+                    else "MANUAL_PROPOSAL_NOT_ACTIONABLE"
+                )
+                return OperatorCandidateGenerationOutcome(
+                    "BLOCKED",
+                    blocker,
+                    intent=run_result.candidate.intent,
+                    validation_valid=run_result.validation.valid,
+                    orchestrator_called=True,
+                )
+            if operator_proposal is not None and not run_result.journal_appended:
+                store_autonomous_decision_run_result(session_state, run_result)
+                return OperatorCandidateGenerationOutcome(
+                    "DUPLICATE_IGNORED",
+                    "MANUAL_PROPOSAL_ALREADY_PERSISTED",
+                    candidate_reference=run_result.candidate.candidate_reference,
+                    intent=run_result.candidate.intent,
+                    validation_valid=True,
+                    orchestrator_called=True,
+                    stored=True,
                 )
             store_autonomous_decision_run_result(session_state, run_result)
             return OperatorCandidateGenerationOutcome(

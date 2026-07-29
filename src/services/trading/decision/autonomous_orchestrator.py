@@ -31,6 +31,14 @@ AUTONOMOUS_DECISION_SCHEMA_VERSION = "autonomous-decision-candidate/v2"
 AUTONOMOUS_DECISION_LEGACY_SCHEMA_VERSION = "autonomous-decision-candidate/v1"
 OFFLINE_FIXTURE_MODE = "offline_fixture"
 OFFLINE_FIXTURE_REFERENCE_PREFIX = "offline_fixture:"
+AUTONOMOUS_LLM_PROPOSAL_SOURCE = "AUTONOMOUS_LLM"
+OFFLINE_FIXTURE_PROPOSAL_SOURCE = "OFFLINE_FIXTURE"
+MANUAL_OPERATOR_PROPOSAL_SOURCE = "MANUAL_OPERATOR"
+PROPOSAL_SOURCES = {
+    AUTONOMOUS_LLM_PROPOSAL_SOURCE,
+    OFFLINE_FIXTURE_PROPOSAL_SOURCE,
+    MANUAL_OPERATOR_PROPOSAL_SOURCE,
+}
 
 
 class AutonomousDecisionIntent(str, Enum):
@@ -164,6 +172,8 @@ class AutonomousDecisionInputs:
     order_market_snapshot: AutonomousOrderMarketSnapshot | None = None
     timeframe_profile: tuple[str, ...] = ()
     account_context_reference: str = ""
+    proposal_source: str = AUTONOMOUS_LLM_PROPOSAL_SOURCE
+    proposal_source_reference: str = ""
 
 
 @dataclass(frozen=True)
@@ -221,6 +231,8 @@ class AutonomousDecisionCandidate:
     timeframe_profile: tuple[str, ...] = ()
     method_selection_summary: str = field(default="", repr=False)
     account_context_reference: str = ""
+    proposal_source: str = AUTONOMOUS_LLM_PROPOSAL_SOURCE
+    proposal_source_reference: str = ""
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -231,6 +243,8 @@ class AutonomousDecisionCandidate:
             "operating_mode": self.operating_mode,
             "symbol_reference": self.symbol_reference,
             "broker_symbol_reference": self.broker_symbol_reference,
+            "proposal_source": self.proposal_source,
+            "proposal_source_reference": self.proposal_source_reference,
             "intent": self.intent,
             "direction_present": bool(self.direction),
             "side_present": bool(self.side),
@@ -285,6 +299,8 @@ class AutonomousDecisionCandidate:
             "expires_at": self.expires_at,
             "symbol": self.symbol_reference,
             "broker_symbol": self.broker_symbol_reference,
+            "proposal_source": self.proposal_source,
+            "proposal_source_reference": self.proposal_source_reference,
             "timeframe_profile": list(self.timeframe_profile),
             "method_selection_summary": self.method_selection_summary,
             "account_context_reference": self.account_context_reference,
@@ -531,7 +547,9 @@ class AutonomousDecisionJournal:
                         "protected_market_snapshot",
                         "protected_runtime_evidence",
                     ):
-                        if key in protected_row and row.get(key) != protected_row.get(key):
+                        if key in protected_row and _canonical_json(
+                            row.get(key)
+                        ) != _canonical_json(protected_row.get(key)):
                             raise AutonomousDecisionJournalError("DECISION_JOURNAL_CONFLICT")
                     return False
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -672,6 +690,8 @@ class AutonomousDecisionOrchestrator:
             timeframe_profile=tuple(inputs.timeframe_profile),
             method_selection_summary=str(inputs.method_selection.reasoning_summary or "")[:500],
             account_context_reference=_safe_or_empty(inputs.account_context_reference),
+            proposal_source=_proposal_source(inputs),
+            proposal_source_reference=_safe_or_empty(inputs.proposal_source_reference),
         )
 
     def validate_candidate(
@@ -712,6 +732,17 @@ class AutonomousDecisionOrchestrator:
                 and candidate.broker_symbol_reference != broker_symbol_for(candidate.symbol_reference)
             ):
                 issues.append("BROKER_SYMBOL_REFERENCE_MISMATCH")
+        if candidate.proposal_source not in PROPOSAL_SOURCES:
+            issues.append("PROPOSAL_SOURCE_INVALID")
+        if (
+            candidate.proposal_source == MANUAL_OPERATOR_PROPOSAL_SOURCE
+            and not candidate.proposal_source_reference
+        ):
+            issues.append("MANUAL_PROPOSAL_SOURCE_REFERENCE_MISSING")
+        if candidate.proposal_source_reference and not _safe_reference(
+            candidate.proposal_source_reference
+        ):
+            issues.append("PROPOSAL_SOURCE_REFERENCE_INVALID")
         eligible = (
             candidate.deterministic_eligibility_result
             == AutonomousDecisionEligibility.ELIGIBLE_CANDIDATE.value
@@ -791,7 +822,11 @@ class AutonomousDecisionOrchestrator:
         return AutonomousDecisionValidationResult(valid=not issues, issues=tuple(sorted(set(issues))))
 
     def run_once(
-        self, inputs: AutonomousDecisionInputs, *, now: datetime | None = None
+        self,
+        inputs: AutonomousDecisionInputs,
+        *,
+        now: datetime | None = None,
+        require_actionable: bool = False,
     ) -> AutonomousDecisionRunResult:
         persistence_safe = True
         journal_warning = ""
@@ -807,7 +842,13 @@ class AutonomousDecisionOrchestrator:
         candidate = self.build_candidate(inputs, now=now, forced_blockers=forced)
         validation = self.validate_candidate(candidate, now=now)
         appended = False
-        if validation.valid and persistence_safe:
+        actionable = (
+            candidate.intent == AutonomousDecisionIntent.OPEN_POSITION.value
+            and candidate.deterministic_eligibility_result
+            == AutonomousDecisionEligibility.ELIGIBLE_CANDIDATE.value
+            and candidate.action in {item.value for item in AutonomousOrderAction}
+        )
+        if validation.valid and persistence_safe and (actionable or not require_actionable):
             try:
                 if inputs.order_market_snapshot is None:
                     appended = self.journal.append_idempotent(candidate)
@@ -912,6 +953,10 @@ def autonomous_inputs_from_mapping(payload: Mapping[str, Any]) -> AutonomousDeci
         order_market_snapshot=snapshot,
         timeframe_profile=tuple(str(item) for item in payload.get("timeframe_profile", ())),
         account_context_reference=str(payload.get("account_context_reference", "")),
+        proposal_source=str(
+            payload.get("proposal_source", AUTONOMOUS_LLM_PROPOSAL_SOURCE)
+        ),
+        proposal_source_reference=str(payload.get("proposal_source_reference", "")),
     )
 
 
@@ -1173,7 +1218,10 @@ def _resolve_order_proposal(
         blockers.append("UNSUPPORTED_ADVISORY_ACTION")
     if not resolved["risk_policy_reference"]:
         blockers.append("RISK_POLICY_REFERENCE_MISSING")
-    if not resolved["structured_reasoning"]:
+    if (
+        not resolved["structured_reasoning"]
+        and _proposal_source(inputs) != MANUAL_OPERATOR_PROPOSAL_SOURCE
+    ):
         blockers.append("STRUCTURED_REASONING_MISSING")
     volume = _decimal_or_none(resolved["proposed_volume"])
     if volume is not None and volume <= 0:
@@ -1233,7 +1281,10 @@ def _resolve_order_proposal(
         volume_step = _positive_decimal_or_none(market_material["volume_step"])
         tick_value = _positive_decimal_or_none(market_material["tick_value"])
         contract_size = _positive_decimal_or_none(market_material["contract_size"])
-        if snapshot.symbol == "BTCUSD" and any(
+        if (
+            snapshot.symbol == "BTCUSD"
+            or _proposal_source(inputs) == MANUAL_OPERATOR_PROPOSAL_SOURCE
+        ) and any(
             value is None
             for value in (
                 point, tick_size, distance_points, volume_min, volume_max,
@@ -1605,11 +1656,20 @@ def _input_blockers(
         blockers.append("UNSUPPORTED_DIRECTION")
     if inputs.exposure_effect.strip().upper() not in {"NONE", "UNCHANGED", "REDUCE"}:
         blockers.append("EXPOSURE_INCREASE_NOT_ALLOWED")
+    proposal_source = _proposal_source(inputs)
+    if proposal_source not in PROPOSAL_SOURCES:
+        blockers.append("PROPOSAL_SOURCE_INVALID")
+    if (
+        proposal_source == MANUAL_OPERATOR_PROPOSAL_SOURCE
+        and not inputs.proposal_source_reference
+    ):
+        blockers.append("MANUAL_PROPOSAL_SOURCE_REFERENCE_MISSING")
     references = (
         context.context_pack_id,
         method.result_id,
         score.score_report_id,
         risk.decision_id if risk else "",
+        inputs.proposal_source_reference,
         *context.source_refs,
         *inputs.semantic_parameter_references,
     )
@@ -1622,6 +1682,15 @@ def _input_blockers(
     ):
         blockers.append("PROHIBITED_EXPOSURE_BEHAVIOR")
     return blockers
+
+
+def _proposal_source(inputs: AutonomousDecisionInputs) -> str:
+    value = str(inputs.proposal_source or "").strip().upper()
+    if value:
+        return value
+    if inputs.runtime_context.mode == OFFLINE_FIXTURE_MODE:
+        return OFFLINE_FIXTURE_PROPOSAL_SOURCE
+    return AUTONOMOUS_LLM_PROPOSAL_SOURCE
 
 
 def _classify(
@@ -1760,6 +1829,8 @@ def _canonical_provenance(
         "timeframe_profile": list(inputs.timeframe_profile),
         "method_selection_summary": str(inputs.method_selection.reasoning_summary or "")[:500],
         "account_context_reference": inputs.account_context_reference,
+        "proposal_source": _proposal_source(inputs),
+        "proposal_source_reference": inputs.proposal_source_reference,
         "requested_intent": inputs.requested_intent.strip().upper(),
         "direction": inputs.direction.strip().upper(),
         "exposure_effect": inputs.exposure_effect.strip().upper(),

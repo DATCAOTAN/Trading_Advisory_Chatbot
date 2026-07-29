@@ -597,7 +597,8 @@ def test_generation_code_has_no_export_submission_or_broker_mutation_calls():
 def test_dashboard_generation_is_explicit_and_export_remains_separate():
     source = Path("src/ui/tab_dashboard.py").read_text(encoding="utf-8")
     assert '"Generate Autonomous Candidate"' in source
-    assert source.count("controller.generate(") == 1
+    assert source.count("controller.generate(") == 2
+    assert '"Validate and Create Manual Candidate"' in source
     assert source.count("write_pending_candidate_handoff(") == 1
     assert source.index('"Generate Autonomous Candidate"') < source.index(
         '"Export Protected Pending Candidate"'

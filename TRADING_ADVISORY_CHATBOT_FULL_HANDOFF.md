@@ -2397,3 +2397,17 @@ The confirmed authoritative MARKET and PENDING candidates now reach one protecte
 - Verification: 24 focused milestone tests and 100 directly affected confirmation/proposal tests passed. Full regression passed with 3,129 tests and 156 subtests in 215.32 seconds with 3 unchanged dependency warnings. Compileall passed.
 - External LLM, MT5, live market data, Streamlit generation, export, controlled-submit, runtime `order_send`, and broker mutation counts were zero.
 - Verification level: `FULL_REGRESSION_PASS`. Next critical milestone: separately authorized controlled demo submission acceptance using this protected pre-submit artifact; permissions remain disabled until that task explicitly authorizes them.
+
+# 52. PROTECTED MANUAL OPERATOR CANDIDATE ENTRY
+
+The existing candidate lifecycle now accepts one explicitly operator-entered proposal without invoking an external proposal model or creating a parallel candidate path.
+
+- `MANUAL_OPERATOR` is an explicit proposal source, distinct from `AUTONOMOUS_LLM` and `OFFLINE_FIXTURE`, and its deterministic source reference is bound into candidate provenance, confirmation source references, and the protected pre-submit intent.
+- The existing authoritative assembler reloads market data, account binding, terminal metadata, deterministic method selection, scoring, risk policy, lifecycle, and reconciliation evidence. The manual branch forces `use_llm=false`; it does not call the autonomous proposal provider.
+- The existing order resolver validates MARKET and all supported pending-order semantics, canonical decimal values, tick size, stop distance, protection relationships, and volume metadata before actionable admission.
+- Invalid or non-actionable manual proposals are not appended. Equivalent decimal representations resolve to the same source reference, and exact journal duplicates return the existing candidate without a second record.
+- The dashboard adds one explicit form with no default symbol, order type, or protected parameter values. Candidate creation remains separate from Review Card confirmation, pre-submit, export, and controlled submission.
+- A shared duplicate-journal comparison now canonicalizes protected JSON before comparison so tuple/list serialization does not create a false conflict.
+- Verification: 123 focused manual/operator/review/confirmation/pre-submit tests and 229 neighboring candidate/policy/pending tests passed. Full regression passed with 3,142 tests and 156 subtests; three dependency warnings were unchanged.
+- External LLM, controlled-submit, runtime `order_send`, retry, fallback, and broker mutation counts were zero. Runtime manual candidate creation and all subsequent operator acceptance stages remain pending explicit human input.
+- Verification level: `FULL_REGRESSION_PASS`. Next: restart the app and let the operator enter one exact demo proposal in the Manual Operator Proposal form.

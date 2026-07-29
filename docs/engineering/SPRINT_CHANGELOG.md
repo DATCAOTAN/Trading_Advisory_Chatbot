@@ -1002,3 +1002,31 @@ Commit: this commit
 
 - Approval integrity, final validation, persistent idempotency, and non-submitting pre-submit readiness are complete for authoritative MARKET and PENDING candidates.
 - Next: a separately authorized controlled demo submission acceptance. No submission permission was enabled in this milestone.
+
+---
+
+### Post-release Maintenance - Protected Manual Operator Candidate Entry
+
+Date: 2026-07-29
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added explicit `MANUAL_OPERATOR` proposal provenance to the existing candidate schema, journal, Review Card, confirmation bindings, and protected pre-submit intent.
+- Reused authoritative market/account metadata, deterministic method selection, scoring, risk, lifecycle, reconciliation, order validation, and candidate admission.
+- Added one dashboard form with no prefilled trade values and no automatic confirmation, export, pre-submit, or execution action.
+- Prevented invalid manual proposals from being journaled and preserved deterministic duplicate admission across equivalent decimal text.
+- Fixed false duplicate journal conflicts caused by tuple/list differences after JSON reload.
+
+#### Verification
+
+- Focused manual/operator/review/confirmation/pre-submit tests: 123 passed.
+- Neighboring candidate/policy/pending tests: 229 passed.
+- Full regression: 3,142 passed and 156 subtests passed with 3 unchanged dependency warnings.
+- External LLM, controlled-submit, runtime `order_send`, retries, fallback, and broker mutation: 0.
+
+#### Current state / next step
+
+- Manual candidate implementation is complete and non-executable; no runtime manual candidate, confirmation, pre-submit artifact, or submission was created in this task.
+- Next: operator enters one exact demo proposal through the dashboard form; subsequent confirmation and submission still require separate explicit actions.

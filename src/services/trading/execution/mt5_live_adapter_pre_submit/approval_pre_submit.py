@@ -452,6 +452,8 @@ class ApprovalPreSubmitLifecycleService:
             "candidate_reference": candidate.candidate_reference,
             "candidate_provenance_hash": candidate.provenance_hash,
             "structured_order_hash": candidate.structured_order_hash,
+            "proposal_source": candidate.proposal_source,
+            "proposal_source_reference": candidate.proposal_source_reference,
             "confirmation_intent_id": confirmation.intent_id,
             "confirmation_binding_hash": confirmation.confirmation_binding_hash,
             "approval_integrity_hash": approval.approval_integrity_hash,

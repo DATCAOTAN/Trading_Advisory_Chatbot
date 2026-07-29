@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
 
 from src.config import Config
@@ -8,12 +12,17 @@ from src.services.trading.decision.autonomous_proposal_provider import (
     AutonomousOrderProposalProvider,
     AutonomousOrderProposalRequest,
     AutonomousOrderProposalResult,
+    market_snapshot_from_feature_result,
     valid_autonomous_order_proposal_bindings,
 )
 from src.services.trading.calendar import CalendarContextBuilder
 from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionInputs,
+    AutonomousOrderIntentProposal,
+    MANUAL_OPERATOR_PROPOSAL_SOURCE,
+    _ORDER_TYPE_SEMANTICS,
     autonomous_account_context_reference,
+    autonomous_market_snapshot_provenance_hash,
 )
 from src.services.trading.decision.policy_engine import TradeDecisionPolicyEngine
 from src.services.trading.execution.mt5_live_adapter_pre_submit.lifecycle_supervisor import (
@@ -31,6 +40,17 @@ from src.services.trading.scoring import SignalScoringEngine
 
 
 AUTONOMOUS_RUNTIME_MODE = "autonomous_live"
+
+
+@dataclass(frozen=True)
+class ManualOperatorProposalInput:
+    order_type: str
+    entry_price: str = ""
+    trigger_price: str = ""
+    limit_price: str = ""
+    stop_loss: str = ""
+    take_profit: str = ""
+    proposed_volume: str = ""
 
 
 class OperatorCandidateInputError(RuntimeError):
@@ -85,6 +105,7 @@ class AuthoritativeAutonomousInputAssembler:
         symbol: str | None = None,
         timeframes: Iterable[str] | None = None,
         now: datetime | None = None,
+        operator_proposal: ManualOperatorProposalInput | None = None,
     ) -> AutonomousDecisionInputs:
         market_evaluated_at = _utc(now)
         symbol = str(symbol or Config.MARKET_DEFAULT_SYMBOL).strip().upper()
@@ -120,7 +141,11 @@ class AuthoritativeAutonomousInputAssembler:
                 symbol,
                 feature.broker_symbol,
             )
-            method = self.method_selector.select(context, mode=self.mode)
+            method = self.method_selector.select(
+                context,
+                mode=self.mode,
+                use_llm=False if operator_proposal is not None else None,
+            )
             score = self.scoring_engine.score(
                 feature, calendar, regime, context, method, mode=self.mode
             )
@@ -164,6 +189,13 @@ class AuthoritativeAutonomousInputAssembler:
             now=handoff_evaluated_at,
             max_age_seconds=Config.TRADING_AUTONOMOUS_DECISION_INPUT_MAX_AGE_SECONDS,
         )
+        if operator_proposal is not None:
+            return _manual_inputs(
+                operator_proposal,
+                feature_result,
+                inputs,
+            )
+
         proposal_result = self.proposal_provider.produce(
             AutonomousOrderProposalRequest(
                 feature_result=feature_result,
@@ -188,7 +220,97 @@ class AuthoritativeAutonomousInputAssembler:
             order_market_snapshot=proposal_result.order_market_snapshot,
             timeframe_profile=inputs.timeframe_profile,
             account_context_reference=inputs.account_context_reference,
+            proposal_source_reference=proposal_result.proposal_reference,
         )
+
+
+def _manual_inputs(
+    operator_proposal: ManualOperatorProposalInput,
+    feature_result: Any,
+    inputs: AutonomousDecisionInputs,
+) -> AutonomousDecisionInputs:
+    order_type = str(operator_proposal.order_type or "").strip().upper()
+    semantics = _ORDER_TYPE_SEMANTICS.get(order_type)
+    if semantics is None:
+        raise OperatorCandidateInputError("UNSUPPORTED_ORDER_TYPE")
+    side, entry_intent, action = semantics
+    snapshot = market_snapshot_from_feature_result(feature_result)
+    proposal = AutonomousOrderIntentProposal(
+        symbol=inputs.runtime_context.symbol,
+        side=side,
+        entry_intent=entry_intent,
+        order_type=order_type,
+        proposed_action=action,
+        entry_price=operator_proposal.entry_price,
+        trigger_price=operator_proposal.trigger_price,
+        limit_price=operator_proposal.limit_price,
+        stop_loss=operator_proposal.stop_loss,
+        take_profit=operator_proposal.take_profit,
+        proposed_volume=operator_proposal.proposed_volume,
+        risk_policy_reference=inputs.risk_result.decision_id if inputs.risk_result else "",
+        structured_reasoning=(),
+    )
+    material = {
+        "source": MANUAL_OPERATOR_PROPOSAL_SOURCE,
+        "proposal": {
+            "order_type": order_type,
+            **{
+                name: _canonical_manual_decimal(getattr(operator_proposal, name))
+                for name in (
+                    "entry_price",
+                    "trigger_price",
+                    "limit_price",
+                    "stop_loss",
+                    "take_profit",
+                    "proposed_volume",
+                )
+            },
+        },
+        "symbol": inputs.runtime_context.symbol,
+        "broker_symbol": inputs.runtime_context.broker_symbol,
+        "account_context_reference": inputs.account_context_reference,
+        "market_snapshot_hash": autonomous_market_snapshot_provenance_hash(snapshot),
+        "context_reference": inputs.runtime_context.context_pack_id,
+        "risk_reference": inputs.risk_result.decision_id if inputs.risk_result else "",
+    }
+    digest = hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    source_reference = "manual_operator_proposal_" + digest[:24]
+    return AutonomousDecisionInputs(
+        runtime_context=inputs.runtime_context,
+        method_selection=inputs.method_selection,
+        score_report=inputs.score_report,
+        risk_result=inputs.risk_result,
+        lifecycle_status=inputs.lifecycle_status,
+        direction=side,
+        semantic_parameter_references=(
+            source_reference,
+            inputs.risk_result.decision_id if inputs.risk_result else "",
+            inputs.method_selection.result_id,
+            inputs.runtime_context.context_pack_id,
+        ),
+        order_proposal=proposal,
+        order_market_snapshot=snapshot,
+        timeframe_profile=inputs.timeframe_profile,
+        account_context_reference=inputs.account_context_reference,
+        proposal_source=MANUAL_OPERATOR_PROPOSAL_SOURCE,
+        proposal_source_reference=source_reference,
+    )
+
+
+def _canonical_manual_decimal(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        number = Decimal(text)
+    except InvalidOperation:
+        return text
+    if not number.is_finite():
+        return text
+    normalized = format(number, "f")
+    return normalized.rstrip("0").rstrip(".") if "." in normalized else normalized
 
 
 def _validate_market_sources(

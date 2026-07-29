@@ -19,6 +19,7 @@ from src.config import Config
 from src.services.trading.calendar import CalendarContextBuilder
 from src.services.trading.decision.operator_candidate_generation import (
     AuthoritativeAutonomousInputAssembler,
+    ManualOperatorProposalInput,
 )
 from src.services.trading.execution import (
     DryRunConfirmationService,
@@ -303,6 +304,7 @@ def _render_autonomous_decision_review_card(orchestrator):
         else:
             st.info(f"Generation={outcome.status} | reason={outcome.blocker}")
 
+    _render_manual_operator_candidate_form(orchestrator)
     run_result = get_autonomous_decision_run_result(st.session_state)
     candidate = run_result.candidate if run_result else None
     validation = run_result.validation if run_result else None
@@ -313,6 +315,110 @@ def _render_autonomous_decision_review_card(orchestrator):
             _operator_candidate_review_controller(),
         )
     _render_pending_candidate_handoff(run_result)
+
+
+def _render_manual_operator_candidate_form(orchestrator) -> None:
+    with st.expander("Manual Operator Proposal", expanded=False):
+        st.caption(
+            "Creates one protected, non-executable candidate from values entered here. "
+            "It does not call the LLM, confirm, export, submit, or grant execution permission."
+        )
+        with st.form("manual_operator_proposal_form"):
+            symbol = st.selectbox(
+                "Canonical symbol",
+                ("XAUUSD", "BTCUSD"),
+                index=None,
+                placeholder="Select symbol",
+                key="manual_operator_symbol",
+            )
+            order_type = st.selectbox(
+                "Order type",
+                (
+                    "BUY",
+                    "SELL",
+                    "BUY_LIMIT",
+                    "SELL_LIMIT",
+                    "BUY_STOP",
+                    "SELL_STOP",
+                    "BUY_STOP_LIMIT",
+                    "SELL_STOP_LIMIT",
+                ),
+                index=None,
+                placeholder="Select order type",
+                key="manual_operator_order_type",
+            )
+            pending = bool(order_type and order_type not in {"BUY", "SELL"})
+            stop_limit = bool(order_type and order_type.endswith("STOP_LIMIT"))
+            entry_price = st.text_input(
+                "Entry price",
+                disabled=not pending or stop_limit,
+                key="manual_operator_entry_price",
+            )
+            trigger_price = st.text_input(
+                "Trigger price",
+                disabled=not stop_limit,
+                key="manual_operator_trigger_price",
+            )
+            limit_price = st.text_input(
+                "Limit price",
+                disabled=not stop_limit,
+                key="manual_operator_limit_price",
+            )
+            stop_loss = st.text_input(
+                "Stop loss", key="manual_operator_stop_loss"
+            )
+            take_profit = st.text_input(
+                "Take profit", key="manual_operator_take_profit"
+            )
+            proposed_volume = st.text_input(
+                "Proposed volume", key="manual_operator_volume"
+            )
+            submitted = st.form_submit_button(
+                "Validate and Create Manual Candidate",
+                use_container_width=True,
+            )
+        if submitted:
+            if not symbol or not order_type:
+                st.session_state["manual_operator_candidate_outcome"] = (
+                    "BLOCKED",
+                    "MANUAL_PROPOSAL_SELECTION_MISSING",
+                )
+            else:
+                controller = OperatorCandidateGenerationController(
+                    AuthoritativeAutonomousInputAssembler(
+                        orchestrator.live_service,
+                        mode="human_confirmed_live",
+                    )
+                )
+                with st.spinner("Validating authoritative manual proposal..."):
+                    outcome = controller.generate(
+                        st.session_state,
+                        secrets.token_hex(16),
+                        symbol=symbol,
+                        operator_proposal=ManualOperatorProposalInput(
+                            order_type=order_type,
+                            entry_price=entry_price,
+                            trigger_price=trigger_price,
+                            limit_price=limit_price,
+                            stop_loss=stop_loss,
+                            take_profit=take_profit,
+                            proposed_volume=proposed_volume,
+                        ),
+                    )
+                st.session_state["manual_operator_candidate_outcome"] = (
+                    outcome.status,
+                    outcome.blocker,
+                    outcome.candidate_reference,
+                )
+        manual_outcome = st.session_state.get("manual_operator_candidate_outcome")
+        if manual_outcome:
+            status, blocker, *candidate = manual_outcome
+            if status == "GENERATED":
+                st.success(
+                    f"Manual candidate created: {candidate[0]} | non-executable=true"
+                )
+            else:
+                st.warning(f"Manual candidate blocked: {blocker}")
 
 
 def _operator_candidate_review_controller() -> OperatorCandidateReviewController:
