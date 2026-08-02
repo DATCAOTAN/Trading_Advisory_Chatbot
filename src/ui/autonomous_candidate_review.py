@@ -218,6 +218,8 @@ def render_autonomous_candidate_review_card(
 def render_autonomous_candidate_confirmation_controls(
     candidate_reference: str,
     controller: OperatorCandidateReviewController,
+    *,
+    key_prefix: str = "",
 ) -> None:
     st.caption(
         "Explicit candidate review only. Confirmation remains non-executable and "
@@ -229,18 +231,18 @@ def render_autonomous_candidate_confirmation_controls(
     phrase = st.text_input(
         "Non-executable confirmation phrase",
         type="password",
-        key="autonomous_candidate_confirmation_phrase",
+        key=f"{key_prefix}autonomous_candidate_confirmation_phrase",
     )
     actions = st.columns(2)
     if actions[0].button(
         "Confirm Candidate (Non-Executable)",
-        key="confirm_autonomous_candidate",
+        key=f"{key_prefix}confirm_autonomous_candidate",
         use_container_width=True,
     ):
         controller.act(st.session_state, candidate_reference, "CONFIRM", phrase)
     if actions[1].button(
         "Reject Candidate",
-        key="reject_autonomous_candidate",
+        key=f"{key_prefix}reject_autonomous_candidate",
         use_container_width=True,
     ):
         controller.act(st.session_state, candidate_reference, "REJECT")

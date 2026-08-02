@@ -290,18 +290,34 @@ def _render_runtime_profile_selector() -> tuple[str, tuple[str, ...]]:
         f"{','.join(selected_timeframes)}"
     )
     return selected_symbol, selected_timeframes
-def _render_autonomous_decision_review_card(orchestrator, selected_symbol, selected_timeframes):
+def _render_autonomous_decision_review_card(
+    orchestrator,
+    selected_symbol,
+    selected_timeframes,
+    *,
+    requested_mode=None,
+    generation_request_id=None,
+    show_manual_proposal=True,
+    key_prefix="",
+):
     monitor_row = _latest_monitor_row(selected_symbol, selected_timeframes)
     active_mode = _render_trading_runtime_controls(
-        selected_symbol, selected_timeframes, monitor_row
+        selected_symbol,
+        selected_timeframes,
+        monitor_row,
+        requested_mode=requested_mode,
+        key_prefix=key_prefix,
     )
-    mode_ui = _mode_ui_capabilities(active_mode)
+    mode_ui = _mode_ui_capabilities(requested_mode or active_mode)
     actions = st.columns(2)
     generation_active = st.session_state.get("autonomous_candidate_generation_active") is True
     if actions[0].button(
         "Generate Autonomous Candidate",
-        key="generate_autonomous_candidate",
-        disabled=generation_active,
+        key=f"{key_prefix}generate_autonomous_candidate",
+        disabled=(
+            generation_active
+            or bool(requested_mode and active_mode != requested_mode)
+        ),
         use_container_width=True,
     ):
         controller = OperatorCandidateGenerationController(
@@ -312,14 +328,14 @@ def _render_autonomous_decision_review_card(orchestrator, selected_symbol, selec
         with st.spinner("Building authoritative runtime context..."):
             outcome = controller.generate(
                 st.session_state,
-                secrets.token_hex(16),
+                generation_request_id or secrets.token_hex(16),
                 symbol=selected_symbol,
                 timeframes=selected_timeframes,
             )
         st.session_state["autonomous_candidate_generation_outcome"] = outcome
     if actions[1].button(
         "Clear Current Candidate",
-        key="clear_autonomous_candidate",
+        key=f"{key_prefix}clear_autonomous_candidate",
         use_container_width=True,
     ):
         clear_autonomous_decision_run_result(st.session_state)
@@ -344,7 +360,10 @@ def _render_autonomous_decision_review_card(orchestrator, selected_symbol, selec
             f"closed_bar={monitor_row['closed_bar_time']} | execution_authority=false"
         )
 
-    _render_manual_operator_candidate_form(orchestrator, active_mode)
+    if requested_mode and active_mode != requested_mode:
+        st.info("Grant the requested authoritative mode before candidate generation.")
+    if show_manual_proposal:
+        _render_manual_operator_candidate_form(orchestrator, active_mode)
     run_result = get_autonomous_decision_run_result(st.session_state)
     candidate = run_result.candidate if run_result else None
     validation = run_result.validation if run_result else None
@@ -364,13 +383,14 @@ def _render_autonomous_decision_review_card(orchestrator, selected_symbol, selec
         render_autonomous_candidate_confirmation_controls(
             candidate.candidate_reference,
             _operator_candidate_review_controller(),
+            key_prefix=key_prefix,
         )
     elif candidate is not None and active_mode == "advisory_only":
         st.info("Advisory-only mode cannot confirm or submit a candidate.")
     elif candidate is not None and active_mode == "autonomous_live":
         st.info("Autonomous mode uses Standing Trading Mandate authority, not per-trade confirmation.")
     if mode_ui["human_confirmation"]:
-        _render_pending_candidate_handoff(run_result)
+        _render_pending_candidate_handoff(run_result, key_prefix=key_prefix)
 
 
 def _latest_monitor_row(symbol: str, timeframes: tuple[str, ...]):
@@ -400,7 +420,9 @@ def _mode_ui_capabilities(mode: str) -> dict[str, bool]:
     }
 
 
-def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> str:
+def _render_trading_runtime_controls(
+    symbol, timeframes, monitor_row, *, requested_mode=None, key_prefix=""
+) -> str:
     with st.expander("Trading Authority and Runtime Supervisor", expanded=True):
         st.caption(
             "Protected demo-account authority and bounded completed-bar supervision. "
@@ -408,7 +430,10 @@ def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> str:
         )
         service = _trading_authority_service()
         try:
-            st.button("Refresh Runtime Health", key="refresh_trading_runtime_health")
+            st.button(
+                "Refresh Runtime Health",
+                key=f"{key_prefix}refresh_trading_runtime_health",
+            )
             status = service.status(refresh_runtime=True)
         except Exception as exc:
             st.warning(f"Trading authority unavailable: {type(exc).__name__}")
@@ -490,17 +515,30 @@ def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> str:
             ),
         }
         st.info(mode_help.get(status["mode"], "Operating mode is unavailable."))
-        mode_ui = _mode_ui_capabilities(status["mode"])
+        mode_ui = _mode_ui_capabilities(requested_mode or status["mode"])
 
-        with st.form("authoritative_mode_form"):
-            mode = st.selectbox(
-                "Authoritative operating mode",
-                ("advisory_only", "human_confirmed_live", "autonomous_live"),
-                index=None,
-                placeholder="Select mode",
+        with st.form(f"{key_prefix}authoritative_mode_form"):
+            if requested_mode:
+                mode = requested_mode
+                st.caption(f"Requested authoritative mode: {requested_mode}")
+            else:
+                mode = st.selectbox(
+                    "Authoritative operating mode",
+                    ("advisory_only", "human_confirmed_live", "autonomous_live"),
+                    index=None,
+                    placeholder="Select mode",
+                    key=f"{key_prefix}authoritative_operating_mode",
+                )
+            grant_mode = st.checkbox(
+                "I explicitly authorize this demo-account mode change",
+                key=f"{key_prefix}authorize_demo_mode_change",
             )
-            grant_mode = st.checkbox("I explicitly authorize this demo-account mode change")
-            if st.form_submit_button("Set Authoritative Mode"):
+            mode_action = (
+                "Grant MT5 Demo Access"
+                if requested_mode == "human_confirmed_live"
+                else "Set Authoritative Mode"
+            )
+            if st.form_submit_button(mode_action):
                 try:
                     service.set_mode(mode, operator_grant=grant_mode)
                     st.success("Authoritative mode updated.")
@@ -510,32 +548,74 @@ def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> str:
         if not mode_ui["mandate_controls"]:
             return status["mode"]
 
-        with st.form("standing_mandate_form"):
+        with st.form(f"{key_prefix}standing_mandate_form"):
             st.markdown("**Standing Trading Mandate**")
-            mandate_id = st.text_input("Mandate ID")
-            mandate_version = st.number_input("Mandate version", min_value=1, step=1)
-            symbols = tuple(st.multiselect("Canonical symbols", ("XAUUSD", "BTCUSD")))
-            broker_symbols = tuple(
-                st.multiselect("Broker symbols", ("XAUUSDm", "BTCUSDm"))
+            mandate_id = st.text_input("Mandate ID", key=f"{key_prefix}mandate_id")
+            mandate_version = st.number_input(
+                "Mandate version", min_value=1, step=1, key=f"{key_prefix}mandate_version"
             )
-            order_families = tuple(st.multiselect("Order families", ("MARKET", "PENDING")))
+            symbols = tuple(
+                st.multiselect(
+                    "Canonical symbols",
+                    ("XAUUSD", "BTCUSD"),
+                    key=f"{key_prefix}mandate_symbols",
+                )
+            )
+            broker_symbols = tuple(
+                st.multiselect(
+                    "Broker symbols",
+                    ("XAUUSDm", "BTCUSDm"),
+                    key=f"{key_prefix}mandate_broker_symbols",
+                )
+            )
+            order_families = tuple(
+                st.multiselect(
+                    "Order families",
+                    ("MARKET", "PENDING"),
+                    key=f"{key_prefix}mandate_order_families",
+                )
+            )
             management_actions = tuple(
                 st.multiselect(
                     "Management actions",
                     ("OBSERVE", "NO_ACTION", "CANCEL_PENDING", "MODIFY_PROTECTION", "CLOSE_POSITION"),
+                    key=f"{key_prefix}mandate_management_actions",
                 )
             )
             limit_columns = st.columns(5)
-            maximum_volume = limit_columns[0].text_input("Max volume")
-            maximum_risk = limit_columns[1].text_input("Max risk/trade")
-            maximum_positions = limit_columns[2].number_input("Max positions", min_value=1, step=1)
-            maximum_trades = limit_columns[3].number_input("Max trades/day", min_value=1, step=1)
-            maximum_loss = limit_columns[4].text_input("Max loss/day")
-            active_from = st.text_input("Active from (UTC ISO-8601)")
-            active_until = st.text_input("Active until (UTC ISO-8601)")
-            expires_at = st.text_input("Expires at (UTC ISO-8601)")
-            mandate_kill_switch = st.checkbox("Mandate kill switch engaged", value=True)
-            grant_mandate = st.checkbox("I explicitly grant this bounded demo-account mandate")
+            maximum_volume = limit_columns[0].text_input(
+                "Max volume", key=f"{key_prefix}mandate_max_volume"
+            )
+            maximum_risk = limit_columns[1].text_input(
+                "Max risk/trade", key=f"{key_prefix}mandate_max_risk"
+            )
+            maximum_positions = limit_columns[2].number_input(
+                "Max positions", min_value=1, step=1, key=f"{key_prefix}mandate_max_positions"
+            )
+            maximum_trades = limit_columns[3].number_input(
+                "Max trades/day", min_value=1, step=1, key=f"{key_prefix}mandate_max_trades"
+            )
+            maximum_loss = limit_columns[4].text_input(
+                "Max loss/day", key=f"{key_prefix}mandate_max_loss"
+            )
+            active_from = st.text_input(
+                "Active from (UTC ISO-8601)", key=f"{key_prefix}mandate_active_from"
+            )
+            active_until = st.text_input(
+                "Active until (UTC ISO-8601)", key=f"{key_prefix}mandate_active_until"
+            )
+            expires_at = st.text_input(
+                "Expires at (UTC ISO-8601)", key=f"{key_prefix}mandate_expires_at"
+            )
+            mandate_kill_switch = st.checkbox(
+                "Mandate kill switch engaged",
+                value=True,
+                key=f"{key_prefix}mandate_kill_switch",
+            )
+            grant_mandate = st.checkbox(
+                "I explicitly grant this bounded demo-account mandate",
+                key=f"{key_prefix}grant_mandate",
+            )
             if st.form_submit_button("Grant Standing Mandate"):
                 try:
                     service.grant_mandate(
@@ -565,9 +645,20 @@ def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> str:
         mandate_ids = tuple(item["mandate_id"] for item in status["mandates"])
         command_columns = st.columns(2)
         with command_columns[0]:
-            revoke_id = st.selectbox("Mandate to revoke", mandate_ids, index=None)
-            revoke_grant = st.checkbox("I explicitly revoke this mandate")
-            if st.button("Revoke Mandate", disabled=revoke_id is None):
+            revoke_id = st.selectbox(
+                "Mandate to revoke",
+                mandate_ids,
+                index=None,
+                key=f"{key_prefix}revoke_mandate_id",
+            )
+            revoke_grant = st.checkbox(
+                "I explicitly revoke this mandate", key=f"{key_prefix}revoke_mandate_grant"
+            )
+            if st.button(
+                "Revoke Mandate",
+                disabled=revoke_id is None,
+                key=f"{key_prefix}revoke_mandate",
+            ):
                 try:
                     service.revoke_mandate(revoke_id, operator_grant=revoke_grant)
                     st.success("Mandate revoked.")
@@ -576,15 +667,28 @@ def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> str:
         with command_columns[1]:
             process = _autonomous_monitor_process()
             process_status = process.status()
-            monitor_mandate = st.selectbox("Supervisor mandate", mandate_ids, index=None)
+            monitor_mandate = st.selectbox(
+                "Supervisor mandate",
+                mandate_ids,
+                index=None,
+                key=f"{key_prefix}supervisor_mandate",
+            )
             start, stop = st.columns(2)
-            if start.button("Start Supervisor", disabled=process_status["running"]):
+            if start.button(
+                "Start Supervisor",
+                disabled=process_status["running"],
+                key=f"{key_prefix}start_supervisor",
+            ):
                 process_status = process.start(
                     symbol=symbol,
                     timeframes=timeframes,
                     mandate_id=monitor_mandate or "",
                 )
-            if stop.button("Stop Supervisor", disabled=not process_status["running"]):
+            if stop.button(
+                "Stop Supervisor",
+                disabled=not process_status["running"],
+                key=f"{key_prefix}stop_supervisor",
+            ):
                 process_status = process.stop()
             st.caption(
                 f"supervisor_running={str(process_status['running']).lower()} | "
@@ -720,7 +824,7 @@ def _operator_candidate_review_controller() -> OperatorCandidateReviewController
     )
 
 
-def _render_pending_candidate_handoff(run_result):
+def _render_pending_candidate_handoff(run_result, *, key_prefix=""):
     if run_result is None or run_result.candidate.action != "PENDING":
         return
     st.caption(
@@ -737,13 +841,13 @@ def _render_pending_candidate_handoff(run_result):
     )
     phrase = st.text_input(
         "Export-only confirmation",
-        key="pending_candidate_export_confirmation",
+        key=f"{key_prefix}pending_candidate_export_confirmation",
         type="password",
         disabled=not ready,
     )
     if st.button(
         "Export Protected Pending Candidate",
-        key="export_protected_pending_candidate",
+        key=f"{key_prefix}export_protected_pending_candidate",
         disabled=not ready,
     ):
         try:

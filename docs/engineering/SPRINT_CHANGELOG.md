@@ -1240,3 +1240,30 @@ Commit: this commit
 
 - Streamlit mode authorization presentation is complete; execution permissions remain disabled and kill switches engaged.
 - A human operator may later perform a separately authorized demo acceptance when a natural actionable candidate exists.
+
+---
+
+### Maintenance - Conversational Trading Authorization
+
+Date: 2026-08-02
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added one typed, redacted and non-executable conversational trading request for advisory, human-confirmed and autonomous mode intent.
+- Reused the existing protected mode/mandate service, candidate generation, Review Card and confirmation controls directly beside the conversation.
+- Added caller-scoped Streamlit widget keys so Dashboard and chat controls coexist without duplicate actions.
+- Kept configured symbol/profile resolution authoritative and added no dedicated intent-classification LLM call.
+
+#### Verification
+
+- Focused/neighboring tests: 83 passed with 2 dependency warnings.
+- Full regression: 3,205 passed and 156 subtests passed in 172.16 seconds with 3 unchanged dependency warnings.
+- Browser: one BTCUSD demo request rendered the human-confirmed MT5 Access Card; one refresh preserved the same request and no action repeated.
+- Candidate generation, confirmation, mandate, export, pre-submit, controlled-submit, `order_send`, management and broker mutation: 0.
+
+#### Current state / next step
+
+- Conversational authorization is waiting at the genuine human `Grant MT5 Demo Access` boundary.
+- The operator may grant that mode explicitly, then authorize at most one candidate-generation action. Submission remains separate and disabled.

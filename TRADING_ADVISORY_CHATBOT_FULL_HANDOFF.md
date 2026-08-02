@@ -2518,3 +2518,16 @@ Post-release maintenance completes the existing Dashboard mode-specific authoriz
 - The single authorized human-mode generation attempt ended naturally with `METHOD_BAD_REGIME`; no candidate, confirmation, export, pre-submit artifact, controlled submission, or broker mutation was created.
 - Full regression passed with 3,194 tests and 156 subtests; three dependency warnings were unchanged. Focused mode/Dashboard/authority tests passed with 48 tests. Compileall, diff, and static safety checks passed.
 - The software-complete release tag remains unchanged. Operational broker acceptance remains separate and requires explicit human authorization.
+
+# 61. CONVERSATIONAL TRADING AUTHORIZATION
+
+The existing chat surface now carries a typed, non-executable trading-authorization request into the existing protected authority and candidate-review workflow.
+
+- A deterministic parser normalizes advisory-only, human-confirmed, and autonomous requests without adding an intent-classification LLM call. Conflicting automatic/per-trade-confirmation wording resolves to the safer human-confirmed mode.
+- The typed public request binds the conversation request, configured canonical/broker symbol mapping, active timeframe profile, confirmation policy, demo-account scope, mandate requirement, allowed next action, blockers, and an explicitly non-executable state.
+- Streamlit reloads the typed request from persisted chat history and reuses the existing authority service, candidate generator, Review Card, confirmation controls, and Standing Trading Mandate controls. Chat text and session state remain non-authoritative.
+- Shared Dashboard/chat widgets use caller-scoped keys, so both surfaces can render in one Streamlit run without duplicate widget actions. Refresh reuses the persisted request and does not call the provider or generate a candidate.
+- Browser acceptance sent one BTCUSD demo human-confirmed request. The conversation displayed `human_confirmed_live`, `CONFIRM_EVERY_TRADE`, `BTCUSD -> BTCUSDm`, `M1,H1,H4`, healthy DEMO/account/lifecycle evidence, disabled permissions, engaged kill switches, and the existing `Grant MT5 Demo Access` action.
+- Acceptance stopped at the required human Grant boundary. Candidate generation, confirmation, mandate creation, export, pre-submit creation, controlled-submit, runtime `order_send`, management mutation, and broker mutation were zero.
+- Verification: 83 focused/neighboring tests passed. Full regression passed with 3,205 tests and 156 subtests in 172.16 seconds; three dependency warnings were unchanged. Compile and diff checks passed.
+- Verification level: `FULL_REGRESSION_PASS`. Next: the operator may explicitly grant the requested demo-account mode; only then may one candidate-generation action occur.

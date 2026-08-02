@@ -24,7 +24,12 @@ except ImportError:
 from src.config import Config
 from src.services.agents.evaluation_registry import register_evaluation_record
 from src.services.agents.journal_review import record_journal_review
+from src.services.trading.decision.conversational_authorization import (
+    ConversationalTradingRequest,
+    parse_conversational_trading_request,
+)
 from src.ui.runtime_flags import get_knowledge_v3_flags
+from src.ui.tab_dashboard import _render_autonomous_decision_review_card
 
 
 class _AnswerStreamLogger:
@@ -190,7 +195,17 @@ def render(orchestrator, feature_flags: dict):
                 if metrics:
                     _render_trade_chart(metrics)
 
+    latest_trading_request = _latest_conversational_trading_request(
+        st.session_state.messages
+    )
+    if latest_trading_request is not None:
+        _render_conversational_trading_authorization(orchestrator, latest_trading_request)
+
     if user_query := st.chat_input("Hoi ve xu huong vang, chien luoc SMC, du lieu vi mo..."):
+        trading_request = parse_conversational_trading_request(
+            user_query,
+            conversation_id=st.session_state.current_session_id,
+        )
         user_msg = {"role": "user", "content": user_query}
         from src.services.history_service import HistoryService
 
@@ -307,6 +322,8 @@ def render(orchestrator, feature_flags: dict):
             assistant_msg["finish_reason"] = completion_result["finish_reason"]
             if completion_result["level"] == "warn":
                 assistant_msg["quality_status"] = "DEGRADED"
+        if trading_request is not None:
+            assistant_msg["trading_request"] = trading_request.to_public_dict()
         st.session_state.messages.append(assistant_msg)
         if memory_save_allowed:
             memory_hash = _answer_sha256(full_answer)
@@ -362,6 +379,60 @@ def render(orchestrator, feature_flags: dict):
                 user_query=user_query,
             )
             _store_evaluation_runtime_artifacts(artifacts_for_review)
+
+        if trading_request is not None:
+            _render_conversational_trading_authorization(orchestrator, trading_request)
+
+
+def _latest_conversational_trading_request(messages) -> ConversationalTradingRequest | None:
+    for message in reversed(messages):
+        payload = message.get("trading_request") if isinstance(message, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        try:
+            return ConversationalTradingRequest.from_public_dict(payload)
+        except ValueError:
+            return None
+    return None
+
+
+def _render_conversational_trading_authorization(
+    orchestrator,
+    request: ConversationalTradingRequest,
+) -> None:
+    st.markdown("#### MT5 Trading Authorization")
+    st.caption(
+        f"mode={request.requested_mode} | confirmation={request.confirmation_policy} | "
+        f"symbol={request.canonical_symbol} | broker={request.broker_symbol} | "
+        f"profile={','.join(request.timeframe_profile)} | NON_EXECUTABLE"
+    )
+    if request.blockers:
+        st.warning("Authorization blockers: " + ", ".join(request.blockers))
+        return
+    if request.requested_mode == "advisory_only":
+        st.info(
+            "Advisory-only request: analysis is available, but Confirm, mandate, "
+            "MT5 authorization, and submission are unavailable."
+        )
+    elif request.requested_mode == "human_confirmed_live":
+        st.info(
+            "Human-confirmed request: demo MT5 access is separate from exact candidate "
+            "confirmation and any later one-shot submission authorization."
+        )
+    else:
+        st.info(
+            "Autonomous request: execution requires a current bounded Standing Trading "
+            "Mandate; per-trade human confirmation is not authority in this mode."
+        )
+    _render_autonomous_decision_review_card(
+        orchestrator,
+        request.canonical_symbol,
+        request.timeframe_profile,
+        requested_mode=request.requested_mode,
+        generation_request_id=request.request_id,
+        show_manual_proposal=False,
+        key_prefix="chat_trade_",
+    )
 
 
 def _store_evaluation_runtime_artifacts(runtime_artifacts: dict | None) -> None:

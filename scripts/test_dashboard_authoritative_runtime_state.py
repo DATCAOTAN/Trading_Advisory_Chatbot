@@ -176,5 +176,5 @@ def test_dashboard_isolates_mode_specific_authority_controls():
 def test_mode_form_submit_is_not_deadlocked_by_form_local_selection():
     source = Path("src/ui/tab_dashboard.py").read_text(encoding="utf-8")
 
-    assert 'form_submit_button("Set Authoritative Mode")' in source
-    assert 'form_submit_button("Set Authoritative Mode", disabled=' not in source
+    assert "form_submit_button(mode_action)" in source
+    assert "form_submit_button(mode_action, disabled=" not in source
