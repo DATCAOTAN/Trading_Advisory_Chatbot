@@ -1267,3 +1267,30 @@ Commit: this commit
 
 - Conversational authorization is waiting at the genuine human `Grant MT5 Demo Access` boundary.
 - The operator may grant that mode explicitly, then authorize at most one candidate-generation action. Submission remains separate and disabled.
+
+---
+
+### Maintenance - Conversational MT5 Access Grant Idempotency
+
+Date: 2026-08-02
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Verified one real human Grant reached the existing controller and persisted `human_confirmed_live` for the matching DEMO account fingerprint.
+- Reused the stable typed conversational request ID as the existing mode nonce/idempotency key.
+- Made duplicate delivery return the original protected mode record and conflicting reuse fail closed.
+- Rerun Streamlit after a successful write so the visible mode is reloaded from backend authority immediately.
+
+#### Verification
+
+- Focused authority/Dashboard/conversation tests: 39 passed with 2 unchanged dependency warnings.
+- Full regression: 3,206 passed and 156 subtests passed with 3 unchanged dependency warnings.
+- Fresh authority reload and Streamlit refresh both showed `human_confirmed_live`; the protected journal grew by exactly one record from the human click.
+- LLM, candidate generation, controlled-submit, runtime `order_send`, and broker mutation counts: 0.
+
+#### Current state / next step
+
+- Execution permissions remain disabled and execution/management kill switches remain engaged.
+- Next: complete full regression, then the operator may separately authorize one candidate-generation action.

@@ -152,6 +152,37 @@ def test_operator_service_reloads_mode_and_mandate_and_rejects_real_account(tmp_
         blocked.set_mode("advisory_only", operator_grant=True)
 
 
+def test_operator_mode_grant_is_idempotent_for_stable_request_id(tmp_path):
+    authority = TradingAuthorityService(TradingAuthorityStore(tmp_path / "authority.jsonl"))
+    service = TradingAuthorityOperatorService(
+        authority_service=authority,
+        account_adapter=_AccountAdapter("DEMO"),
+        lifecycle_supervisor=SimpleNamespace(),
+        pre_submit_store=SimpleNamespace(),
+    )
+
+    first = service.set_mode(
+        "human_confirmed_live",
+        operator_grant=True,
+        idempotency_key="conversation_trade_stable_request",
+    )
+    second = service.set_mode(
+        "human_confirmed_live",
+        operator_grant=True,
+        idempotency_key="conversation_trade_stable_request",
+    )
+
+    assert second == first
+    assert len(authority.store.read_strict()) == 1
+
+    with pytest.raises(TradingAuthorityError, match="AUTHORITY_IDEMPOTENCY_CONFLICT"):
+        service.set_mode(
+            "autonomous_live",
+            operator_grant=True,
+            idempotency_key="conversation_trade_stable_request",
+        )
+
+
 def test_monitor_process_starts_once_and_stops(monkeypatch, tmp_path):
     script = tmp_path / "scripts" / "run_autonomous_candidate_monitor.py"
     script.parent.mkdir()

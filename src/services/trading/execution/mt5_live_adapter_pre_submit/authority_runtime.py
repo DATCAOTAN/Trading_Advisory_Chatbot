@@ -119,14 +119,20 @@ class TradingAuthorityOperatorService:
             "metadata_redacted": True,
         }
 
-    def set_mode(self, operating_mode: str, *, operator_grant: bool) -> dict[str, Any]:
+    def set_mode(
+        self,
+        operating_mode: str,
+        *,
+        operator_grant: bool,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
         account = self._demo_account()
         record = self.authority.set_mode(
             operating_mode,
             account_fingerprint=account["account_context_fingerprint"],
             account_is_demo=True,
             operator_grant=operator_grant,
-            nonce=secrets.token_hex(16),
+            nonce=idempotency_key or secrets.token_hex(16),
         )
         return record.to_public_dict()
 

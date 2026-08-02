@@ -2531,3 +2531,14 @@ The existing chat surface now carries a typed, non-executable trading-authorizat
 - Acceptance stopped at the required human Grant boundary. Candidate generation, confirmation, mandate creation, export, pre-submit creation, controlled-submit, runtime `order_send`, management mutation, and broker mutation were zero.
 - Verification: 83 focused/neighboring tests passed. Full regression passed with 3,205 tests and 156 subtests in 172.16 seconds; three dependency warnings were unchanged. Compile and diff checks passed.
 - Verification level: `FULL_REGRESSION_PASS`. Next: the operator may explicitly grant the requested demo-account mode; only then may one candidate-generation action occur.
+
+# 62. CONVERSATIONAL MT5 ACCESS GRANT IDEMPOTENCY
+
+Post-release maintenance verifies the real human Grant boundary and makes repeated delivery of the same typed request idempotent.
+
+- One real operator click reached the existing controller and protected authority service. The journal added exactly one valid record and the authoritative mode changed from `autonomous_live` to `human_confirmed_live` for the matching DEMO account fingerprint.
+- A fresh store/service reload rendered `human_confirmed_live`; a successful Grant now triggers a native Streamlit rerun so the UI immediately reloads backend authority instead of retaining the pre-submit display value. Session state is not treated as authority.
+- The stable conversational request ID is now passed to the existing mode service as its nonce/idempotency key. Repeating the same grant returns the existing record; reusing the key with different mode or account semantics fails closed.
+- Ordinary non-conversational mode changes retain the existing generated nonce behavior. No new authority path, schema, journal, or execution boundary was added.
+- Grant and verification caused zero LLM calls, candidate generations, controlled submissions, runtime `order_send` calls, or broker mutations. Execution permissions remained disabled and both kill switches remained engaged.
+- Verification: 39 focused authority/Dashboard/conversation tests passed; full regression passed with 3,206 tests and 156 subtests; three dependency warnings were unchanged. Compileall, diff, and static safety checks passed.

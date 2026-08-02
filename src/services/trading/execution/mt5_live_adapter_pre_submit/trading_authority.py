@@ -209,6 +209,10 @@ class TradingAuthorityStore:
             rows = self.read_strict()
             existing = next((row for row in rows if row["event_id"] == event_id), None)
             if existing is not None:
+                if event_type == "MODE_SET" and _same_mode_request(
+                    existing["payload"], payload
+                ):
+                    return existing, False
                 if not hmac.compare_digest(
                     str(existing["payload"].get("artifact_hash", "")),
                     str(payload.get("artifact_hash", "")),
@@ -356,13 +360,13 @@ class TradingAuthorityService:
             "nonce": nonce,
         }
         record = OperatingModeAuthority(
-            mode_record_id="mode_authority_" + _hash(material)[:24],
+            mode_record_id="mode_authority_" + _hash({"idempotency_key": nonce})[:24],
             artifact_hash="",
             **material,
         )
         record = replace(record, artifact_hash=_hash(record.protected_payload()))
-        self.store.append("MODE_SET", record)
-        return record
+        row, _created = self.store.append("MODE_SET", record)
+        return _mode_from_payload(row["payload"])
 
     def grant_mandate(
         self,
@@ -814,6 +818,17 @@ def _event_id(artifact: Any) -> str:
             f"{'revoked' if artifact.revoked else 'granted'}"
         )
     )
+
+
+def _same_mode_request(existing: Mapping[str, Any], requested: Mapping[str, Any]) -> bool:
+    fields = (
+        "operating_mode",
+        "account_fingerprint_hash",
+        "account_is_demo",
+        "operator_grant",
+        "nonce",
+    )
+    return all(existing.get(field) == requested.get(field) for field in fields)
 
 
 def _candidate_source_refs(candidate: Any) -> tuple[str, ...]:

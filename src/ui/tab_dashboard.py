@@ -306,6 +306,7 @@ def _render_autonomous_decision_review_card(
         selected_timeframes,
         monitor_row,
         requested_mode=requested_mode,
+        mode_idempotency_key=generation_request_id,
         key_prefix=key_prefix,
     )
     mode_ui = _mode_ui_capabilities(requested_mode or active_mode)
@@ -421,7 +422,13 @@ def _mode_ui_capabilities(mode: str) -> dict[str, bool]:
 
 
 def _render_trading_runtime_controls(
-    symbol, timeframes, monitor_row, *, requested_mode=None, key_prefix=""
+    symbol,
+    timeframes,
+    monitor_row,
+    *,
+    requested_mode=None,
+    mode_idempotency_key=None,
+    key_prefix="",
 ) -> str:
     with st.expander("Trading Authority and Runtime Supervisor", expanded=True):
         st.caption(
@@ -540,8 +547,13 @@ def _render_trading_runtime_controls(
             )
             if st.form_submit_button(mode_action):
                 try:
-                    service.set_mode(mode, operator_grant=grant_mode)
+                    service.set_mode(
+                        mode,
+                        operator_grant=grant_mode,
+                        idempotency_key=mode_idempotency_key,
+                    )
                     st.success("Authoritative mode updated.")
+                    st.rerun()
                 except Exception as exc:
                     st.warning(f"Mode change blocked: {str(exc)}")
 

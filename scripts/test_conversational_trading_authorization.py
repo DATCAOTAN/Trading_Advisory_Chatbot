@@ -119,6 +119,9 @@ def test_chat_ui_reuses_existing_authority_and_candidate_controls():
     assert "_render_autonomous_decision_review_card" in chatbot
     assert 'key_prefix="chat_trade_"' in chatbot
     assert 'key=f"{key_prefix}generate_autonomous_candidate"' in dashboard
+    assert "mode_idempotency_key=generation_request_id" in dashboard
+    assert "idempotency_key=mode_idempotency_key" in dashboard
+    assert 'st.success("Authoritative mode updated.")\n                    st.rerun()' in dashboard
     assert "Grant MT5 Demo Access" in dashboard
     assert "generation_request_id or secrets.token_hex(16)" in dashboard
     assert "controlled-submit" not in chatbot
