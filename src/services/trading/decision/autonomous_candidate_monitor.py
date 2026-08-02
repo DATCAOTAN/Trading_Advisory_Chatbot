@@ -10,15 +10,6 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from src.config import Config
-from src.services.trading.decision.autonomous_orchestrator import (
-    AutonomousDecisionOrchestrator,
-    AutonomousDecisionRunResult,
-)
-from src.services.trading.decision.operator_candidate_generation import (
-    OperatorCandidateInputError,
-)
-
-
 DEFAULT_MONITOR_JOURNAL_PATH = (
     "data/trading/execution_journal/autonomous_candidate_monitor.jsonl"
 )
@@ -67,6 +58,10 @@ class AutonomousCandidateMonitorResult:
     export_called: bool = False
     submission_called: bool = False
     order_send_called: bool = False
+    account_scope: str = ""
+    coordinator_status: str = ""
+    authorization_source: str = ""
+    pre_submit_ready: bool = False
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -85,6 +80,10 @@ class AutonomousCandidateMonitorResult:
             "export_called": False,
             "submission_called": False,
             "order_send_called": False,
+            "account_scope": self.account_scope,
+            "coordinator_status": self.coordinator_status,
+            "authorization_source": self.authorization_source,
+            "pre_submit_ready": bool(self.pre_submit_ready),
         }
 
 
@@ -93,6 +92,7 @@ class AutonomousCandidateMonitorJournal:
         "event_id",
         "created_at",
         "profile_id",
+        "account_scope",
         "symbol",
         "broker_symbol",
         "timeframes",
@@ -104,12 +104,21 @@ class AutonomousCandidateMonitorJournal:
         "blocker",
         "validation_valid",
         "generation_count",
+        "coordinator_status",
+        "authorization_source",
+        "pre_submit_ready",
         "execution_authority",
         "export_called",
         "submission_called",
         "order_send_called",
         "metadata_redacted",
         "record_hash",
+    }
+    _legacy_required = _required - {
+        "account_scope",
+        "coordinator_status",
+        "authorization_source",
+        "pre_submit_ready",
     }
 
     def __init__(self, path: str | Path = DEFAULT_MONITOR_JOURNAL_PATH):
@@ -131,11 +140,18 @@ class AutonomousCandidateMonitorJournal:
                 row = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise AutonomousCandidateMonitorError("MONITOR_JOURNAL_CORRUPT") from exc
-            if not isinstance(row, dict) or set(row) != self._required:
+            if not isinstance(row, dict):
+                raise AutonomousCandidateMonitorError("MONITOR_JOURNAL_CORRUPT")
+            keys = frozenset(row)
+            if keys not in {frozenset(self._required), frozenset(self._legacy_required)}:
                 raise AutonomousCandidateMonitorError("MONITOR_JOURNAL_CORRUPT")
             expected = _record_hash({key: value for key, value in row.items() if key != "record_hash"})
             if not hmac.compare_digest(str(row["record_hash"]), expected):
                 raise AutonomousCandidateMonitorError("MONITOR_JOURNAL_CORRUPT")
+            row.setdefault("account_scope", "legacy")
+            row.setdefault("coordinator_status", row.get("status", ""))
+            row.setdefault("authorization_source", "")
+            row.setdefault("pre_submit_ready", False)
             records.append(row)
         return records
 
@@ -149,21 +165,43 @@ class AutonomousCandidateMonitorJournal:
         self,
         *,
         profile_id: str,
+        account_scope: str,
         symbol: str,
         broker_symbol: str,
         timeframes: tuple[str, ...],
         closed_bar_time: str,
     ) -> bool:
         with self._exclusive_lock():
-            if any(
-                row["profile_id"] == profile_id
+            rows = self.records()
+            def same_profile(row):
+                return row["profile_id"] == profile_id or (
+                    row["account_scope"] == "legacy"
+                    and row["symbol"] == symbol
+                    and tuple(row["timeframes"]) == timeframes
+                )
+
+            duplicate = any(
+                same_profile(row)
                 and row["closed_bar_time"] == closed_bar_time
-                for row in self.records()
-            ):
+                for row in rows
+            )
+            unresolved = any(
+                same_profile(row)
+                and row["phase"] == "STARTED"
+                and not any(
+                    same_profile(completed)
+                    and completed["closed_bar_time"] == row["closed_bar_time"]
+                    and completed["phase"] == "COMPLETED"
+                    for completed in rows
+                )
+                for row in rows
+            )
+            if duplicate or unresolved:
                 return False
             self._append(
                 _row(
                     profile_id=profile_id,
+                    account_scope=account_scope,
                     symbol=symbol,
                     broker_symbol=broker_symbol,
                     timeframes=timeframes,
@@ -175,7 +213,9 @@ class AutonomousCandidateMonitorJournal:
             return True
 
     def complete(self, result: AutonomousCandidateMonitorResult) -> None:
-        profile_id = monitor_profile_id(result.symbol, result.timeframes)
+        profile_id = monitor_profile_id(
+            result.symbol, result.timeframes, result.account_scope
+        )
         with self._exclusive_lock():
             matching = [
                 row
@@ -190,6 +230,7 @@ class AutonomousCandidateMonitorJournal:
             self._append(
                 _row(
                     profile_id=profile_id,
+                    account_scope=result.account_scope,
                     symbol=result.symbol,
                     broker_symbol=result.broker_symbol,
                     timeframes=result.timeframes,
@@ -201,6 +242,9 @@ class AutonomousCandidateMonitorJournal:
                     blocker=result.blocker,
                     validation_valid=result.validation_valid,
                     generation_count=result.generation_count,
+                    coordinator_status=result.coordinator_status,
+                    authorization_source=result.authorization_source,
+                    pre_submit_ready=result.pre_submit_ready,
                 )
             )
 
@@ -242,30 +286,29 @@ class AutonomousCandidateMonitor:
         self,
         *,
         feature_service: Any,
-        input_assembler: Any,
-        decision_orchestrator: Any | None = None,
+        completed_bar_handler: Any,
         journal: AutonomousCandidateMonitorJournal | None = None,
     ) -> None:
         self.feature_service = feature_service
-        self.input_assembler = input_assembler
-        self.decision_orchestrator = decision_orchestrator or AutonomousDecisionOrchestrator()
+        self.completed_bar_handler = completed_bar_handler
         self.journal = journal or AutonomousCandidateMonitorJournal()
 
     def run_once(
-        self, *, symbol: str, timeframes: Iterable[str]
+        self, *, symbol: str, timeframes: Iterable[str], account_scope: str
     ) -> AutonomousCandidateMonitorResult:
         normalized_symbol = str(symbol or "").strip().upper()
+        normalized_account_scope = str(account_scope or "").strip().lower()
         normalized_timeframes = tuple(str(item).strip().upper() for item in timeframes if str(item).strip())
-        if not normalized_symbol or not normalized_timeframes:
+        if not normalized_symbol or not normalized_timeframes or not normalized_account_scope:
             return AutonomousCandidateMonitorResult(
                 "BLOCKED", normalized_symbol, timeframes=normalized_timeframes,
-                blocker="MONITOR_PROFILE_INVALID",
+                blocker="MONITOR_PROFILE_INVALID", account_scope=normalized_account_scope,
             )
         enabled = [name for name in _FORBIDDEN_FLAGS if bool(getattr(Config, name, False))]
         if enabled:
             return AutonomousCandidateMonitorResult(
                 "BLOCKED", normalized_symbol, timeframes=normalized_timeframes,
-                blocker="MONITOR_EXECUTION_PERMISSION_ENABLED",
+                blocker="MONITOR_EXECUTION_PERMISSION_ENABLED", account_scope=normalized_account_scope,
             )
         try:
             feature_result = self.feature_service.build_features(
@@ -278,17 +321,21 @@ class AutonomousCandidateMonitor:
         except Exception:
             return AutonomousCandidateMonitorResult(
                 "BLOCKED", normalized_symbol, timeframes=normalized_timeframes,
-                blocker="MONITOR_MARKET_SNAPSHOT_UNAVAILABLE",
+                blocker="MONITOR_MARKET_SNAPSHOT_UNAVAILABLE", account_scope=normalized_account_scope,
             )
         if quality != "COMPLETE" or not closed_bar_time:
             return AutonomousCandidateMonitorResult(
                 "BLOCKED", normalized_symbol, broker_symbol, normalized_timeframes,
                 closed_bar_time, blocker="MONITOR_MARKET_INPUT_NOT_FRESH",
+                account_scope=normalized_account_scope,
             )
 
-        profile_id = monitor_profile_id(normalized_symbol, normalized_timeframes)
+        profile_id = monitor_profile_id(
+            normalized_symbol, normalized_timeframes, normalized_account_scope
+        )
         if not self.journal.claim(
             profile_id=profile_id,
+            account_scope=normalized_account_scope,
             symbol=normalized_symbol,
             broker_symbol=broker_symbol,
             timeframes=normalized_timeframes,
@@ -302,66 +349,46 @@ class AutonomousCandidateMonitor:
                 normalized_timeframes,
                 closed_bar_time,
                 blocker=("" if latest and latest["phase"] == "COMPLETED" else "MONITOR_PREVIOUS_ATTEMPT_INCOMPLETE"),
+                account_scope=normalized_account_scope,
             )
 
-        result = self._generate(normalized_symbol, broker_symbol, normalized_timeframes, closed_bar_time)
+        try:
+            result = self.completed_bar_handler(
+                symbol=normalized_symbol,
+                broker_symbol=broker_symbol,
+                timeframes=normalized_timeframes,
+                closed_bar_time=closed_bar_time,
+                account_scope=normalized_account_scope,
+            )
+            if not isinstance(result, AutonomousCandidateMonitorResult):
+                raise TypeError("invalid completed-bar handler result")
+        except Exception:
+            result = AutonomousCandidateMonitorResult(
+                "BLOCKED", normalized_symbol, broker_symbol, normalized_timeframes,
+                closed_bar_time, blocker="MONITOR_COORDINATOR_FAILED",
+                account_scope=normalized_account_scope,
+            )
         self.journal.complete(result)
         return result
 
-    def _generate(
-        self,
-        symbol: str,
-        broker_symbol: str,
-        timeframes: tuple[str, ...],
-        closed_bar_time: str,
-    ) -> AutonomousCandidateMonitorResult:
-        try:
-            inputs = self.input_assembler.build(symbol=symbol, timeframes=timeframes)
-            run_result = self.decision_orchestrator.run_once(inputs)
-            if not isinstance(run_result, AutonomousDecisionRunResult):
-                raise TypeError("invalid orchestrator result")
-            if not run_result.validation.valid or not run_result.persistence_safe:
-                blocker = run_result.journal_warning or (
-                    run_result.validation.issues[0]
-                    if run_result.validation.issues
-                    else "MONITOR_RESULT_INVALID"
-                )
-                return AutonomousCandidateMonitorResult(
-                    "BLOCKED", symbol, broker_symbol, timeframes, closed_bar_time,
-                    intent=run_result.candidate.intent, blocker=blocker,
-                    generation_count=1, proposal_provider_max_invocations=1,
-                )
-            return AutonomousCandidateMonitorResult(
-                "GENERATED", symbol, broker_symbol, timeframes, closed_bar_time,
-                candidate_reference=run_result.candidate.candidate_reference,
-                intent=run_result.candidate.intent, validation_valid=True,
-                generation_count=1, proposal_provider_max_invocations=1,
-            )
-        except OperatorCandidateInputError as exc:
-            no_action = exc.blockers == ("STRUCTURED_PROPOSAL_NOT_AVAILABLE",)
-            return AutonomousCandidateMonitorResult(
-                "NO_ACTION" if no_action else "BLOCKED",
-                symbol, broker_symbol, timeframes, closed_bar_time,
-                intent="NO_ACTION" if no_action else "",
-                blocker=str(exc), generation_count=1,
-                proposal_provider_max_invocations=1,
-            )
-        except Exception:
-            return AutonomousCandidateMonitorResult(
-                "BLOCKED", symbol, broker_symbol, timeframes, closed_bar_time,
-                blocker="MONITOR_GENERATION_FAILED", generation_count=1,
-                proposal_provider_max_invocations=1,
-            )
 
-
-def monitor_profile_id(symbol: str, timeframes: Iterable[str]) -> str:
-    material = str(symbol).upper() + "|" + ",".join(str(item).upper() for item in timeframes)
+def monitor_profile_id(
+    symbol: str, timeframes: Iterable[str], account_scope: str = "legacy"
+) -> str:
+    material = (
+        str(account_scope).lower()
+        + "|"
+        + str(symbol).upper()
+        + "|"
+        + ",".join(str(item).upper() for item in timeframes)
+    )
     return "monitor_profile_" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
 def _row(
     *,
     profile_id: str,
+    account_scope: str,
     symbol: str,
     broker_symbol: str,
     timeframes: tuple[str, ...],
@@ -373,6 +400,9 @@ def _row(
     blocker: str = "",
     validation_valid: bool = False,
     generation_count: int = 0,
+    coordinator_status: str = "",
+    authorization_source: str = "",
+    pre_submit_ready: bool = False,
 ) -> dict[str, Any]:
     created_at = datetime.now(timezone.utc).isoformat()
     payload = {
@@ -381,6 +411,7 @@ def _row(
         ).hexdigest()[:20],
         "created_at": created_at,
         "profile_id": profile_id,
+        "account_scope": account_scope,
         "symbol": symbol,
         "broker_symbol": broker_symbol,
         "timeframes": list(timeframes),
@@ -392,6 +423,9 @@ def _row(
         "blocker": blocker,
         "validation_valid": validation_valid,
         "generation_count": generation_count,
+        "coordinator_status": coordinator_status,
+        "authorization_source": authorization_source,
+        "pre_submit_ready": bool(pre_submit_ready),
         "execution_authority": False,
         "export_called": False,
         "submission_called": False,

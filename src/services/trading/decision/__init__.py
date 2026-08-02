@@ -34,6 +34,10 @@ from src.services.trading.decision.autonomous_execution_policy import (
     AutonomousPolicyValidationResult,
     autonomous_policy_inputs_from_mapping,
 )
+from src.services.trading.decision.autonomous_trading_coordinator import (
+    AutonomousTradingCoordinator,
+    CoordinatorAccountContext,
+)
 from src.services.trading.decision.models import DecisionBlocker, TradeReadinessDecision
 from src.services.trading.decision.policies import TradeDecisionPolicy
 from src.services.trading.decision.policy_engine import TradeDecisionPolicyEngine
@@ -61,6 +65,8 @@ __all__ = [
     "AutonomousOrderType",
     "AutonomousDecisionValidationResult",
     "AutonomousExecutionPolicyConfig",
+    "AutonomousTradingCoordinator",
+    "CoordinatorAccountContext",
     "AutonomousExecutionPolicyGate",
     "AutonomousExecutionPolicyResult",
     "AutonomousPolicyDecision",

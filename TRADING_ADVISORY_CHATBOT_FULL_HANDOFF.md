@@ -2438,3 +2438,17 @@ Production completion Stage 1 adds one protected authority owner without replaci
 - The existing final validation and `PRE_SUBMIT_READY_NON_EXECUTABLE` journal remain authoritative and non-submitting. Real-account inputs, mode/account/candidate/version/scope/limit mismatches, expiry, revocation, corruption, lifecycle/reconciliation conflict, or an engaged autonomous kill switch block before pre-submit.
 - Verification: 153 focused and neighboring authority/approval/confirmation/permission tests passed with two unchanged dependency warnings; changed-package compileall passed. External LLM, MT5, controlled-submit, runtime `order_send`, and broker mutation counts were zero.
 - Next production dependency: integrate the completed-bar monitor into one bounded coordinator that consumes this authority owner before any pre-submit path.
+
+# 55. BOUNDED AUTONOMOUS COORDINATOR AND COMPLETED-BAR SUPERVISOR
+
+The completed-bar monitor is now a trigger/checkpoint owned by one bounded production coordinator rather than a separate orchestration path.
+
+- `AutonomousCandidateMonitor` owns only fresh completed-bar discovery, execution-permission fail-closed checks, persisted claim/completion records, duplicate prevention, and invocation of one injected handler. It no longer constructs the proposal assembler or decision orchestrator.
+- `AutonomousTradingCoordinator` owns authoritative account capture, proposal input assembly, lifecycle/reconciliation admission, candidate orchestration, operating-mode dispatch, exact standing-mandate authorization, and the optional existing approval/pre-submit transition.
+- Monitor identity is scoped by protected account fingerprint hash prefix, canonical symbol, and timeframe profile. One incomplete `STARTED` attempt blocks later bars for that account/profile; another account remains isolated.
+- Previous monitor journal rows remain integrity-verified. A legacy unresolved `STARTED` row blocks the matching symbol/profile after upgrade instead of permitting an unsafe retry.
+- Advisory mode produces a non-executable advisory candidate, human-confirmed mode stops awaiting protected human confirmation, and autonomous mode requires current mandate context. No mode creates submission authority by itself.
+- The coordinator validates healthy lifecycle and reconciliation evidence before candidate admission. `RESULT_UNKNOWN`, reconciliation-required, submission-started, discrepancy, account mismatch, missing mandate context, or authority corruption fail closed.
+- The operator CLI constructs this coordinator and closes its bridge client on normal exit or interruption. Streamlit continues to read persisted status only; reruns do not start work.
+- Verification: 29 coordinator/monitor/mandate tests and 307 focused/neighboring pipeline tests passed with two unchanged dependency warnings. Changed-path compileall passed. External LLM, MT5, controlled-submit, runtime `order_send`, and broker mutation counts were zero.
+- Next production dependency: connect the existing controlled execution, result, reconciliation, lifecycle, and management services through this coordinator with deterministic fake boundaries.

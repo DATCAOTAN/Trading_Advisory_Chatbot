@@ -1084,3 +1084,28 @@ Commit: this commit
 
 - Stage 1 authority ownership is complete at focused verification level.
 - Next: integrate the completed-bar monitor into one bounded coordinator; no autonomous execution authority is enabled by default.
+
+---
+
+### Production Completion - Bounded Coordinator and Monitor Integration
+
+Date: 2026-08-02
+Verification: `FOCUSED_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Reduced the completed-bar monitor to an account-scoped trigger/checkpoint and moved proposal assembly, candidate admission, runtime-state checks, mode authority, mandate authorization, and optional pre-submit transition into one `AutonomousTradingCoordinator`.
+- Added persisted account+symbol+timeframe claims, cross-account isolation, unresolved-STARTED hard blocking, next-bar duplicate protection, and backward-compatible strict reads for the previous monitor journal schema.
+- Reconciliation/lifecycle conflict blocks before orchestration; advisory and human modes stop at their proper non-executing boundaries; autonomous mode requires current mandate context before exact-candidate authorization.
+- The CLI now constructs the coordinator and closes the bridge client on normal exit or interruption. Streamlit remains read-only and does not start the coordinator on rerun.
+
+#### Verification
+
+- Coordinator/monitor/mandate focused tests: 29 passed; focused and neighboring candidate/proposal/policy/review/manual/pre-submit suites: 307 passed.
+- Changed-path compileall passed. External LLM, MT5, controlled-submit, runtime `order_send`, and broker mutation: 0.
+
+#### Current state / next step
+
+- Stage 2 bounded coordination is complete at focused verification level; the monitor is no longer an independent business-logic owner.
+- Next: attach the existing controlled execution/result/reconciliation/lifecycle/management services to the coordinator using deterministic fake boundaries.
