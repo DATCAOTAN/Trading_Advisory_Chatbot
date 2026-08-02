@@ -291,6 +291,11 @@ def _render_runtime_profile_selector() -> tuple[str, tuple[str, ...]]:
     )
     return selected_symbol, selected_timeframes
 def _render_autonomous_decision_review_card(orchestrator, selected_symbol, selected_timeframes):
+    monitor_row = _latest_monitor_row(selected_symbol, selected_timeframes)
+    active_mode = _render_trading_runtime_controls(
+        selected_symbol, selected_timeframes, monitor_row
+    )
+    mode_ui = _mode_ui_capabilities(active_mode)
     actions = st.columns(2)
     generation_active = st.session_state.get("autonomous_candidate_generation_active") is True
     if actions[0].button(
@@ -300,7 +305,9 @@ def _render_autonomous_decision_review_card(orchestrator, selected_symbol, selec
         use_container_width=True,
     ):
         controller = OperatorCandidateGenerationController(
-            AuthoritativeAutonomousInputAssembler(orchestrator.live_service)
+            AuthoritativeAutonomousInputAssembler(
+                orchestrator.live_service, mode=active_mode
+            )
         )
         with st.spinner("Building authoritative runtime context..."):
             outcome = controller.generate(
@@ -330,7 +337,6 @@ def _render_autonomous_decision_review_card(orchestrator, selected_symbol, selec
         else:
             st.info(f"Generation={outcome.status} | reason={outcome.blocker}")
 
-    monitor_row = _latest_monitor_row(selected_symbol, selected_timeframes)
     if monitor_row:
         st.caption(
             "Monitor | "
@@ -338,9 +344,7 @@ def _render_autonomous_decision_review_card(orchestrator, selected_symbol, selec
             f"closed_bar={monitor_row['closed_bar_time']} | execution_authority=false"
         )
 
-    _render_trading_runtime_controls(selected_symbol, selected_timeframes, monitor_row)
-
-    _render_manual_operator_candidate_form(orchestrator)
+    _render_manual_operator_candidate_form(orchestrator, active_mode)
     run_result = get_autonomous_decision_run_result(st.session_state)
     candidate = run_result.candidate if run_result else None
     validation = run_result.validation if run_result else None
@@ -356,12 +360,17 @@ def _render_autonomous_decision_review_card(orchestrator, selected_symbol, selec
         except AutonomousDecisionJournalError:
             st.warning("Monitored candidate journal is unavailable or invalid.")
     render_autonomous_candidate_review_card(candidate, validation)
-    if candidate is not None:
+    if candidate is not None and mode_ui["human_confirmation"]:
         render_autonomous_candidate_confirmation_controls(
             candidate.candidate_reference,
             _operator_candidate_review_controller(),
         )
-    _render_pending_candidate_handoff(run_result)
+    elif candidate is not None and active_mode == "advisory_only":
+        st.info("Advisory-only mode cannot confirm or submit a candidate.")
+    elif candidate is not None and active_mode == "autonomous_live":
+        st.info("Autonomous mode uses Standing Trading Mandate authority, not per-trade confirmation.")
+    if mode_ui["human_confirmation"]:
+        _render_pending_candidate_handoff(run_result)
 
 
 def _latest_monitor_row(symbol: str, timeframes: tuple[str, ...]):
@@ -384,7 +393,14 @@ def _autonomous_monitor_process():
     return AutonomousMonitorProcess(Config.BASE_DIR)
 
 
-def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> None:
+def _mode_ui_capabilities(mode: str) -> dict[str, bool]:
+    return {
+        "human_confirmation": mode == "human_confirmed_live",
+        "mandate_controls": mode == "autonomous_live",
+    }
+
+
+def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> str:
     with st.expander("Trading Authority and Runtime Supervisor", expanded=True):
         st.caption(
             "Protected demo-account authority and bounded completed-bar supervision. "
@@ -396,7 +412,7 @@ def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> None:
             status = service.status(refresh_runtime=True)
         except Exception as exc:
             st.warning(f"Trading authority unavailable: {type(exc).__name__}")
-            return
+            return "UNKNOWN"
 
         lifecycle = status["lifecycle"]
         columns = st.columns(6)
@@ -459,6 +475,23 @@ def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> None:
         if pre_submit["warnings"]:
             st.error("Pre-submit journal is unavailable or corrupt.")
 
+        mode_help = {
+            "advisory_only": (
+                "Advisory only: analysis and non-executable candidate generation are available; "
+                "confirmation, mandates, and MT5 submission are unavailable."
+            ),
+            "human_confirmed_live": (
+                "Human-confirmed live: every actionable candidate requires exact operator "
+                "confirmation and a separate protected one-shot submission authorization."
+            ),
+            "autonomous_live": (
+                "Autonomous live: per-trade confirmation is unavailable; execution requires an "
+                "active in-scope Standing Trading Mandate and all kill-switch checks to pass."
+            ),
+        }
+        st.info(mode_help.get(status["mode"], "Operating mode is unavailable."))
+        mode_ui = _mode_ui_capabilities(status["mode"])
+
         with st.form("authoritative_mode_form"):
             mode = st.selectbox(
                 "Authoritative operating mode",
@@ -467,12 +500,15 @@ def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> None:
                 placeholder="Select mode",
             )
             grant_mode = st.checkbox("I explicitly authorize this demo-account mode change")
-            if st.form_submit_button("Set Authoritative Mode", disabled=mode is None):
+            if st.form_submit_button("Set Authoritative Mode"):
                 try:
                     service.set_mode(mode, operator_grant=grant_mode)
                     st.success("Authoritative mode updated.")
                 except Exception as exc:
                     st.warning(f"Mode change blocked: {str(exc)}")
+
+        if not mode_ui["mandate_controls"]:
+            return status["mode"]
 
         with st.form("standing_mandate_form"):
             st.markdown("**Standing Trading Mandate**")
@@ -558,9 +594,10 @@ def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> None:
                 st.caption(
                     f"latest={monitor_row['status']} | blocker={monitor_row['blocker'] or 'none'}"
                 )
+        return status["mode"]
 
 
-def _render_manual_operator_candidate_form(orchestrator) -> None:
+def _render_manual_operator_candidate_form(orchestrator, active_mode: str) -> None:
     with st.expander("Manual Operator Proposal", expanded=False):
         st.caption(
             "Creates one protected, non-executable candidate from values entered here. "
@@ -630,7 +667,7 @@ def _render_manual_operator_candidate_form(orchestrator) -> None:
                 controller = OperatorCandidateGenerationController(
                     AuthoritativeAutonomousInputAssembler(
                         orchestrator.live_service,
-                        mode="human_confirmed_live",
+                        mode=active_mode,
                     )
                 )
                 with st.spinner("Validating authoritative manual proposal..."):

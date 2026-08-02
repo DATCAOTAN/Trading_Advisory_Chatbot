@@ -1214,3 +1214,29 @@ Commit: this commit
 
 - Dashboard/backend state alignment is complete; software execution permissions remain disabled and kill switches engaged.
 - Next: operator reviews the corrected Dashboard before separately authorizing any operational candidate-generation acceptance.
+
+---
+
+### Maintenance - Streamlit Mode Authorization Demo
+
+Date: 2026-08-02
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Bound candidate assembly and mode-specific controls to the authoritative persisted operating mode.
+- Limited Confirm/Reject to `human_confirmed_live` and Standing Trading Mandate controls to `autonomous_live`; `advisory_only` exposes neither authority path.
+- Fixed the existing mode form so an explicit initial selection can reach backend validation.
+
+#### Verification
+
+- Focused Dashboard/authority tests: 48 passed.
+- Browser: all three modes persisted and rendered distinct controls; one human-mode generation attempt stopped at `METHOD_BAD_REGIME` with no candidate.
+- Full regression: 3,194 passed; 156 subtests passed; 3 unchanged dependency warnings.
+- Confirmation, mandate grant/revoke, export, pre-submit, controlled-submit, `order_send`, management mutation, and broker mutation: 0.
+
+#### Current state / next step
+
+- Streamlit mode authorization presentation is complete; execution permissions remain disabled and kill switches engaged.
+- A human operator may later perform a separately authorized demo acceptance when a natural actionable candidate exists.

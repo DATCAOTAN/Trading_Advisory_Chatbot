@@ -7,7 +7,7 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.authority_runtim
 from src.services.trading.decision.operator_candidate_generation import (
     operator_timeframe_profile,
 )
-from src.ui.tab_dashboard import _market_runtime_projection
+from src.ui.tab_dashboard import _market_runtime_projection, _mode_ui_capabilities
 
 
 def _market_result(*, symbol="BTCUSD", broker_symbol="BTCUSDm", issue=None):
@@ -156,3 +156,25 @@ def test_dashboard_renders_authority_and_selected_symbol_without_mutation_calls(
     assert "status(refresh_runtime=True)" in source
     assert ".order_send(" not in source
     assert "controlled-submit" not in source
+
+
+def test_dashboard_isolates_mode_specific_authority_controls():
+    advisory = _mode_ui_capabilities("advisory_only")
+    human = _mode_ui_capabilities("human_confirmed_live")
+    autonomous = _mode_ui_capabilities("autonomous_live")
+
+    assert advisory == {
+        "human_confirmation": False,
+        "mandate_controls": False,
+    }
+    assert human["human_confirmation"] is True
+    assert human["mandate_controls"] is False
+    assert autonomous["human_confirmation"] is False
+    assert autonomous["mandate_controls"] is True
+
+
+def test_mode_form_submit_is_not_deadlocked_by_form_local_selection():
+    source = Path("src/ui/tab_dashboard.py").read_text(encoding="utf-8")
+
+    assert 'form_submit_button("Set Authoritative Mode")' in source
+    assert 'form_submit_button("Set Authoritative Mode", disabled=' not in source

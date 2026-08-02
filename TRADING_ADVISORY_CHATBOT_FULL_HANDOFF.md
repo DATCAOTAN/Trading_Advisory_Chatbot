@@ -2506,3 +2506,15 @@ Post-release maintenance aligns the existing Streamlit Dashboard with current ba
 - Browser verification showed `DEMO`, `human_confirmed_live`, `HEALTHY`, account match true, discrepancies 0, unresolved 0, disabled execution/submission/management permissions, and engaged kill switches. BTCUSD displayed `BTCUSDm`, `M1/H1/H4`, complete freshness and complete symbol capability with no stale XAUUSD metrics.
 - Verification: 70 focused Dashboard/runtime/multi-symbol/operator tests passed. Full regression passed with 3,192 tests and 156 subtests; three dependency warnings were unchanged. Compileall, diff, and safety checks passed.
 - Candidate generation, external LLM, confirmation, pre-submit creation, controlled-submit, runtime `order_send`, management mutation, broker mutation, and real-account action counts were zero.
+
+# 60. STREAMLIT MODE AUTHORIZATION DEMO
+
+Post-release maintenance completes the existing Dashboard mode-specific authorization presentation without adding another workflow.
+
+- The Dashboard renders authority controls from the persisted backend mode: advisory mode has no confirmation or mandate controls, human-confirmed mode exposes per-candidate review authority, and autonomous mode exposes Standing Trading Mandate grant/revocation controls without per-trade confirmation.
+- Candidate assembly receives the authoritative mode returned by the runtime authority service. Streamlit session state does not grant or replace operating authority.
+- The authoritative mode form remains explicitly operator-authorized and now permits the initial selection to reach its backend validator instead of being permanently disabled before Streamlit can rerun.
+- Browser verification persisted `advisory_only`, `human_confirmed_live`, and `autonomous_live` sequentially. No mandate was granted or revoked and no candidate was confirmed or rejected.
+- The single authorized human-mode generation attempt ended naturally with `METHOD_BAD_REGIME`; no candidate, confirmation, export, pre-submit artifact, controlled submission, or broker mutation was created.
+- Full regression passed with 3,194 tests and 156 subtests; three dependency warnings were unchanged. Focused mode/Dashboard/authority tests passed with 48 tests. Compileall, diff, and static safety checks passed.
+- The software-complete release tag remains unchanged. Operational broker acceptance remains separate and requires explicit human authorization.
