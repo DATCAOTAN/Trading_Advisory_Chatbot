@@ -85,7 +85,17 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.adapter import (
 from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_artifact_capture import (
     ProtectedAccountContextCapture,
 )
-from src.services.trading.decision.autonomous_orchestrator import AutonomousDecisionJournal
+from src.services.trading.decision.autonomous_candidate_monitor import (
+    DEFAULT_MONITOR_JOURNAL_PATH,
+    AutonomousCandidateMonitorError,
+    AutonomousCandidateMonitorJournal,
+    monitor_profile_id,
+)
+from src.services.trading.decision.autonomous_orchestrator import (
+    AutonomousDecisionJournal,
+    AutonomousDecisionJournalError,
+    AutonomousDecisionOrchestrator,
+)
 from src.services.trading.market.live_feature_service import LiveFeatureService
 from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBundleBuilder
 from src.services.trading.market.regime_detector import MarketRegimeDetector
@@ -263,6 +273,11 @@ def _render_autonomous_decision_review_card(orchestrator):
         disabled=selected_symbol != "BTCUSD",
         key="autonomous_candidate_btc_m1_acceptance",
     )
+    selected_timeframes = (
+        ("M1", "H1", "H4")
+        if selected_symbol == "BTCUSD" and btc_m1_acceptance
+        else tuple(Config.MARKET_DEFAULT_TIMEFRAMES)
+    )
     actions = st.columns(2)
     generation_active = st.session_state.get("autonomous_candidate_generation_active") is True
     if actions[0].button(
@@ -279,9 +294,7 @@ def _render_autonomous_decision_review_card(orchestrator):
                 st.session_state,
                 secrets.token_hex(16),
                 symbol=selected_symbol,
-                timeframes=("M1", "H1", "H4")
-                if selected_symbol == "BTCUSD" and btc_m1_acceptance
-                else None,
+                timeframes=selected_timeframes,
             )
         st.session_state["autonomous_candidate_generation_outcome"] = outcome
     if actions[1].button(
@@ -304,10 +317,29 @@ def _render_autonomous_decision_review_card(orchestrator):
         else:
             st.info(f"Generation={outcome.status} | reason={outcome.blocker}")
 
+    monitor_row = _latest_monitor_row(selected_symbol, selected_timeframes)
+    if monitor_row:
+        st.caption(
+            "Monitor | "
+            f"status={monitor_row['status']} | intent={monitor_row['intent'] or 'NONE'} | "
+            f"closed_bar={monitor_row['closed_bar_time']} | execution_authority=false"
+        )
+
     _render_manual_operator_candidate_form(orchestrator)
     run_result = get_autonomous_decision_run_result(st.session_state)
     candidate = run_result.candidate if run_result else None
     validation = run_result.validation if run_result else None
+    if candidate is None and monitor_row and monitor_row["status"] == "GENERATED":
+        try:
+            journal = AutonomousDecisionJournal(
+                Config.TRADING_AUTONOMOUS_DECISION_JOURNAL_PATH,
+                Config.TRADING_AUTONOMOUS_DECISION_MAX_READ_RECORDS,
+            )
+            candidate = journal.load_candidate(monitor_row["candidate_reference"])
+            if candidate is not None:
+                validation = AutonomousDecisionOrchestrator().validate_candidate(candidate)
+        except AutonomousDecisionJournalError:
+            st.warning("Monitored candidate journal is unavailable or invalid.")
     render_autonomous_candidate_review_card(candidate, validation)
     if candidate is not None:
         render_autonomous_candidate_confirmation_controls(
@@ -315,6 +347,16 @@ def _render_autonomous_decision_review_card(orchestrator):
             _operator_candidate_review_controller(),
         )
     _render_pending_candidate_handoff(run_result)
+
+
+def _latest_monitor_row(symbol: str, timeframes: tuple[str, ...]):
+    try:
+        return AutonomousCandidateMonitorJournal(DEFAULT_MONITOR_JOURNAL_PATH).latest(
+            monitor_profile_id(symbol, timeframes)
+        )
+    except AutonomousCandidateMonitorError:
+        st.warning("Candidate monitor journal is unavailable or invalid.")
+        return None
 
 
 def _render_manual_operator_candidate_form(orchestrator) -> None:

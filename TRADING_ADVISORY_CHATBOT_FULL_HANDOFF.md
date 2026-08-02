@@ -2411,3 +2411,17 @@ The existing candidate lifecycle now accepts one explicitly operator-entered pro
 - Verification: 123 focused manual/operator/review/confirmation/pre-submit tests and 229 neighboring candidate/policy/pending tests passed. Full regression passed with 3,142 tests and 156 subtests; three dependency warnings were unchanged.
 - External LLM, controlled-submit, runtime `order_send`, retry, fallback, and broker mutation counts were zero. Runtime manual candidate creation and all subsequent operator acceptance stages remain pending explicit human input.
 - Verification level: `FULL_REGRESSION_PASS`. Next: restart the app and let the operator enter one exact demo proposal in the Manual Operator Proposal form.
+
+# 53. READ-ONLY COMPLETED-BAR CANDIDATE MONITOR
+
+The existing autonomous candidate pipeline now has an operator-started CLI monitor that evaluates each completed short-term bar at most once.
+
+- The monitor reuses `LiveFeatureService`, `AuthoritativeAutonomousInputAssembler`, `AutonomousDecisionOrchestrator`, and the existing protected decision journal. It does not introduce another candidate schema, proposal provider, execution boundary, or broker endpoint.
+- A strict append-only monitor journal claims `canonical symbol + timeframe profile + completed-bar timestamp` before generation. A completed claim is idempotent; an interrupted `STARTED` claim becomes `RESULT_UNKNOWN` and is never retried automatically for that bar.
+- Stale or incomplete market inputs and enabled execution/submission/management permissions block before the assembler or proposal provider is called.
+- Natural `NO_ACTION`, blocked results, and generated candidate references are persisted as redacted monitor events. Candidate details remain owned by the existing protected autonomous decision journal.
+- `scripts/run_autonomous_candidate_monitor.py` supports one explicit `--once` check or an operator-started `--watch` loop. Streamlit only reads monitor state and an existing protected candidate; page refresh does not start the monitor or call the LLM.
+- Every monitor record fixes execution authority, export, submission, and `order_send` to false. No confirmation, approval, export, reconciliation mutation, controlled submission, bridge mutation, or broker mutation path was added.
+- Verification: 8 focused monitor tests and 206 neighboring candidate/provider/orchestrator/review/manual/policy tests passed with 2 unchanged dependency warnings. Changed-path compileall, CLI help, diff check, and safety scans passed.
+- Exactly one production `.order_send(` call-site remains in the host bridge, `src/` has zero MetaTrader5 imports, and the monitor journal path is Git-ignored.
+- Verification level: `FOCUSED_PASS`. The watch loop and external proposal provider were not started during implementation verification.

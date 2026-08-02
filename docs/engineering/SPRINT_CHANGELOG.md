@@ -1030,3 +1030,30 @@ Commit: this commit
 
 - Manual candidate implementation is complete and non-executable; no runtime manual candidate, confirmation, pre-submit artifact, or submission was created in this task.
 - Next: operator enters one exact demo proposal through the dashboard form; subsequent confirmation and submission still require separate explicit actions.
+
+---
+
+### Post-release Maintenance - Read-only Completed-Bar Candidate Monitor
+
+Date: 2026-08-02
+Verification: `FOCUSED_PASS`
+Commit: uncommitted
+
+#### Implemented
+
+- Added one CLI monitor around the existing live feature, authoritative input, proposal, orchestrator, and protected candidate journal path.
+- Claimed each symbol/timeframe/completed-bar key before generation and prohibited automatic retry after an interrupted attempt.
+- Persisted only redacted monitor status; Streamlit reads status and existing protected candidates without starting work on rerun.
+- Preserved disabled execution, export, submission, management, reconciliation mutation, and broker permissions.
+
+#### Verification
+
+- Focused monitor tests: 8 passed.
+- Neighboring candidate/provider/orchestrator/review/manual/policy tests: 206 passed with 2 dependency warnings.
+- Changed-path compileall, CLI help, diff check, journal-ignore check, and static safety scans passed.
+- Production `order_send` call-sites: 1; MetaTrader5 imports under `src/`: 0.
+
+#### Current state / next step
+
+- Monitor implementation is verified; the watch loop and external LLM were not started automatically.
+- Next: operator starts the BTCUSD M1/H1/H4 monitor explicitly and observes the first natural new-bar result while execution remains disabled.
