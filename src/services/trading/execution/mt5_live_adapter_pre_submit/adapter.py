@@ -67,6 +67,7 @@ class MT5LiveAdapterDisabled:
             "currency": payload.get("currency"),
             "trade_mode": payload.get("trade_mode"),
             "account_environment": str(payload.get("account_environment", "UNKNOWN")),
+            "trade_allowed": payload.get("trade_allowed") is True,
             "redacted": True,
         }
 

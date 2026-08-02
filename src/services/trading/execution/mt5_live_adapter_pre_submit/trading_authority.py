@@ -42,6 +42,17 @@ class OperatingModeAuthority:
             self.artifact_hash, _hash(self.protected_payload())
         )
 
+    def to_public_dict(self) -> dict[str, Any]:
+        return {
+            "mode_record_id": self.mode_record_id,
+            "created_at": self.created_at,
+            "operating_mode": self.operating_mode,
+            "account_is_demo": self.account_is_demo,
+            "operator_grant": self.operator_grant,
+            "integrity_valid": self.integrity_valid(),
+            "metadata_redacted": True,
+        }
+
 
 @dataclass(frozen=True)
 class StandingTradingMandate:
@@ -87,6 +98,32 @@ class StandingTradingMandate:
         return _valid_hash(self.artifact_hash) and hmac.compare_digest(
             self.artifact_hash, _hash(self.protected_payload())
         )
+
+    def to_public_dict(self) -> dict[str, Any]:
+        return {
+            "mandate_id": self.mandate_id,
+            "mandate_version": self.mandate_version,
+            "created_at": self.created_at,
+            "active_from": self.active_from,
+            "active_until": self.active_until,
+            "expires_at": self.expires_at,
+            "operating_mode": self.operating_mode,
+            "account_is_demo": self.account_is_demo,
+            "permitted_symbols": list(self.permitted_symbols),
+            "permitted_broker_symbols": list(self.permitted_broker_symbols),
+            "permitted_order_families": list(self.permitted_order_families),
+            "permitted_management_actions": list(self.permitted_management_actions),
+            "maximum_volume": self.maximum_volume,
+            "maximum_risk_per_trade": self.maximum_risk_per_trade,
+            "maximum_concurrent_positions": self.maximum_concurrent_positions,
+            "maximum_trades_per_day": self.maximum_trades_per_day,
+            "maximum_loss_per_day": self.maximum_loss_per_day,
+            "kill_switch_engaged": self.kill_switch_engaged,
+            "revoked": self.revoked,
+            "revoked_at": self.revoked_at,
+            "integrity_valid": self.integrity_valid(),
+            "metadata_redacted": True,
+        }
 
 
 @dataclass(frozen=True)
@@ -241,6 +278,14 @@ class TradingAuthorityStore:
             and row["payload"].get("mandate_id") == mandate_id
         ]
         return _mandate_from_payload(rows[-1]["payload"]) if rows else None
+
+    def latest_mandates(self) -> tuple[StandingTradingMandate, ...]:
+        latest: dict[str, StandingTradingMandate] = {}
+        for row in self.read_strict():
+            if row["event_type"] in {"MANDATE_GRANTED", "MANDATE_REVOKED"}:
+                mandate = _mandate_from_payload(row["payload"])
+                latest[mandate.mandate_id] = mandate
+        return tuple(sorted(latest.values(), key=lambda item: item.mandate_id))
 
     def load_authorization(self, authorization_id: str) -> MandateCandidateAuthorization:
         rows = [

@@ -1136,3 +1136,30 @@ Commit: this commit
 
 - Stage 3 controlled execution integration is complete at focused verification level; management and reconciliation continue through their existing services and remain disabled by default.
 - Next: expose authoritative mode/mandate/supervisor state through existing Streamlit controllers and complete restart/readiness verification.
+
+---
+
+### Production Completion - Runtime, Observability, and Readiness Closure
+
+Date: 2026-08-02
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Wired the existing authority, approval/pre-submit, policy, coordinator, disabled adapter, and completed-bar monitor into one production CLI path.
+- Added authoritative lifecycle aggregate/capability evidence for standing-mandate limits and fail-closed mandate risk evaluation from broker metadata.
+- Required the autonomous policy gate before mandate authorization and preserved all default execution, submission, management, and kill-switch blocks.
+- Added service-owned Streamlit mode/mandate/supervisor controls plus redacted lifecycle, permission, execution, reconciliation, and unknown-result observability.
+
+#### Verification
+
+- Focused/neighboring completion tests: 243 passed; final coordinator/runtime tests: 14 passed.
+- Full regression: 3,186 passed and 156 subtests passed in 160.55 seconds with 3 unchanged dependency warnings.
+- Compileall and diff checks passed. Production `order_send` call-sites: 1; MetaTrader5 imports under `src/`: 0.
+- Real external LLM, MT5, controlled-submit HTTP, runtime `order_send`, and broker mutation: 0.
+
+#### Current state / next step
+
+- `AUTONOMOUS_TRADING_SOFTWARE_IMPLEMENTATION_COMPLETE`; working permissions remain disabled and hard-blocked by default.
+- `OPERATIONAL_ACCEPTANCE_PENDING`; next work is one separately authorized demo-account operational acceptance, not another implementation sprint.

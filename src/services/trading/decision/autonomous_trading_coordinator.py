@@ -5,6 +5,7 @@ import hmac
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
 from src.services.trading.decision.autonomous_candidate_monitor import (
@@ -16,11 +17,16 @@ from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionOrchestrator,
     AutonomousDecisionRunResult,
 )
+from src.services.trading.decision.autonomous_execution_policy import (
+    AutonomousExecutionPolicyGate,
+    AutonomousPolicyInputs,
+)
 from src.services.trading.decision.operator_candidate_generation import (
     OperatorCandidateInputError,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.approval_pre_submit import (
     ApprovalPreSubmitLifecycleService,
+    TerminalCapabilityEvidence,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled import (
     MT5ControlledExecutionRequest,
@@ -69,6 +75,7 @@ class AutonomousTradingCoordinator:
         approval_service: ApprovalPreSubmitLifecycleService | None = None,
         mandate_context_provider: Any | None = None,
         execution_adapter: Any | None = None,
+        policy_gate: Any | None = None,
         monitor_journal: AutonomousCandidateMonitorJournal | None = None,
         clock: Any | None = None,
     ) -> None:
@@ -79,6 +86,7 @@ class AutonomousTradingCoordinator:
         self.approval_service = approval_service
         self.mandate_context_provider = mandate_context_provider
         self.execution_adapter = execution_adapter
+        self.policy_gate = policy_gate or AutonomousExecutionPolicyGate()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         # ponytail: one coordinator lock; use per-account locks only if measured throughput needs it.
         self._run_lock = threading.Lock()
@@ -213,6 +221,38 @@ class AutonomousTradingCoordinator:
                 candidate, symbol, broker_symbol, timeframes, closed_bar_time,
                 account_scope, "AWAITING_HUMAN_CONFIRMATION", "",
                 authorization_source="HUMAN_CONFIRMATION",
+            )
+        policy_run = self.policy_gate.run_once(
+            AutonomousPolicyInputs(
+                candidate=candidate,
+                risk_result=getattr(inputs, "risk_result", None),
+                account_context_reference=candidate.account_context_reference,
+                account_context_created_at=account.captured_at,
+                account_context_matches=True,
+                semantic_proposal_complete=bool(
+                    candidate.proposed_semantic_parameter_references
+                ),
+                lifecycle_observation=getattr(inputs, "lifecycle_observation", None),
+                reconciliation_result=getattr(inputs, "reconciliation_result", None),
+                management_exposure_effect=getattr(inputs, "exposure_effect", "NONE"),
+            ),
+            now=self.clock(),
+        )
+        policy = policy_run.policy_result
+        if (
+            not policy_run.persistence_safe
+            or not policy_run.validation.valid
+            or policy.decision != "ELIGIBLE_FOR_CONTROLLED_BOUNDARY"
+            or policy.target_controlled_boundary != "CONTROLLED_OPEN_POSITION"
+        ):
+            blocker = (
+                policy_run.journal_warning
+                or (policy.deterministic_reason_codes[0] if policy.deterministic_reason_codes else "AUTONOMOUS_POLICY_BLOCKED")
+            )
+            return self._candidate_result(
+                candidate, symbol, broker_symbol, timeframes, closed_bar_time,
+                account_scope, "BLOCKED", blocker,
+                authorization_source="STANDING_MANDATE",
             )
         if self.mandate_context_provider is None:
             return self._candidate_result(
@@ -394,6 +434,83 @@ def coordinator_account_context(
         account_is_demo=account_is_demo,
         redacted=True,
     )
+
+
+def production_mandate_context(
+    candidate: Any,
+    inputs: Any,
+    *,
+    authority_service: TradingAuthorityService,
+    mandate_id: str,
+    account_context_fingerprint: str,
+    kill_switch_engaged: bool,
+) -> dict[str, Any]:
+    """Build current mandate-limit evidence from the protected candidate and lifecycle."""
+    mandate = authority_service.store.latest_mandate(mandate_id)
+    if mandate is None:
+        raise TradingAuthorityError("MANDATE_NOT_FOUND")
+    lifecycle = getattr(inputs, "lifecycle_status", None)
+    if (
+        lifecycle is None
+        or lifecycle.supervisor_status != "HEALTHY"
+        or lifecycle.mandate_limit_evidence_available is not True
+    ):
+        raise TradingAuthorityError("LIFECYCLE_NOT_HEALTHY")
+    observed_at = str(lifecycle.last_successful_cycle or "")
+    capability = TerminalCapabilityEvidence.create(
+        observed_at=observed_at,
+        symbol=candidate.symbol_reference,
+        broker_symbol=candidate.broker_symbol_reference,
+        account_fingerprint_hash=hashlib.sha256(
+            account_context_fingerprint.encode("utf-8")
+        ).hexdigest(),
+        trade_allowed=(
+            lifecycle.terminal_trade_allowed is True
+            and lifecycle.account_trade_allowed is True
+        ),
+        supported_order_types=(
+            "BUY", "SELL", "BUY_LIMIT", "SELL_LIMIT", "BUY_STOP", "SELL_STOP",
+            "BUY_STOP_LIMIT", "SELL_STOP_LIMIT",
+        ),
+    )
+    return {
+        "mandate_id": mandate.mandate_id,
+        "evaluated_risk_per_trade": _candidate_risk_amount(candidate, inputs),
+        "concurrent_positions": int(lifecycle.active_position_count),
+        "trades_today": int(lifecycle.trades_today),
+        "loss_today": str(lifecycle.loss_today),
+        "kill_switch_engaged": bool(kill_switch_engaged),
+        "authorization_nonce": hashlib.sha256(
+            f"{candidate.decision_idempotency_key}|{mandate.artifact_hash}".encode("utf-8")
+        ).hexdigest(),
+        "terminal_capability": capability,
+    }
+
+
+def _candidate_risk_amount(candidate: Any, inputs: Any) -> str:
+    snapshot = getattr(inputs, "order_market_snapshot", None)
+    if snapshot is None:
+        raise TradingAuthorityError("MANDATE_RISK_EVIDENCE_MISSING")
+    try:
+        order_type = str(candidate.order_type).upper()
+        entry = (
+            Decimal(str(candidate.limit_price))
+            if order_type.endswith("STOP_LIMIT")
+            else Decimal(str(candidate.entry_price or candidate.trigger_price))
+            if candidate.entry_price or candidate.trigger_price
+            else Decimal(str(snapshot.ask if candidate.side == "BUY" else snapshot.bid))
+        )
+        stop = Decimal(str(candidate.stop_loss))
+        volume = Decimal(str(candidate.proposed_volume))
+        tick_size = Decimal(str(snapshot.tick_size))
+        tick_value = Decimal(str(snapshot.tick_value))
+        if min(volume, tick_size, tick_value) <= 0 or entry == stop:
+            raise InvalidOperation
+        amount = abs(entry - stop) / tick_size * tick_value * volume
+    except (InvalidOperation, TypeError, ValueError):
+        raise TradingAuthorityError("MANDATE_RISK_EVIDENCE_INVALID") from None
+    text = format(amount, "f").rstrip("0").rstrip(".")
+    return text or "0"
 
 
 def _valid_hash(value: str) -> bool:

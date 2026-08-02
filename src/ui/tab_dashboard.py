@@ -21,6 +21,7 @@ from src.services.trading.decision.operator_candidate_generation import (
     AuthoritativeAutonomousInputAssembler,
     ManualOperatorProposalInput,
 )
+from src.services.trading.decision.autonomous_runtime import AutonomousMonitorProcess
 from src.services.trading.execution import (
     DryRunConfirmationService,
     ExecutionAdapterRegistry,
@@ -81,6 +82,10 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.pending_artifact
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.adapter import (
     MT5LiveAdapterDisabled,
+)
+from src.services.trading.execution.mt5_live_adapter_pre_submit.authority_runtime import (
+    MandateGrantCommand,
+    TradingAuthorityOperatorService,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_artifact_capture import (
     ProtectedAccountContextCapture,
@@ -325,6 +330,8 @@ def _render_autonomous_decision_review_card(orchestrator):
             f"closed_bar={monitor_row['closed_bar_time']} | execution_authority=false"
         )
 
+    _render_trading_runtime_controls(selected_symbol, selected_timeframes, monitor_row)
+
     _render_manual_operator_candidate_form(orchestrator)
     run_result = get_autonomous_decision_run_result(st.session_state)
     candidate = run_result.candidate if run_result else None
@@ -357,6 +364,165 @@ def _latest_monitor_row(symbol: str, timeframes: tuple[str, ...]):
     except AutonomousCandidateMonitorError:
         st.warning("Candidate monitor journal is unavailable or invalid.")
         return None
+
+
+@st.cache_resource
+def _trading_authority_service():
+    return TradingAuthorityOperatorService()
+
+
+@st.cache_resource
+def _autonomous_monitor_process():
+    return AutonomousMonitorProcess(Config.BASE_DIR)
+
+
+def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> None:
+    with st.expander("Trading Authority and Runtime Supervisor", expanded=False):
+        st.caption(
+            "Protected demo-account authority and bounded completed-bar supervision. "
+            "No control here bypasses execution, kill-switch, idempotency, or bridge checks."
+        )
+        service = _trading_authority_service()
+        try:
+            refresh = st.button("Refresh Runtime Health", key="refresh_trading_runtime_health")
+            status = service.status(refresh_runtime=refresh)
+        except Exception as exc:
+            st.warning(f"Trading authority unavailable: {type(exc).__name__}")
+            return
+
+        lifecycle = status["lifecycle"]
+        columns = st.columns(4)
+        columns[0].metric("Account", status["account_environment"])
+        columns[1].metric("Mode", status["mode"])
+        columns[2].metric("Lifecycle", lifecycle["supervisor_status"])
+        columns[3].metric("Mandates", len(status["mandates"]))
+        st.caption(
+            f"bridge_available={str(lifecycle['bridge_available']).lower()} | "
+            f"account_match={str(lifecycle['account_context_match']).lower()} | "
+            f"positions={lifecycle['active_position_count']} | trades_today={lifecycle['trades_today']} | "
+            f"kill_switch={str(Config.TRADING_EXECUTION_KILL_SWITCH).lower()} | "
+            f"autonomous_execution={str(Config.TRADING_EXECUTION_AUTONOMOUS_ENABLED).lower()}"
+        )
+        pre_submit = status["pre_submit"]
+        permissions = status["permission_state"]
+        st.caption(
+            f"pre_submit={pre_submit['latest_status'] or 'none'} | "
+            f"execution_states={status['execution_state_counts'] or {}} | "
+            f"reconciliation_states={status['reconciliation_state_counts'] or {}}"
+        )
+        st.caption(
+            f"policy_gate={str(permissions['autonomous_policy_gate_enabled']).lower()} | "
+            f"open_eligibility={str(permissions['autonomous_open_eligibility_enabled']).lower()} | "
+            f"management_eligibility={str(permissions['autonomous_management_eligibility_enabled']).lower()} | "
+            f"controlled_management={str(permissions['controlled_management_enabled']).lower()} | "
+            f"management_kill_switch={str(permissions['management_kill_switch_engaged']).lower()}"
+        )
+        if lifecycle["discrepancy_count"]:
+            st.warning(f"Lifecycle blocker: {lifecycle['health_reason']}")
+        if status["execution_state_counts"].get("RESULT_UNKNOWN", 0):
+            st.error("Unknown execution result requires reconciliation and blocks new work.")
+        if pre_submit["warnings"]:
+            st.error("Pre-submit journal is unavailable or corrupt.")
+
+        with st.form("authoritative_mode_form"):
+            mode = st.selectbox(
+                "Authoritative operating mode",
+                ("advisory_only", "human_confirmed_live", "autonomous_live"),
+                index=None,
+                placeholder="Select mode",
+            )
+            grant_mode = st.checkbox("I explicitly authorize this demo-account mode change")
+            if st.form_submit_button("Set Authoritative Mode", disabled=mode is None):
+                try:
+                    service.set_mode(mode, operator_grant=grant_mode)
+                    st.success("Authoritative mode updated.")
+                except Exception as exc:
+                    st.warning(f"Mode change blocked: {str(exc)}")
+
+        with st.form("standing_mandate_form"):
+            st.markdown("**Standing Trading Mandate**")
+            mandate_id = st.text_input("Mandate ID")
+            mandate_version = st.number_input("Mandate version", min_value=1, step=1)
+            symbols = tuple(st.multiselect("Canonical symbols", ("XAUUSD", "BTCUSD")))
+            broker_symbols = tuple(
+                st.multiselect("Broker symbols", ("XAUUSDm", "BTCUSDm"))
+            )
+            order_families = tuple(st.multiselect("Order families", ("MARKET", "PENDING")))
+            management_actions = tuple(
+                st.multiselect(
+                    "Management actions",
+                    ("OBSERVE", "NO_ACTION", "CANCEL_PENDING", "MODIFY_PROTECTION", "CLOSE_POSITION"),
+                )
+            )
+            limit_columns = st.columns(5)
+            maximum_volume = limit_columns[0].text_input("Max volume")
+            maximum_risk = limit_columns[1].text_input("Max risk/trade")
+            maximum_positions = limit_columns[2].number_input("Max positions", min_value=1, step=1)
+            maximum_trades = limit_columns[3].number_input("Max trades/day", min_value=1, step=1)
+            maximum_loss = limit_columns[4].text_input("Max loss/day")
+            active_from = st.text_input("Active from (UTC ISO-8601)")
+            active_until = st.text_input("Active until (UTC ISO-8601)")
+            expires_at = st.text_input("Expires at (UTC ISO-8601)")
+            mandate_kill_switch = st.checkbox("Mandate kill switch engaged", value=True)
+            grant_mandate = st.checkbox("I explicitly grant this bounded demo-account mandate")
+            if st.form_submit_button("Grant Standing Mandate"):
+                try:
+                    service.grant_mandate(
+                        MandateGrantCommand(
+                            mandate_id=mandate_id,
+                            mandate_version=int(mandate_version),
+                            permitted_symbols=symbols,
+                            permitted_broker_symbols=broker_symbols,
+                            permitted_order_families=order_families,
+                            permitted_management_actions=management_actions,
+                            maximum_volume=maximum_volume,
+                            maximum_risk_per_trade=maximum_risk,
+                            maximum_concurrent_positions=int(maximum_positions),
+                            maximum_trades_per_day=int(maximum_trades),
+                            maximum_loss_per_day=maximum_loss,
+                            active_from=active_from,
+                            active_until=active_until,
+                            expires_at=expires_at,
+                            kill_switch_engaged=mandate_kill_switch,
+                        ),
+                        operator_grant=grant_mandate,
+                    )
+                    st.success("Standing mandate stored with protected integrity.")
+                except Exception as exc:
+                    st.warning(f"Mandate grant blocked: {str(exc)}")
+
+        mandate_ids = tuple(item["mandate_id"] for item in status["mandates"])
+        command_columns = st.columns(2)
+        with command_columns[0]:
+            revoke_id = st.selectbox("Mandate to revoke", mandate_ids, index=None)
+            revoke_grant = st.checkbox("I explicitly revoke this mandate")
+            if st.button("Revoke Mandate", disabled=revoke_id is None):
+                try:
+                    service.revoke_mandate(revoke_id, operator_grant=revoke_grant)
+                    st.success("Mandate revoked.")
+                except Exception as exc:
+                    st.warning(f"Mandate revocation blocked: {str(exc)}")
+        with command_columns[1]:
+            process = _autonomous_monitor_process()
+            process_status = process.status()
+            monitor_mandate = st.selectbox("Supervisor mandate", mandate_ids, index=None)
+            start, stop = st.columns(2)
+            if start.button("Start Supervisor", disabled=process_status["running"]):
+                process_status = process.start(
+                    symbol=symbol,
+                    timeframes=timeframes,
+                    mandate_id=monitor_mandate or "",
+                )
+            if stop.button("Stop Supervisor", disabled=not process_status["running"]):
+                process_status = process.stop()
+            st.caption(
+                f"supervisor_running={str(process_status['running']).lower()} | "
+                f"profile={symbol}:{','.join(timeframes)}"
+            )
+            if monitor_row:
+                st.caption(
+                    f"latest={monitor_row['status']} | blocker={monitor_row['blocker'] or 'none'}"
+                )
 
 
 def _render_manual_operator_candidate_form(orchestrator) -> None:

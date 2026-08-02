@@ -2467,3 +2467,18 @@ The bounded coordinator now reaches the existing controlled-submit boundary with
 - Deterministic verification covered accepted, rejected, unknown, duplicate, revoked mandate, real/unknown account environment and existing human/pending paths. The focused execution/reconciliation/lifecycle/management set passed 157 tests with two unchanged dependency warnings.
 - Real LLM, MT5, HTTP controlled-submit, runtime `order_send` and broker-mutation counts were zero. Exactly one production `.order_send(` call-site remains in the host bridge and `src/` still has zero MetaTrader5 imports.
 - Next production dependency: Streamlit authority/supervisor controls, redacted observability, and restart/readiness closure. Operational broker acceptance remains separate.
+
+# 57. AUTONOMOUS TRADING SOFTWARE IMPLEMENTATION CLOSURE
+
+Production completion Stage 4 closes the bounded runtime without enabling external execution.
+
+- The existing completed-bar CLI now constructs the authoritative mode/mandate service, approval/pre-submit lifecycle, policy gate, coordinator, and disabled live adapter in one production path. The monitor remains only a persisted trigger/checkpoint.
+- The coordinator requires a persisted valid autonomous-policy decision before standing-mandate authorization. Default-disabled policy, execution, submission, management, or kill-switch state therefore blocks before the controlled boundary.
+- Read-only lifecycle snapshots now include active-position, daily-trade, and daily-loss evidence plus terminal/account trade capability. Missing or malformed aggregate evidence fails closed before mandate-limit evaluation.
+- Mandate risk is calculated from the protected candidate and broker tick metadata. The current mode, mandate, account, limits, capability, lifecycle, reconciliation, authorization, final validation, and pre-submit artifact are reloaded at their existing protected boundaries.
+- One Streamlit expander delegates mode changes, bounded mandate grant/revocation, supervisor start/stop, and redacted status to service/process controllers. It exposes lifecycle, policy, management-permission, pre-submit, execution, reconciliation, expiry/revocation, and unknown-result state without direct broker logic.
+- Controlled position management continues through the existing human-confirmed controlled-management boundary; autonomous management eligibility remains independently default-disabled. No autonomous management mutation shortcut was added.
+- Authority, mode, mandate, monitor checkpoint, candidate, authorization, pre-submit, execution, reconciliation, and lifecycle persistence retain their existing strict reload and fail-closed corruption behavior.
+- Verification: 243 focused/neighboring authority, policy, monitor, coordinator, execution, lifecycle, reconciliation, management, and UI tests passed. Full regression passed with 3,186 tests and 156 subtests in 160.55 seconds with three unchanged dependency warnings. Compileall and diff checks passed.
+- Static safety: exactly one production `.order_send(` call-site remains in the host bridge; `src/` has zero MetaTrader5 imports. Real LLM, MT5, controlled-submit HTTP, runtime `order_send`, and broker-mutation counts were zero.
+- Classification: `AUTONOMOUS_TRADING_SOFTWARE_IMPLEMENTATION_COMPLETE`. Operational broker evidence remains `OPERATIONAL_ACCEPTANCE_PENDING` and requires a separately authorized demo-account procedure.

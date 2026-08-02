@@ -5,7 +5,7 @@ import os
 import queue
 import threading
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Dict, List
 
 from tools.mt5_bridge.redaction import hash_identifier, redact_server
@@ -356,6 +356,7 @@ class MT5Client:
         except Exception as exc:
             return _unavailable_lifecycle_snapshot(type(exc).__name__)
         tags = tuple(dict.fromkeys(str(tag) for tag in correlation_tags or [] if tag))
+        trades_today, loss_today = _daily_deal_summary(recent_deals or [], end)
         snapshot = {
             "status": "OK",
             "terminal_connected": True,
@@ -366,6 +367,9 @@ class MT5Client:
             "recent_orders": [_normalize_lifecycle_row(item, "order", tags) for item in recent_orders or []],
             "recent_deals": [_normalize_lifecycle_row(item, "deal", tags) for item in recent_deals or []],
             "positions": [_normalize_lifecycle_row(item, "position", tags) for item in positions or []],
+            "active_position_count": len(positions or []),
+            "trades_today": trades_today,
+            "loss_today": loss_today,
             "metadata_redacted": True,
         }
         stable = json.dumps(snapshot, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
@@ -576,6 +580,40 @@ def _normalize_lifecycle_row(item: Any, kind: str, correlation_tags: tuple[str, 
     return normalized
 
 
+def _daily_deal_summary(deals: List[Any], end: datetime) -> tuple[int, str]:
+    day = end.astimezone(timezone.utc).date()
+    opening_orders: set[str] = set()
+    net = Decimal("0")
+    for item in deals:
+        data = item._asdict()
+        try:
+            occurred = datetime.fromtimestamp(
+                float(data.get("time_msc") or 0) / 1000
+                if data.get("time_msc")
+                else float(data.get("time") or 0),
+                timezone.utc,
+            )
+        except (TypeError, ValueError, OSError):
+            continue
+        if occurred.date() != day:
+            continue
+        if data.get("entry") in {
+            getattr(mt5, "DEAL_ENTRY_IN", object()),
+            getattr(mt5, "DEAL_ENTRY_INOUT", object()),
+        }:
+            opening_orders.add(
+                str(data.get("order") or data.get("position_id") or data.get("ticket"))
+            )
+        try:
+            net += sum(
+                Decimal(str(data.get(name) or 0))
+                for name in ("profit", "commission", "swap", "fee")
+            )
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+    return len(opening_orders), _normalized_number(max(Decimal("0"), -net))
+
+
 def protection_reference_hash(symbol: str, stop_loss: Any, take_profit: Any) -> str:
     payload = {
         "symbol": str(symbol),
@@ -605,6 +643,9 @@ def _unavailable_lifecycle_snapshot(reason: str) -> Dict[str, Any]:
         "recent_orders": [],
         "recent_deals": [],
         "positions": [],
+        "active_position_count": 0,
+        "trades_today": 0,
+        "loss_today": "0",
         "snapshot_reference": "",
         "metadata_redacted": True,
     }

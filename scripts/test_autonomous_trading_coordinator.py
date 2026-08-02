@@ -213,6 +213,37 @@ def test_pre_submit_ready_mandate_uses_existing_execution_adapter_once(tmp_path)
     assert adapter.typed_confirmation == ""
 
 
+def test_autonomous_policy_block_stops_before_mandate_authorization(tmp_path):
+    state = _prepared(tmp_path / "candidate", "fresh_market", confirm=False)
+    candidate = replace(state["candidate"], operating_mode="autonomous_live")
+    authority = _authority(tmp_path / "authority", "autonomous_live")
+    context_calls = []
+    blocked_gate = SimpleNamespace(
+        run_once=lambda inputs, now=None: SimpleNamespace(
+            persistence_safe=True,
+            validation=SimpleNamespace(valid=True),
+            policy_result=SimpleNamespace(
+                decision="BLOCK",
+                target_controlled_boundary="NONE",
+                deterministic_reason_codes=("AUTONOMOUS_POLICY_DISABLED",),
+            ),
+            journal_warning="",
+        )
+    )
+    coordinator, _ = _coordinator(
+        tmp_path,
+        candidate,
+        authority,
+        policy_gate=blocked_gate,
+        mandate_context_provider=lambda *_: context_calls.append(True),
+    )
+
+    result = coordinator.run_once(symbol="XAUUSD", timeframes=("M15", "H1", "H4"))
+
+    assert result.blocker == "AUTONOMOUS_POLICY_DISABLED"
+    assert context_calls == []
+
+
 class _ExecutionAdapter:
     def __init__(self):
         self.calls = 0
@@ -266,6 +297,7 @@ def _coordinator(
     account_context=None,
     approval_service=None,
     execution_adapter=None,
+    policy_gate=None,
 ):
     lifecycle = lifecycle or SimpleNamespace(
         supervisor_status="HEALTHY",
@@ -293,6 +325,7 @@ def _coordinator(
             mandate_context_provider=mandate_context_provider,
             approval_service=approval_service,
             execution_adapter=execution_adapter,
+            policy_gate=policy_gate or _EligiblePolicyGate(),
             monitor_journal=AutonomousCandidateMonitorJournal(
                 tmp_path / "monitor.jsonl"
             ),
@@ -339,3 +372,17 @@ def _mandate(authority):
         operator_grant=True,
         now=NOW,
     )
+
+
+class _EligiblePolicyGate:
+    def run_once(self, inputs, now=None):
+        return SimpleNamespace(
+            persistence_safe=True,
+            validation=SimpleNamespace(valid=True),
+            policy_result=SimpleNamespace(
+                decision="ELIGIBLE_FOR_CONTROLLED_BOUNDARY",
+                target_controlled_boundary="CONTROLLED_OPEN_POSITION",
+                deterministic_reason_codes=(),
+            ),
+            journal_warning="",
+        )

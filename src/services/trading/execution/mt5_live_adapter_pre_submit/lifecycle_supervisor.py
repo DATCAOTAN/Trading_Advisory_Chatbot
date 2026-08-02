@@ -125,6 +125,12 @@ class MT5RuntimeSupervisorStatus:
     account_fingerprint_prefix: str = ""
     records_inspected: int = 0
     observations_appended: int = 0
+    active_position_count: int = 0
+    trades_today: int = 0
+    loss_today: str = "0"
+    terminal_trade_allowed: bool = False
+    account_trade_allowed: bool = False
+    mandate_limit_evidence_available: bool = False
     health_reason: str = "NOT_STARTED"
     live_submission_allowed: bool = False
     live_execution_allowed: bool = False
@@ -438,6 +444,15 @@ class MT5PositionLifecycleSupervisor:
             account_fingerprint_prefix=str(snapshot.get("account_context_fingerprint", ""))[:12],
             records_inspected=len(records),
             observations_appended=appended,
+            active_position_count=int(snapshot.get("active_position_count", 0)),
+            trades_today=int(snapshot.get("trades_today", 0)),
+            loss_today=str(snapshot.get("loss_today", "0")),
+            terminal_trade_allowed=snapshot.get("terminal_trade_allowed") is True,
+            account_trade_allowed=snapshot.get("account_trade_allowed") is True,
+            mandate_limit_evidence_available=all(
+                key in snapshot
+                for key in ("active_position_count", "trades_today", "loss_today")
+            ),
             health_reason="OK" if discrepancies == 0 else "DISCREPANCIES_DETECTED",
         )
         return self._status
@@ -764,6 +779,20 @@ def _validate_snapshot(snapshot: Any) -> None:
             raise ValueError("snapshot fingerprint invalid")
         if not str(snapshot.get("snapshot_reference", "")):
             raise ValueError("snapshot reference missing")
+        if any(
+            key in snapshot
+            for key in ("active_position_count", "trades_today", "loss_today")
+        ):
+            try:
+                if not all(
+                    key in snapshot
+                    for key in ("active_position_count", "trades_today", "loss_today")
+                ) or int(snapshot["active_position_count"]) < 0 or int(
+                    snapshot["trades_today"]
+                ) < 0 or Decimal(str(snapshot["loss_today"])) < 0:
+                    raise ValueError("snapshot aggregate invalid")
+            except (InvalidOperation, TypeError, ValueError) as exc:
+                raise ValueError("snapshot aggregate invalid") from exc
 
 
 def _protected_references_valid(value: Any) -> bool:

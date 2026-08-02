@@ -240,7 +240,7 @@ class Config:
     TRADING_AUTONOMOUS_POLICY_ALLOWED_MODES = [
         item.strip()
         for item in os.getenv(
-            "TRADING_AUTONOMOUS_POLICY_ALLOWED_MODES", "autonomous_candidate"
+            "TRADING_AUTONOMOUS_POLICY_ALLOWED_MODES", "autonomous_candidate,autonomous_live"
         ).split(",")
         if item.strip()
     ]
