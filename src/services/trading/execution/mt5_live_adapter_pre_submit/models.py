@@ -198,6 +198,8 @@ class MT5PreSubmitGateReport:
     reconciliation_reference: str = ""
     intent_hash: str = ""
     idempotency_key_hash: str = ""
+    authorization_source: str = "HUMAN_CONFIRMATION"
+    source_authorization_id: str = ""
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -240,6 +242,8 @@ class MT5PreSubmitGateReport:
             "reconciliation_reference": self.reconciliation_reference,
             "intent_hash": self.intent_hash,
             "idempotency_key_hash": self.idempotency_key_hash,
+            "authorization_source": self.authorization_source,
+            "source_authorization_id": self.source_authorization_id,
         }
 
 
@@ -277,6 +281,8 @@ class MT5PreSubmitJournalRecord:
     pre_submit_state: str = ""
     protected_intent: Dict[str, Any] = field(default_factory=dict, repr=False)
     record_hash: str = ""
+    authorization_source: str = "HUMAN_CONFIRMATION"
+    source_authorization_id: str = ""
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -312,6 +318,8 @@ class MT5PreSubmitJournalRecord:
             "pre_submit_state": self.pre_submit_state,
             "protected_intent": dict(self.protected_intent),
             "record_hash": self.record_hash,
+            "authorization_source": self.authorization_source,
+            "source_authorization_id": self.source_authorization_id,
         }
 
 

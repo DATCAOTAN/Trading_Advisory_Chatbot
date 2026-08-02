@@ -2425,3 +2425,16 @@ The existing autonomous candidate pipeline now has an operator-started CLI monit
 - Verification: 8 focused monitor tests and 206 neighboring candidate/provider/orchestrator/review/manual/policy tests passed with 2 unchanged dependency warnings. Changed-path compileall, CLI help, diff check, and safety scans passed.
 - Exactly one production `.order_send(` call-site remains in the host bridge, `src/` has zero MetaTrader5 imports, and the monitor journal path is Git-ignored.
 - Verification level: `FOCUSED_PASS`. The watch loop and external proposal provider were not started during implementation verification.
+
+# 54. STANDING MANDATE AND AUTHORITATIVE OPERATING MODE
+
+Production completion Stage 1 adds one protected authority owner without replacing the existing human-confirmation lifecycle.
+
+- `TradingAuthorityStore` is a strict append-only, hash-chained journal for authoritative mode changes, standing-mandate grant/update/revocation, and exact-candidate mandate authorization. Corrupt, partial, conflicting, or missing records fail closed.
+- The supported authoritative modes are `advisory_only`, `human_confirmed_live`, and `autonomous_live`. Mode changes require an explicit operator grant, a nonce, a protected demo-account fingerprint, and an auditable record; LLM output and Streamlit session state are not authority.
+- A standing mandate binds its version, demo account, canonical/broker symbols, MARKET/PENDING and management families, volume/risk/concurrent-position/trade/daily-loss limits, active window, expiry, nonce, idempotency key, operator grant, and kill-switch state. Revocation is immediate for subsequent validation.
+- `MandateCandidateAuthorization` is distinct from `HumanConfirmedProposalIntent`. It binds the exact candidate/proposal/order hashes, source references, protected order parameters, account, evaluated risk/limits, mandate ID/version, nonce, authorization time/expiry, and deterministic idempotency key.
+- `ApprovalPreSubmitLifecycleService` reloads the selected authority source from its protected store. Human confirmation is valid only for the human-confirmed path; autonomous candidates require standing-mandate authorization; advisory candidates cannot create approval authority.
+- The existing final validation and `PRE_SUBMIT_READY_NON_EXECUTABLE` journal remain authoritative and non-submitting. Real-account inputs, mode/account/candidate/version/scope/limit mismatches, expiry, revocation, corruption, lifecycle/reconciliation conflict, or an engaged autonomous kill switch block before pre-submit.
+- Verification: 153 focused and neighboring authority/approval/confirmation/permission tests passed with two unchanged dependency warnings; changed-package compileall passed. External LLM, MT5, controlled-submit, runtime `order_send`, and broker mutation counts were zero.
+- Next production dependency: integrate the completed-bar monitor into one bounded coordinator that consumes this authority owner before any pre-submit path.

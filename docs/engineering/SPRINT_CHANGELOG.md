@@ -1037,7 +1037,7 @@ Commit: this commit
 
 Date: 2026-08-02
 Verification: `FOCUSED_PASS`
-Commit: uncommitted
+Commit: 04479e5
 
 #### Implemented
 
@@ -1057,3 +1057,30 @@ Commit: uncommitted
 
 - Monitor implementation is verified; the watch loop and external LLM were not started automatically.
 - Next: operator starts the BTCUSD M1/H1/H4 monitor explicitly and observes the first natural new-bar result while execution remains disabled.
+
+---
+
+### Production Completion - Standing Mandate and Mode Authority
+
+Date: 2026-08-02
+Verification: `FOCUSED_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added one protected hash-chained authority journal for `advisory_only`, `human_confirmed_live`, and `autonomous_live` mode changes, standing-mandate grant/update/revocation, and exact-candidate mandate authorization.
+- Bound mandates to a demo account fingerprint, symbols, MARKET/PENDING and management families, volume/risk/position/trade/loss limits, active window, expiry, nonce, idempotency, operator grant, and kill-switch state.
+- Extended the existing approval/pre-submit lifecycle with an explicit `HUMAN_CONFIRMATION` versus `STANDING_MANDATE` source discriminator; the two record types cannot substitute for each other.
+- Autonomous mode reloads and revalidates the current mode, mandate version/revocation, exact candidate/order parameters, account, expiry, and kill switch before the existing non-executable pre-submit journal is appended.
+- Advisory candidates cannot create approval authority, real-account inputs fail closed, and all submission/execution flags remain disabled.
+
+#### Verification
+
+- Standing mandate/mode/authorization and neighboring approval/confirmation/permission tests: 153 passed with 2 unchanged dependency warnings.
+- Changed-package compileall and diff check passed.
+- External LLM, MT5, controlled-submit, runtime `order_send`, and broker mutation: 0.
+
+#### Current state / next step
+
+- Stage 1 authority ownership is complete at focused verification level.
+- Next: integrate the completed-bar monitor into one bounded coordinator; no autonomous execution authority is enabled by default.

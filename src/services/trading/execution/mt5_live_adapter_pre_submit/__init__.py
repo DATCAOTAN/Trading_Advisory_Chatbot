@@ -51,6 +51,16 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.validator import
     MT5LiveAdapterPreSubmitValidationResult,
     MT5LiveAdapterPreSubmitValidator,
 )
+from src.services.trading.execution.mt5_live_adapter_pre_submit.trading_authority import (
+    AUTHORIZATION_SOURCES,
+    OPERATING_MODES,
+    MandateCandidateAuthorization,
+    OperatingModeAuthority,
+    StandingTradingMandate,
+    TradingAuthorityError,
+    TradingAuthorityService,
+    TradingAuthorityStore,
+)
 
 __all__ = [
     "MT5_IDEMPOTENCY_STATUSES",
@@ -92,4 +102,12 @@ __all__ = [
     "MT5PreSubmitJournalRecord",
     "MT5PreSubmitJournalStore",
     "MT5PreSubmitSummary",
+    "AUTHORIZATION_SOURCES",
+    "OPERATING_MODES",
+    "MandateCandidateAuthorization",
+    "OperatingModeAuthority",
+    "StandingTradingMandate",
+    "TradingAuthorityError",
+    "TradingAuthorityService",
+    "TradingAuthorityStore",
 ]

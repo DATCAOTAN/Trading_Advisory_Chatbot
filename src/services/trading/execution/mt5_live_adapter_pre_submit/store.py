@@ -29,7 +29,10 @@ class MT5PreSubmitJournalStore:
         with self._exclusive_lock():
             rows = self._read_strict()
             key_hash = record.idempotency_key_hash
-            confirmation_id = record.source_confirmation_intent_id
+            authority_id = (
+                record.source_authorization_id
+                or record.source_confirmation_intent_id
+            )
             existing = next(
                 (row for row in rows if row.get("idempotency_key_hash") == key_hash),
                 None,
@@ -44,8 +47,12 @@ class MT5PreSubmitJournalStore:
                 (
                     row
                     for row in rows
-                    if confirmation_id
-                    and row.get("source_confirmation_intent_id") == confirmation_id
+                    if authority_id
+                    and (
+                        row.get("source_authorization_id")
+                        or row.get("source_confirmation_intent_id")
+                    )
+                    == authority_id
                 ),
                 None,
             )

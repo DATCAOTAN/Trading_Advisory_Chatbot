@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from src.config import Config
 from src.services.trading.decision.autonomous_orchestrator import (
+    OFFLINE_FIXTURE_MODE,
     AutonomousDecisionConfig,
     AutonomousDecisionJournalError,
     AutonomousDecisionOrchestrator,
@@ -34,6 +35,11 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.reconciliation i
 from src.services.trading.execution.mt5_live_adapter_pre_submit.store import (
     MT5PreSubmitJournalStore,
     pre_submit_record_hash,
+)
+from src.services.trading.execution.mt5_live_adapter_pre_submit.trading_authority import (
+    MandateCandidateAuthorization,
+    TradingAuthorityError,
+    TradingAuthorityService,
 )
 from src.services.trading.market.timeframes import broker_symbol_for
 from src.services.trading.proposal.confirmation_service import (
@@ -115,6 +121,8 @@ class ApprovalIntegrityResult:
     candidate_reference: str = ""
     confirmation_intent_id: str = ""
     blockers: tuple[str, ...] = ()
+    authorization_source: str = "HUMAN_CONFIRMATION"
+    authorization_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -133,6 +141,8 @@ class FinalValidationResult:
     blockers: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
     protected_intent: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    authorization_source: str = "HUMAN_CONFIRMATION"
+    authorization_id: str = ""
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -141,6 +151,8 @@ class FinalValidationResult:
             "valid": self.valid,
             "candidate_reference": self.candidate_reference,
             "confirmation_intent_id": self.confirmation_intent_id,
+            "authorization_source": self.authorization_source,
+            "authorization_id": self.authorization_id,
             "approval_integrity_hash": self.approval_integrity_hash,
             "terminal_capability_reference": self.terminal_capability_reference,
             "lifecycle_reference": self.lifecycle_reference,
@@ -177,6 +189,7 @@ class ApprovalPreSubmitLifecycleService:
         config: MT5LiveAdapterPreSubmitConfig | None = None,
         decision_config: AutonomousDecisionConfig | None = None,
         confirmation_service: HumanProposalConfirmationService | None = None,
+        authority_service: TradingAuthorityService | None = None,
     ):
         self.candidate_journal = candidate_journal
         self.confirmation_store = confirmation_store
@@ -184,6 +197,7 @@ class ApprovalPreSubmitLifecycleService:
         self.config = config or MT5LiveAdapterPreSubmitConfig.from_config()
         self.decision_config = decision_config or AutonomousDecisionConfig.from_config()
         self.confirmation_service = confirmation_service or HumanProposalConfirmationService()
+        self.authority_service = authority_service
 
     def run(
         self,
@@ -194,6 +208,13 @@ class ApprovalPreSubmitLifecycleService:
         terminal_capability: TerminalCapabilityEvidence | None,
         current_lifecycle_status: MT5RuntimeSupervisorStatus | None = None,
         current_reconciliation: MT5ReconciliationReceipt | None = None,
+        authorization_source: str = "HUMAN_CONFIRMATION",
+        authorization_reference: str = "",
+        account_is_demo: bool = False,
+        mandate_evaluated_risk_per_trade: str | None = None,
+        mandate_concurrent_positions: int | None = None,
+        mandate_trades_today: int | None = None,
+        mandate_loss_today: str | None = None,
         now: datetime | None = None,
     ) -> ApprovalPreSubmitLifecycleResult:
         evaluated_at = _utc(now)
@@ -205,12 +226,24 @@ class ApprovalPreSubmitLifecycleService:
             runtime_evidence = self.candidate_journal.load_runtime_evidence(
                 candidate_reference
             )
-            confirmation = load_candidate_confirmation(
-                self.confirmation_store, candidate_reference
-            )
+            if authorization_source == "HUMAN_CONFIRMATION":
+                confirmation = load_candidate_confirmation(
+                    self.confirmation_store, candidate_reference
+                )
+            elif authorization_source == "STANDING_MANDATE":
+                if self.authority_service is None:
+                    load_blockers.append("MANDATE_AUTHORITY_SERVICE_MISSING")
+                elif not authorization_reference:
+                    load_blockers.append("MANDATE_AUTHORIZATION_REFERENCE_MISSING")
+                else:
+                    confirmation = self.authority_service.store.load_authorization(
+                        authorization_reference
+                    )
+            else:
+                load_blockers.append("AUTHORIZATION_SOURCE_INVALID")
         except AutonomousDecisionJournalError as exc:
             load_blockers.append(str(exc))
-        except RuntimeError as exc:
+        except (RuntimeError, TradingAuthorityError) as exc:
             load_blockers.append(str(exc))
 
         approval = self._approval_integrity(
@@ -220,6 +253,12 @@ class ApprovalPreSubmitLifecycleService:
             expected_account_fingerprint,
             evaluated_at,
             load_blockers,
+            authorization_source,
+            account_is_demo,
+            mandate_evaluated_risk_per_trade,
+            mandate_concurrent_positions,
+            mandate_trades_today,
+            mandate_loss_today,
         )
         if not approval.valid:
             return ApprovalPreSubmitLifecycleResult(approval, None, None, None, False)
@@ -268,7 +307,27 @@ class ApprovalPreSubmitLifecycleService:
         expected_fingerprint: str,
         now: datetime,
         initial_blockers: list[str],
+        authorization_source: str,
+        account_is_demo: bool,
+        mandate_evaluated_risk_per_trade: str | None,
+        mandate_concurrent_positions: int | None,
+        mandate_trades_today: int | None,
+        mandate_loss_today: str | None,
     ) -> ApprovalIntegrityResult:
+        if authorization_source == "STANDING_MANDATE":
+            return self._mandate_approval_integrity(
+                candidate,
+                confirmation,
+                account_context,
+                expected_fingerprint,
+                account_is_demo,
+                mandate_evaluated_risk_per_trade,
+                mandate_concurrent_positions,
+                mandate_trades_today,
+                mandate_loss_today,
+                now,
+                initial_blockers,
+            )
         blockers = list(initial_blockers)
         if candidate is None:
             blockers.append("CANDIDATE_NOT_FOUND")
@@ -288,6 +347,11 @@ class ApprovalPreSubmitLifecycleService:
             blockers.append("CANDIDATE_NOT_ACTIONABLE")
         if candidate.deterministic_eligibility_result != "ELIGIBLE_CANDIDATE":
             blockers.append("CANDIDATE_NOT_ELIGIBLE")
+        if candidate.operating_mode not in {
+            "human_confirmed_live",
+            OFFLINE_FIXTURE_MODE,
+        }:
+            blockers.append("HUMAN_AUTHORIZATION_MODE_MISMATCH")
         if confirmation.proposal_boundary_status != "CONFIRMED_FOR_PROPOSAL_WORKFLOW":
             blockers.append("PROPOSAL_CONFIRMATION_NOT_GRANTED")
         if confirmation.human_confirmation_state != "CONFIRMED_PROPOSAL_WORKFLOW":
@@ -377,6 +441,106 @@ class ApprovalPreSubmitLifecycleService:
             candidate.candidate_reference,
             confirmation.intent_id,
             tuple(blockers),
+            "HUMAN_CONFIRMATION",
+            confirmation.intent_id,
+        )
+
+    def _mandate_approval_integrity(
+        self,
+        candidate,
+        authorization: MandateCandidateAuthorization | None,
+        account_context,
+        expected_fingerprint: str,
+        account_is_demo: bool,
+        evaluated_risk_per_trade: str | None,
+        concurrent_positions: int | None,
+        trades_today: int | None,
+        loss_today: str | None,
+        now: datetime,
+        initial_blockers: list[str],
+    ) -> ApprovalIntegrityResult:
+        blockers = list(initial_blockers)
+        if candidate is None:
+            blockers.append("CANDIDATE_NOT_FOUND")
+        if authorization is None:
+            blockers.append("MANDATE_AUTHORIZATION_NOT_FOUND")
+        if blockers:
+            return ApprovalIntegrityResult(
+                False,
+                blockers=_unique(blockers),
+                authorization_source="STANDING_MANDATE",
+            )
+        validation = AutonomousDecisionOrchestrator(
+            self.decision_config, journal=self.candidate_journal
+        ).validate_candidate(candidate, now=now)
+        blockers.extend(validation.issues)
+        if candidate.intent != "OPEN_POSITION" or candidate.action not in {
+            "MARKET",
+            "PENDING",
+        }:
+            blockers.append("CANDIDATE_NOT_ACTIONABLE")
+        if candidate.deterministic_eligibility_result != "ELIGIBLE_CANDIDATE":
+            blockers.append("CANDIDATE_NOT_ELIGIBLE")
+        fingerprint = str(
+            getattr(account_context, "account_context_fingerprint", "") or ""
+        ).strip().lower()
+        expected_fingerprint = str(expected_fingerprint or "").strip().lower()
+        if (
+            getattr(account_context, "status", "") != "OK"
+            or getattr(account_context, "redacted", False) is not True
+            or not account_is_demo
+        ):
+            blockers.append("ACCOUNT_CONTEXT_INVALID")
+        if not _valid_hash(fingerprint) or not _valid_hash(expected_fingerprint):
+            blockers.append("ACCOUNT_CONTEXT_FINGERPRINT_INVALID")
+        elif not hmac.compare_digest(fingerprint, expected_fingerprint):
+            blockers.append("ACCOUNT_CONTEXT_MISMATCH")
+        if self.authority_service is None:
+            blockers.append("MANDATE_AUTHORITY_SERVICE_MISSING")
+        else:
+            blockers.extend(
+                self.authority_service.validate_candidate_authorization(
+                    authorization.authorization_id,
+                    candidate,
+                    account_fingerprint=expected_fingerprint,
+                    account_is_demo=account_is_demo,
+                    current_kill_switch_engaged=bool(self.config.kill_switch_engaged),
+                    evaluated_risk_per_trade=evaluated_risk_per_trade,
+                    concurrent_positions=concurrent_positions,
+                    trades_today=trades_today,
+                    loss_today=loss_today,
+                    now=now,
+                )
+            )
+        if _expired(candidate.expires_at, now):
+            blockers.append("CANDIDATE_EXPIRED")
+        if not _fresh(
+            getattr(account_context, "captured_at", ""),
+            now,
+            self.decision_config.input_max_age_seconds,
+        ):
+            blockers.append("ACCOUNT_CONTEXT_STALE")
+        blockers = list(_unique(blockers))
+        integrity_hash = _hash(
+            {
+                "authorization_source": "STANDING_MANDATE",
+                "authorization_id": authorization.authorization_id,
+                "authorization_hash": authorization.artifact_hash,
+                "candidate_reference": candidate.candidate_reference,
+                "candidate_hash": candidate.provenance_hash,
+                "structured_order_hash": candidate.structured_order_hash,
+                "account_fingerprint_hash": authorization.account_fingerprint_hash,
+                "source_refs": list(authorization.source_refs),
+            }
+        )
+        return ApprovalIntegrityResult(
+            not blockers,
+            integrity_hash if not blockers else "",
+            candidate.candidate_reference,
+            "",
+            tuple(blockers),
+            "STANDING_MANDATE",
+            authorization.authorization_id,
         )
 
     def _final_validation(
@@ -444,9 +608,18 @@ class ApprovalPreSubmitLifecycleService:
             )
         )
         permission_state = _permission_state(self.config)
-        if not _permissions_safely_disabled(permission_state):
+        permission_valid = (
+            _permissions_disabled_for_mandate(permission_state)
+            if approval.authorization_source == "STANDING_MANDATE"
+            else _permissions_safely_disabled(permission_state)
+        )
+        if not permission_valid:
             blockers.append("CURRENT_PERMISSION_STATE_MISMATCH")
         permission_hash = _hash(permission_state)
+        authorization_id = _authorization_id(confirmation)
+        authorization_binding_hash = _authorization_binding_hash(confirmation)
+        authorization_expires_at = _authorization_expires_at(confirmation)
+        authorization_source_refs = _authorization_source_refs(candidate, confirmation)
         protected_intent = {
             "state": PRE_SUBMIT_STATE,
             "candidate_reference": candidate.candidate_reference,
@@ -454,8 +627,14 @@ class ApprovalPreSubmitLifecycleService:
             "structured_order_hash": candidate.structured_order_hash,
             "proposal_source": candidate.proposal_source,
             "proposal_source_reference": candidate.proposal_source_reference,
-            "confirmation_intent_id": confirmation.intent_id,
-            "confirmation_binding_hash": confirmation.confirmation_binding_hash,
+            "authorization_source": approval.authorization_source,
+            "authorization_id": authorization_id,
+            "confirmation_intent_id": (
+                confirmation.intent_id
+                if approval.authorization_source == "HUMAN_CONFIRMATION"
+                else ""
+            ),
+            "authorization_binding_hash": authorization_binding_hash,
             "approval_integrity_hash": approval.approval_integrity_hash,
             "account_fingerprint_hash": expected_account_hash,
             "symbol": candidate.symbol_reference,
@@ -476,10 +655,10 @@ class ApprovalPreSubmitLifecycleService:
             "reconciliation_reference": candidate.reconciliation_reference,
             "validated_at": now.isoformat(),
             "expires_at": min(
-                candidate.expires_at, confirmation.confirmation_expires_at
+                candidate.expires_at, authorization_expires_at
             ),
             "permission_state": permission_state,
-            "source_refs": list(candidate_confirmation_source_refs(candidate)),
+            "source_refs": list(authorization_source_refs),
             "non_submitted": True,
             "live_submission_allowed": False,
             "live_execution_allowed": False,
@@ -502,7 +681,11 @@ class ApprovalPreSubmitLifecycleService:
             now.isoformat(),
             not blockers,
             candidate.candidate_reference,
-            confirmation.intent_id,
+            (
+                confirmation.intent_id
+                if approval.authorization_source == "HUMAN_CONFIRMATION"
+                else ""
+            ),
             approval.approval_integrity_hash,
             capability.capability_reference if capability else "",
             candidate.lifecycle_observation_reference,
@@ -510,8 +693,14 @@ class ApprovalPreSubmitLifecycleService:
             permission_hash,
             symbol_metadata_hash,
             tuple(blockers),
-            ("SUBMISSION_DISABLED", "KILL_SWITCH_ENGAGED"),
+            (
+                ("SUBMISSION_DISABLED",)
+                if approval.authorization_source == "STANDING_MANDATE"
+                else ("SUBMISSION_DISABLED", "KILL_SWITCH_ENGAGED")
+            ),
             protected_intent if not blockers else {},
+            approval.authorization_source,
+            authorization_id,
         )
 
     def _report(self, final, candidate, confirmation) -> MT5PreSubmitGateReport:
@@ -535,22 +724,28 @@ class ApprovalPreSubmitLifecycleService:
             source_kill_switch_check_id="",
             source_idempotency_check_id="",
             adapter_receipt_id="",
-            kill_switch_engaged=True,
+            kill_switch_engaged=bool(self.config.kill_switch_engaged),
             idempotency_status="CHECK_REGISTERED" if final.valid else "INVALID",
             blockers=list(final.blockers),
             warnings=list(final.warnings),
-            source_refs=list(candidate_confirmation_source_refs(candidate)),
+            source_refs=list(_authorization_source_refs(candidate, confirmation)),
             approval_integrity_valid=bool(final.approval_integrity_hash),
             final_validation_valid=final.valid,
             pre_submit_ready=final.valid,
             submission_disabled=True,
             source_candidate_reference=candidate.candidate_reference,
-            source_confirmation_intent_id=confirmation.intent_id,
+            source_confirmation_intent_id=(
+                confirmation.intent_id
+                if final.authorization_source == "HUMAN_CONFIRMATION"
+                else ""
+            ),
             terminal_capability_reference=final.terminal_capability_reference,
             lifecycle_reference=final.lifecycle_reference,
             reconciliation_reference=final.reconciliation_reference,
             intent_hash=intent_hash,
             idempotency_key_hash=_sha256(key),
+            authorization_source=final.authorization_source,
+            source_authorization_id=final.authorization_id,
         )
         report.payload_size_chars = len(_canonical(report.as_dict()))
         return report
@@ -574,7 +769,7 @@ class ApprovalPreSubmitLifecycleService:
             ticket=None,
             deal=None,
             hard_live_block_required=True,
-            kill_switch_engaged=True,
+            kill_switch_engaged=bool(self.config.kill_switch_engaged),
             idempotency_status="CHECK_REGISTERED",
             bridge_write_skeleton_reachable=False,
             bridge_write_skeleton_status="NOT_CALLED",
@@ -584,10 +779,16 @@ class ApprovalPreSubmitLifecycleService:
             payload_size_chars=len(_canonical(final.protected_intent)),
             metadata_redacted=True,
             source_candidate_reference=candidate.candidate_reference,
-            source_confirmation_intent_id=confirmation.intent_id,
+            source_confirmation_intent_id=(
+                confirmation.intent_id
+                if final.authorization_source == "HUMAN_CONFIRMATION"
+                else ""
+            ),
             approval_integrity_hash=final.approval_integrity_hash,
             pre_submit_state=PRE_SUBMIT_STATE,
             protected_intent=dict(final.protected_intent),
+            authorization_source=final.authorization_source,
+            source_authorization_id=final.authorization_id,
         )
         material = record.as_dict()
         material["record_hash"] = ""
@@ -701,6 +902,27 @@ def _permissions_safely_disabled(state: Mapping[str, bool]) -> bool:
     )
 
 
+def _permissions_disabled_for_mandate(state: Mapping[str, bool]) -> bool:
+    return (
+        state.get("live_adapter_hard_block") is True
+        and state.get("pending_submission_hard_block") is True
+        and state.get("kill_switch_engaged") is False
+        and all(
+            state.get(name) is False
+            for name in (
+                "live_adapter_enabled",
+                "allow_live_submission",
+                "allow_order_send",
+                "controlled_execution_enabled",
+                "pending_submission_enabled",
+                "global_live_execution_enabled",
+                "global_order_send_enabled",
+                "autonomous_policy_gate_enabled",
+            )
+        )
+    )
+
+
 def _blocked_final(final: FinalValidationResult, blocker: str) -> FinalValidationResult:
     return FinalValidationResult(
         final.final_validation_id,
@@ -717,7 +939,36 @@ def _blocked_final(final: FinalValidationResult, blocker: str) -> FinalValidatio
         _unique((*final.blockers, blocker)),
         final.warnings,
         {},
+        final.authorization_source,
+        final.authorization_id,
     )
+
+
+def _authorization_id(authorization: Any) -> str:
+    return str(
+        getattr(authorization, "authorization_id", "")
+        or getattr(authorization, "intent_id", "")
+    )
+
+
+def _authorization_binding_hash(authorization: Any) -> str:
+    return str(
+        getattr(authorization, "artifact_hash", "")
+        or getattr(authorization, "confirmation_binding_hash", "")
+    )
+
+
+def _authorization_expires_at(authorization: Any) -> str:
+    return str(
+        getattr(authorization, "expires_at", "")
+        or getattr(authorization, "confirmation_expires_at", "")
+    )
+
+
+def _authorization_source_refs(candidate: Any, authorization: Any) -> tuple[str, ...]:
+    if isinstance(authorization, MandateCandidateAuthorization):
+        return tuple(authorization.source_refs)
+    return candidate_confirmation_source_refs(candidate)
 
 
 def _construct(cls, payload):
