@@ -53,6 +53,12 @@ MARKET_DATA_PROVIDER=mt5_bridge
 MT5_BRIDGE_URL=http://127.0.0.1:8765
 ```
 
+## Authentication And Safety Defaults
+
+The bridge loads the repository-local ignored `.env`. Authenticated POST endpoints require the header `X-MT5-Bridge-Execution-Token`, whose value must match `MT5_BRIDGE_EXECUTION_TOKEN` on both caller and host bridge. Do not print or commit the token.
+
+Mutation remains disabled by default through independent app-side and bridge-side enable flags, hard blocks, kill switches, account checks, authority reload, idempotency, and capability validation. Starting the terminal or bridge does not submit or modify an order.
+
 ## Live Check
 
 After MT5 terminal and the bridge are running:
@@ -74,6 +80,23 @@ The script checks `/health`, `/account`, `/tick?symbol=XAUUSD`, and `/ohlcv?symb
 - Stale data: confirm terminal connection and market session status.
 - Account info unavailable: confirm terminal is logged in; the bridge will not store or submit credentials.
 
-## Non-Execution Boundary
+## Bridge Endpoints
 
-The bridge exposes market data only. It has no trade execution endpoint, no credentials endpoint, and no login endpoint.
+Read-only GET endpoints:
+
+- `/health`
+- `/account`
+- `/symbols`
+- `/tick`
+- `/ohlcv`
+- `/positions`
+
+POST endpoints:
+
+- `/execution/write-skeleton/check`: always blocked diagnostic.
+- `/execution/lifecycle-snapshot`: authenticated read-only lifecycle evidence.
+- `/execution/reconcile`: authenticated read-only broker-evidence reconciliation.
+- `/execution/controlled-submit`: authenticated controlled execution boundary, disabled and hard-blocked by default.
+- `/execution/controlled-manage`: authenticated controlled management boundary, disabled and hard-blocked by default.
+
+The bridge has no credentials or login endpoint and cannot switch accounts. It independently validates protected authority before its single isolated production `order_send` call-site can be reached. Public responses redact credentials, account login, protected payload values, and exact broker identifiers.

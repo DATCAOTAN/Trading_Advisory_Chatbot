@@ -1163,3 +1163,27 @@ Commit: this commit
 
 - `AUTONOMOUS_TRADING_SOFTWARE_IMPLEMENTATION_COMPLETE`; working permissions remain disabled and hard-blocked by default.
 - `OPERATIONAL_ACCEPTANCE_PENDING`; next work is one separately authorized demo-account operational acceptance, not another implementation sprint.
+
+---
+
+### Software Release Finalization
+
+Date: 2026-08-02
+Verification: `FULL_REGRESSION_PASS` (preserved evidence)
+Commit: this release documentation commit
+
+#### Implemented
+
+- Corrected the existing local and host-bridge runbooks to document authenticated read-only and controlled endpoints, default hard blocks, startup, shutdown, and redaction.
+- Recorded software commit `e8f516d`, release tag `v1.0.0-software-complete`, completed lifecycle, safety invariants, and the separation between implementation completion and operational acceptance.
+
+#### Verification
+
+- Preserved verified evidence: 3,186 regression tests and 156 subtests passed; Ponytail review passed.
+- Documentation integrity, path/config validation, and Git diff checks passed for release finalization.
+- Real LLM, MT5, controlled-submit HTTP, runtime `order_send`, and broker mutation: 0.
+
+#### Current state / next step
+
+- Software release is complete locally with no production blocker.
+- Operational acceptance remains pending and requires a separately authorized demo-account procedure. No push was performed.

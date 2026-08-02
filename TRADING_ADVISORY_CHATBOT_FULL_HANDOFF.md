@@ -2482,3 +2482,16 @@ Production completion Stage 4 closes the bounded runtime without enabling extern
 - Verification: 243 focused/neighboring authority, policy, monitor, coordinator, execution, lifecycle, reconciliation, management, and UI tests passed. Full regression passed with 3,186 tests and 156 subtests in 160.55 seconds with three unchanged dependency warnings. Compileall and diff checks passed.
 - Static safety: exactly one production `.order_send(` call-site remains in the host bridge; `src/` has zero MetaTrader5 imports. Real LLM, MT5, controlled-submit HTTP, runtime `order_send`, and broker-mutation counts were zero.
 - Classification: `AUTONOMOUS_TRADING_SOFTWARE_IMPLEMENTATION_COMPLETE`. Operational broker evidence remains `OPERATIONAL_ACCEPTANCE_PENDING` and requires a separately authorized demo-account procedure.
+
+# 58. SOFTWARE RELEASE RECORD
+
+- Software implementation commit: `e8f516d`.
+- Release tag: `v1.0.0-software-complete` on the release-documentation commit that preserves `e8f516d` unchanged.
+- Implementation classification: `AUTONOMOUS_TRADING_SOFTWARE_IMPLEMENTATION_COMPLETE`.
+- Operational acceptance: `OPERATIONAL_ACCEPTANCE_PENDING`.
+- Completed lifecycle: authoritative proposal/candidate, review, human-or-mandate authority, approval integrity, final validation, pre-submit, controlled execution, result handling, reconciliation, lifecycle, controlled management, completed-bar supervision, recovery, and redacted Streamlit observability.
+- Verification evidence: full regression `3,186 passed`; `156 subtests passed`; Ponytail `PONYTAIL_REVIEW_PASS`; compileall, documentation integrity, static safety, and Git diff checks passed.
+- Real implementation-verification operations: external LLM `0`, MT5 runtime `0`, controlled-submit HTTP `0`, runtime `order_send` `0`, broker mutations `0`.
+- Static invariant: exactly one production `.order_send(` call-site, isolated in the host bridge; zero MetaTrader5 imports under `src/`.
+- Security: credentials, raw account identifiers, protected hashes/payloads, and exact ticket/deal/position identifiers are excluded from public documentation, UI status, and general logs. Protected journals retain only the minimum internal evidence required for integrity, idempotency, and reconciliation.
+- Release state: clean working tree after the release commit; no critical production blocker; branch and tag remain local until explicitly pushed.
