@@ -414,6 +414,7 @@ def _render_conversational_trading_authorization(
             "Advisory-only request: analysis is available, but Confirm, mandate, "
             "MT5 authorization, and submission are unavailable."
         )
+        return
     elif request.requested_mode == "human_confirmed_live":
         st.info(
             "Human-confirmed request: demo MT5 access is separate from exact candidate "
@@ -431,7 +432,7 @@ def _render_conversational_trading_authorization(
         requested_mode=request.requested_mode,
         generation_request_id=request.request_id,
         show_manual_proposal=False,
-        key_prefix="chat_trade_",
+        key_prefix=f"chat_trade_{request.request_id}_",
     )
 
 

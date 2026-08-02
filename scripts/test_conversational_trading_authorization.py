@@ -7,6 +7,7 @@ from src.services.trading.decision.conversational_authorization import (
     ConversationalTradingRequest,
     parse_conversational_trading_request,
 )
+from src.ui import tab_chatbot
 
 
 @pytest.mark.parametrize(
@@ -117,7 +118,7 @@ def test_chat_ui_reuses_existing_authority_and_candidate_controls():
     dashboard = Path("src/ui/tab_dashboard.py").read_text(encoding="utf-8")
 
     assert "_render_autonomous_decision_review_card" in chatbot
-    assert 'key_prefix="chat_trade_"' in chatbot
+    assert 'key_prefix=f"chat_trade_{request.request_id}_"' in chatbot
     assert '"Generate Candidate"' in dashboard
     assert '"Generate Autonomous Candidate"' not in dashboard
     assert 'key=f"{key_prefix}generate_autonomous_candidate"' in dashboard
@@ -132,3 +133,34 @@ def test_chat_ui_reuses_existing_authority_and_candidate_controls():
     assert "LLMClient" not in Path(
         "src/services/trading/decision/conversational_authorization.py"
     ).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_mode"),
+    (
+        ("Analyze BTCUSD only; do not trade.", None),
+        ("Trade BTCUSD automatically within my mandate on demo.", "autonomous_live"),
+    ),
+)
+def test_cross_mode_request_uses_only_its_authority_controls(
+    monkeypatch, text, expected_mode
+):
+    request = parse_conversational_trading_request(text, conversation_id="chat-cross-mode")
+    rendered = []
+    for name in ("markdown", "caption", "info", "warning"):
+        monkeypatch.setattr(tab_chatbot.st, name, lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        tab_chatbot,
+        "_render_autonomous_decision_review_card",
+        lambda *args, **kwargs: rendered.append((args, kwargs)),
+    )
+
+    tab_chatbot._render_conversational_trading_authorization(None, request)
+
+    if expected_mode is None:
+        assert rendered == []
+        return
+    assert len(rendered) == 1
+    assert rendered[0][1]["requested_mode"] == expected_mode
+    assert rendered[0][1]["generation_request_id"] == request.request_id
+    assert rendered[0][1]["key_prefix"] == f"chat_trade_{request.request_id}_"
