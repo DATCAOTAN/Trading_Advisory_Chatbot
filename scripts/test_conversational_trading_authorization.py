@@ -118,7 +118,10 @@ def test_chat_ui_reuses_existing_authority_and_candidate_controls():
 
     assert "_render_autonomous_decision_review_card" in chatbot
     assert 'key_prefix="chat_trade_"' in chatbot
+    assert '"Generate Candidate"' in dashboard
+    assert '"Generate Autonomous Candidate"' not in dashboard
     assert 'key=f"{key_prefix}generate_autonomous_candidate"' in dashboard
+    assert "mode=active_mode" in dashboard
     assert "mode_idempotency_key=generation_request_id" in dashboard
     assert "idempotency_key=mode_idempotency_key" in dashboard
     assert 'st.success("Authoritative mode updated.")\n                    st.rerun()' in dashboard

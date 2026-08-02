@@ -313,7 +313,7 @@ def _render_autonomous_decision_review_card(
     actions = st.columns(2)
     generation_active = st.session_state.get("autonomous_candidate_generation_active") is True
     if actions[0].button(
-        "Generate Autonomous Candidate",
+        "Generate Candidate",
         key=f"{key_prefix}generate_autonomous_candidate",
         disabled=(
             generation_active
