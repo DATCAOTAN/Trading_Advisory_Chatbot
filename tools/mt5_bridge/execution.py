@@ -17,6 +17,7 @@ from tools.mt5_bridge.mt5_client import mt5
 
 REQUEST_VERSION = "controlled-mt5-execution/v1"
 PENDING_REQUEST_VERSION = "controlled-mt5-pending-execution/v1"
+AUTONOMOUS_REQUEST_VERSION = "controlled-mt5-autonomous-execution/v1"
 SEMANTIC_SCHEMA_VERSION = "approved-semantic-execution-parameters/v1"
 PENDING_CONTRACT_SCHEMA_VERSION = "controlled-pending-order-contract/v1"
 SUPPORTED_PENDING_ORDER_TYPES = {
@@ -61,6 +62,7 @@ class ControlledExecutionConfig:
     kill_switch_engaged: bool = True
     order_send_enabled: bool = False
     live_execution_enabled: bool = False
+    autonomous_execution_enabled: bool = False
     pending_submission_enabled: bool = False
     pending_submission_hard_block: bool = True
     pending_limit_enabled: bool = False
@@ -71,6 +73,7 @@ class ControlledExecutionConfig:
     max_request_age_seconds: int = 300
     submit_timeout_seconds: float = 5.0
     journal_path: str = "data/trading/execution_journal/mt5_controlled_execution.jsonl"
+    authority_journal_path: str = "data/trading/execution_journal/trading_authority.jsonl"
 
     @classmethod
     def from_env(cls) -> "ControlledExecutionConfig":
@@ -80,6 +83,9 @@ class ControlledExecutionConfig:
             kill_switch_engaged=_env_bool("MT5_BRIDGE_EXECUTION_KILL_SWITCH", True),
             order_send_enabled=_env_bool("MT5_BRIDGE_ORDER_SEND_ENABLED", False),
             live_execution_enabled=_env_bool("MT5_BRIDGE_LIVE_EXECUTION_ENABLED", False),
+            autonomous_execution_enabled=_env_bool(
+                "MT5_BRIDGE_AUTONOMOUS_EXECUTION_ENABLED", False
+            ),
             pending_submission_enabled=_env_bool("MT5_BRIDGE_PENDING_SUBMISSION_ENABLED", False),
             pending_submission_hard_block=_env_bool(
                 "MT5_BRIDGE_PENDING_SUBMISSION_HARD_BLOCK", True
@@ -98,6 +104,10 @@ class ControlledExecutionConfig:
             journal_path=os.getenv(
                 "MT5_BRIDGE_EXECUTION_JOURNAL_PATH",
                 "data/trading/execution_journal/mt5_controlled_execution.jsonl",
+            ).strip(),
+            authority_journal_path=os.getenv(
+                "MT5_BRIDGE_TRADING_AUTHORITY_JOURNAL_PATH",
+                "data/trading/execution_journal/trading_authority.jsonl",
             ).strip(),
         )
 
@@ -121,6 +131,8 @@ class ProtectedBridgeExecutionRequest:
     idempotency_key: str = field(repr=False)
     expected_account_context_fingerprint: str
     execution_permission_requested: bool
+    authorization_source: str = "HUMAN_CONFIRMATION"
+    authorization_reference: str = ""
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "ProtectedBridgeExecutionRequest":
@@ -132,7 +144,10 @@ class ProtectedBridgeExecutionRequest:
             "pre_submit_validation_reference", "pre_submit_validation_valid", "idempotency_key",
             "expected_account_context_fingerprint", "execution_permission_requested",
         }
-        if not isinstance(payload, Mapping) or set(payload) != required:
+        autonomous_fields = {"authorization_source", "authorization_reference"}
+        if not isinstance(payload, Mapping) or frozenset(payload) not in {
+            frozenset(required), frozenset(required | autonomous_fields)
+        }:
             raise ValueError("controlled execution request schema is invalid")
         protected = payload.get("approved_semantic_parameters")
         if not isinstance(protected, Mapping):
@@ -148,13 +163,21 @@ class ProtectedBridgeExecutionRequest:
             source_artifact_reference=_required_text(payload["source_artifact_reference"], "source_artifact_reference"),
             approval_timestamp=_required_text(payload["approval_timestamp"], "approval_timestamp"),
             lock_timestamp=_required_text(payload["lock_timestamp"], "lock_timestamp"),
-            human_confirmation_reference=_required_hash(payload["human_confirmation_reference"]),
-            human_confirmation_phrase=_required_text(payload["human_confirmation_phrase"], "human_confirmation_phrase"),
+            human_confirmation_reference=(
+                "" if payload.get("authorization_source") == "STANDING_MANDATE"
+                else _required_hash(payload["human_confirmation_reference"])
+            ),
+            human_confirmation_phrase=(
+                "" if payload.get("authorization_source") == "STANDING_MANDATE"
+                else _required_text(payload["human_confirmation_phrase"], "human_confirmation_phrase")
+            ),
             pre_submit_validation_reference=_required_text(payload["pre_submit_validation_reference"], "pre_submit_validation_reference"),
             pre_submit_validation_valid=payload["pre_submit_validation_valid"] is True,
             idempotency_key=_required_text(payload["idempotency_key"], "idempotency_key"),
             expected_account_context_fingerprint=_required_hash(payload["expected_account_context_fingerprint"]),
             execution_permission_requested=payload["execution_permission_requested"] is True,
+            authorization_source=str(payload.get("authorization_source", "HUMAN_CONFIRMATION")),
+            authorization_reference=str(payload.get("authorization_reference", "")),
         )
 
 
@@ -654,6 +677,11 @@ class ControlledMT5ExecutionService:
             first_context = self._validated_account_context(
                 request.expected_account_context_fingerprint
             )
+            if (
+                request.authorization_source == "STANDING_MANDATE"
+                and first_context.get("account_environment") != "DEMO"
+            ):
+                raise ValueError("REAL_ACCOUNT_EXECUTION_FORBIDDEN")
             request_hash = _sha256(
                 json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
             )
@@ -729,6 +757,8 @@ class ControlledMT5ExecutionService:
                     reason="ACCOUNT_CONTEXT_CHANGED",
                 )
                 return _blocked("ACCOUNT_CONTEXT_CHANGED"), 409
+            if request.authorization_source == "STANDING_MANDATE":
+                self._validate_autonomous_integrity(request)
             self.journal.transition(request.idempotency_key, "SUBMISSION_STARTED")
             return self._submit_once(request, mt5_request)
         except (TypeError, ValueError, RuntimeError, ProtectedExecutionJournalError) as exc:
@@ -743,9 +773,16 @@ class ControlledMT5ExecutionService:
             or not self.config.live_execution_enabled
         ):
             raise ValueError("EXECUTION_DISABLED")
+        if (
+            request.authorization_source == "STANDING_MANDATE"
+            and not self.config.autonomous_execution_enabled
+        ):
+            raise ValueError("AUTONOMOUS_EXECUTION_DISABLED")
         if not self.config.auth_token:
             raise ValueError("AUTHENTICATION_FAILED")
-        if request.request_version == PENDING_REQUEST_VERSION:
+        if request.request_version in {PENDING_REQUEST_VERSION, AUTONOMOUS_REQUEST_VERSION} and str(
+            request.approved_semantic_parameters.get("action", "")
+        ).upper() == "PENDING":
             order_type = str(
                 request.approved_semantic_parameters.get("order_type", "")
             ).upper()
@@ -770,7 +807,150 @@ class ControlledMT5ExecutionService:
             return self._validate_market_integrity(request)
         if request.request_version == PENDING_REQUEST_VERSION:
             return self._validate_pending_integrity(request)
+        if request.request_version == AUTONOMOUS_REQUEST_VERSION:
+            return self._validate_autonomous_integrity(request)
         raise ValueError("REQUEST_VERSION_INVALID")
+
+    def _validate_autonomous_integrity(
+        self, request: ProtectedBridgeExecutionRequest
+    ) -> dict[str, Any]:
+        protected = dict(request.approved_semantic_parameters)
+        required = {
+            "state", "candidate_reference", "candidate_provenance_hash",
+            "structured_order_hash", "proposal_source", "proposal_source_reference",
+            "authorization_source", "authorization_id", "confirmation_intent_id",
+            "authorization_binding_hash", "approval_integrity_hash",
+            "account_fingerprint_hash", "symbol", "broker_symbol", "side",
+            "order_type", "action", "entry_price", "trigger_price", "limit_price",
+            "stop_loss", "take_profit", "volume", "terminal_capability_reference",
+            "lifecycle_reference", "reconciliation_reference", "validated_at",
+            "expires_at", "permission_state", "source_refs", "non_submitted",
+            "live_submission_allowed", "live_execution_allowed", "order_send_allowed",
+            "execution_allowed", "executable", "order_sent",
+        }
+        if set(protected) != required:
+            raise ValueError("AUTONOMOUS_INTENT_SCHEMA_INVALID")
+        if (
+            request.authorization_source != "STANDING_MANDATE"
+            or protected.get("authorization_source") != "STANDING_MANDATE"
+            or protected.get("authorization_id") != request.authorization_reference
+            or protected.get("confirmation_intent_id")
+            or protected.get("non_submitted") is not True
+            or any(
+                protected.get(name) is not False
+                for name in (
+                    "live_submission_allowed", "live_execution_allowed",
+                    "order_send_allowed", "execution_allowed", "executable", "order_sent",
+                )
+            )
+        ):
+            raise ValueError("MANDATE_AUTHORIZATION_INVALID")
+        intent_hash = _sha256(
+            json.dumps(protected, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        )
+        if not hmac.compare_digest(intent_hash, request.canonical_semantic_hash):
+            raise ValueError("AUTONOMOUS_INTENT_HASH_MISMATCH")
+        try:
+            from src.services.trading.execution.mt5_live_adapter_pre_submit.trading_authority import (
+                TradingAuthorityError,
+                TradingAuthorityStore,
+            )
+
+            store = TradingAuthorityStore(self.config.authority_journal_path)
+            authorization = store.load_authorization(request.authorization_reference)
+            mandate = store.latest_mandate(authorization.mandate_id)
+            mode = store.latest_mode()
+        except TradingAuthorityError as exc:
+            raise ValueError(str(exc)) from exc
+        now = datetime.now(timezone.utc)
+        if (
+            not authorization.integrity_valid()
+            or mandate is None
+            or not mandate.integrity_valid()
+            or mode is None
+            or not mode.integrity_valid()
+            or mode.operating_mode != "autonomous_live"
+            or mandate.operating_mode != "autonomous_live"
+            or mandate.revoked
+            or mandate.kill_switch_engaged
+            or not mandate.account_is_demo
+            or mandate.mandate_version != authorization.mandate_version
+            or _time(authorization.expires_at) <= now
+            or not (
+                _time(mandate.active_from)
+                <= now
+                < min(_time(mandate.active_until), _time(mandate.expires_at))
+            )
+        ):
+            raise ValueError("MANDATE_NOT_CURRENT")
+        expected_account_hash = _sha256(request.expected_account_context_fingerprint)
+        bindings = (
+            (authorization.authorization_id, request.authorization_reference),
+            (authorization.artifact_hash, request.lock_value_hash),
+            (authorization.deterministic_idempotency_key, request.idempotency_key),
+            (authorization.account_fingerprint_hash, expected_account_hash),
+            (mandate.account_fingerprint_hash, expected_account_hash),
+            (mode.account_fingerprint_hash, expected_account_hash),
+            (authorization.candidate_reference, protected["candidate_reference"]),
+            (authorization.candidate_provenance_hash, protected["candidate_provenance_hash"]),
+            (authorization.structured_order_hash, protected["structured_order_hash"]),
+            (authorization.proposal_source_reference, protected["proposal_source_reference"]),
+            (authorization.symbol, protected["symbol"]),
+            (authorization.broker_symbol, protected["broker_symbol"]),
+            (authorization.order_family, protected["action"]),
+            (protected["candidate_reference"], request.source_artifact_reference),
+            (protected["approval_integrity_hash"], request.approval_value_hash),
+        )
+        if any(left != right for left, right in bindings):
+            raise ValueError("MANDATE_EXECUTION_BINDING_MISMATCH")
+        parameter_bindings = {
+            "side": protected["side"],
+            "order_type": protected["order_type"],
+            "action": protected["action"],
+            "entry_price": protected["entry_price"],
+            "trigger_price": protected["trigger_price"],
+            "limit_price": protected["limit_price"],
+            "stop_loss": protected["stop_loss"],
+            "take_profit": protected["take_profit"],
+            "proposed_volume": protected["volume"],
+        }
+        if dict(authorization.protected_order_parameters) != parameter_bindings:
+            raise ValueError("MANDATE_ORDER_PARAMETERS_CHANGED")
+        _validate_expiry(protected["expires_at"])
+        action = _required_text(protected["action"], "action").upper()
+        side = _required_text(protected["side"], "side").upper()
+        order_type = _required_text(protected["order_type"], "order_type").upper()
+        if action not in {"MARKET", "PENDING"} or side not in {"BUY", "SELL"}:
+            raise ValueError("AUTONOMOUS_ORDER_TYPE_INVALID")
+        if action == "MARKET" and order_type != side:
+            raise ValueError("AUTONOMOUS_ORDER_TYPE_INVALID")
+        if action == "PENDING" and (
+            order_type not in SUPPORTED_PENDING_ORDER_TYPES
+            or not order_type.startswith(side + "_")
+        ):
+            raise ValueError("AUTONOMOUS_ORDER_TYPE_INVALID")
+        values = {
+            "mapping_kind": action,
+            "action": action,
+            "symbol": _required_text(protected["broker_symbol"], "broker_symbol"),
+            "broker_symbol": _required_text(protected["broker_symbol"], "broker_symbol"),
+            "side": side,
+            "order_type": order_type,
+            "entry_price": _optional_decimal(protected["entry_price"]),
+            "trigger_price": _optional_decimal(protected["trigger_price"]),
+            "limit_price": _optional_decimal(protected["limit_price"]),
+            "price": _optional_decimal(protected["entry_price"]),
+            "stop_loss": _decimal(protected["stop_loss"], positive=True),
+            "take_profit": _decimal(protected["take_profit"], positive=True),
+            "volume": _decimal(protected["volume"], positive=True),
+            "expiration_policy": "GTC",
+            "deviation": 0,
+            "magic": 0,
+            "comment": "autonomous-mandate",
+            "audit": authorization.authorization_id,
+            "idempotency": authorization.deterministic_idempotency_key,
+        }
+        return values
 
     def _validate_market_integrity(
         self, request: ProtectedBridgeExecutionRequest
@@ -1005,6 +1185,16 @@ class ControlledMT5ExecutionService:
         if self.mt5 is None:
             raise ValueError("MT5_PACKAGE_UNAVAILABLE")
         if values["mapping_kind"] == "MARKET":
+            if values.get("price") is None:
+                context = self.client.pending_order_context(values["symbol"])
+                if (
+                    context.get("status") != "OK"
+                    or context.get("symbol_available") is not True
+                    or context.get("symbol_trade_allowed") is not True
+                ):
+                    raise ValueError("MARKET_SYMBOL_UNAVAILABLE")
+                price_name = "ask" if values["order_type"] == "BUY" else "bid"
+                values["price"] = _decimal(context.get(price_name), positive=True)
             if (
                 values["action"] != "MARKET"
                 or values["order_type"] not in {"BUY", "SELL"}
@@ -1328,6 +1518,16 @@ def _validate_expiry(value: str) -> None:
     if timestamp.astimezone(timezone.utc) <= datetime.now(timezone.utc):
         raise ValueError("PENDING_CONTRACT_EXPIRED")
 
+
+def _time(value: str) -> datetime:
+    try:
+        timestamp = datetime.fromisoformat(value)
+        if timestamp.tzinfo is None:
+            raise ValueError
+    except (TypeError, ValueError) as exc:
+        raise ValueError("AUTHORITY_TIMESTAMP_INVALID") from exc
+    return timestamp.astimezone(timezone.utc)
+
 def _authenticated(provided: str, expected: str) -> bool:
     if not provided or not expected:
         return False
@@ -1394,6 +1594,13 @@ def _safe_reason(exc: Exception) -> str:
         "PENDING_PRICE_INCREMENT_INVALID", "PENDING_PRICE_RELATIONSHIP_INVALID",
         "PENDING_PROTECTION_DIRECTION_INVALID", "MT5_CONSTANTS_UNAVAILABLE",
         "IDEMPOTENCY_CONFLICT", "IDEMPOTENCY_DUPLICATE",
+        "AUTONOMOUS_EXECUTION_DISABLED", "REAL_ACCOUNT_EXECUTION_FORBIDDEN",
+        "AUTONOMOUS_INTENT_SCHEMA_INVALID", "AUTONOMOUS_INTENT_HASH_MISMATCH",
+        "MANDATE_AUTHORIZATION_INVALID", "MANDATE_NOT_CURRENT",
+        "MANDATE_EXECUTION_BINDING_MISMATCH", "MANDATE_ORDER_PARAMETERS_CHANGED",
+        "AUTHORITY_STORE_CORRUPT", "AUTHORITY_STORE_UNAVAILABLE",
+        "AUTHORIZATION_NOT_FOUND", "AUTONOMOUS_ORDER_TYPE_INVALID",
+        "MARKET_SYMBOL_UNAVAILABLE", "AUTHORITY_TIMESTAMP_INVALID",
     }
     return value if value in allowed else "INVALID_REQUEST"
 

@@ -22,6 +22,7 @@ class MT5LiveAdapterPreSubmitConfig:
     idempotency_path: str = "data/trading/execution_journal/mt5_pre_submit_idempotency.jsonl"
     max_read_records: int = 100
     controlled_execution_enabled: bool = False
+    autonomous_execution_enabled: bool = False
     pending_submission_enabled: bool = False
     pending_submission_hard_block: bool = True
     pending_limit_enabled: bool = False
@@ -71,6 +72,7 @@ class MT5LiveAdapterPreSubmitConfig:
             idempotency_path=getattr(config, "TRADING_MT5_PRE_SUBMIT_IDEMPOTENCY_PATH", "data/trading/execution_journal/mt5_pre_submit_idempotency.jsonl"),
             max_read_records=getattr(config, "TRADING_MT5_PRE_SUBMIT_MAX_READ_RECORDS", 100),
             controlled_execution_enabled=getattr(config, "TRADING_MT5_CONTROLLED_EXECUTION_ENABLED", False),
+            autonomous_execution_enabled=getattr(config, "TRADING_EXECUTION_AUTONOMOUS_ENABLED", False),
             pending_submission_enabled=getattr(
                 config, "TRADING_MT5_PENDING_SUBMISSION_ENABLED", False
             ),

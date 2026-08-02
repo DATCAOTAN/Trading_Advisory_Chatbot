@@ -90,6 +90,7 @@ class MT5Client:
             "free_margin": data.get("margin_free"),
             "leverage": data.get("leverage"),
             "trade_mode": data.get("trade_mode"),
+            "account_environment": _account_environment(data.get("trade_mode")),
             "trade_allowed": bool(data.get("trade_allowed", False)),
             "account_context_fingerprint": account_context_fingerprint,
             "redacted": True,
@@ -118,6 +119,7 @@ class MT5Client:
             "server_redacted": redact_server(account_data.get("server")),
             "currency": account_data.get("currency"),
             "trade_mode": account_data.get("trade_mode"),
+            "account_environment": _account_environment(account_data.get("trade_mode")),
             "redacted": True,
         }
 
@@ -615,3 +617,14 @@ def _account_context_fingerprint(account_data: Dict[str, Any]) -> str:
         "trade_mode": account_data.get("trade_mode"),
     }
     return hash_identifier(json.dumps(stable_context, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
+
+
+def _account_environment(trade_mode: Any) -> str:
+    if mt5 is None:
+        return "UNKNOWN"
+    modes = {
+        getattr(mt5, "ACCOUNT_TRADE_MODE_DEMO", object()): "DEMO",
+        getattr(mt5, "ACCOUNT_TRADE_MODE_CONTEST", object()): "CONTEST",
+        getattr(mt5, "ACCOUNT_TRADE_MODE_REAL", object()): "REAL",
+    }
+    return modes.get(trade_mode, "UNKNOWN")

@@ -1109,3 +1109,30 @@ Commit: this commit
 
 - Stage 2 bounded coordination is complete at focused verification level; the monitor is no longer an independent business-logic owner.
 - Next: attach the existing controlled execution/result/reconciliation/lifecycle/management services to the coordinator using deterministic fake boundaries.
+
+---
+
+### Production Completion - Mandate-Controlled Execution Integration
+
+Date: 2026-08-02
+Verification: `FOCUSED_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added a `STANDING_MANDATE` discriminator to the existing controlled-submit request without changing the human-confirmation contract or endpoint.
+- The host bridge reloads the shared protected authority journal, current mode, mandate and exact-candidate authorization before idempotency reservation or MT5 mapping.
+- Autonomous requests are demo-only, exact-candidate/order/account/mandate bound, and independently hard-blocked by a new default-false bridge flag.
+- The existing coordinator can pass a pre-submit-ready mandate request through the existing adapter; accepted, rejected and unknown receipts retain the existing protected journal and state machine.
+- Current host market price is selected only inside the bridge for MARKET execution when the approved candidate intentionally has no fixed entry price.
+
+#### Verification
+
+- Autonomous mandate bridge/coordinator and execution/reconciliation/lifecycle/management neighbors: 157 passed with 2 unchanged dependency warnings.
+- Fake controlled-submit attempts exercised accepted, rejected, unknown, duplicate, revoked-mandate and non-demo account paths. Real external operations: 0.
+- Production `order_send` call-sites remain 1; MetaTrader5 imports under `src/` remain 0.
+
+#### Current state / next step
+
+- Stage 3 controlled execution integration is complete at focused verification level; management and reconciliation continue through their existing services and remain disabled by default.
+- Next: expose authoritative mode/mandate/supervisor state through existing Streamlit controllers and complete restart/readiness verification.

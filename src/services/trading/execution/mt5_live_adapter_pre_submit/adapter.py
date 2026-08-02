@@ -6,6 +6,7 @@ from time import perf_counter
 from src.services.trading.execution.mt5_bridge_write_skeleton import MT5BridgeWriteSkeletonService
 from src.services.trading.execution.mt5_bridge_write_skeleton.client import MT5BridgeWriteSkeletonClient
 from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled import (
+    AUTONOMOUS_EXECUTION_REQUEST_VERSION,
     PENDING_EXECUTION_REQUEST_VERSION,
     MT5ControlledExecutionReceipt,
     MT5ControlledExecutionRequest,
@@ -65,6 +66,7 @@ class MT5LiveAdapterDisabled:
             "server_redacted": str(payload.get("server_redacted", "")),
             "currency": payload.get("currency"),
             "trade_mode": payload.get("trade_mode"),
+            "account_environment": str(payload.get("account_environment", "UNKNOWN")),
             "redacted": True,
         }
 
@@ -108,19 +110,29 @@ class MT5LiveAdapterDisabled:
         return MT5ControlledExecutionReceipt.from_payload(payload)
 
     def submit_prepared_request(
-        self, request: MT5ControlledExecutionRequest, *, typed_confirmation: str
+        self, request: MT5ControlledExecutionRequest, *, typed_confirmation: str = ""
     ) -> MT5ControlledExecutionReceipt:
         blocker = self._controlled_submission_blocker(typed_confirmation, request)
         if blocker:
             return MT5ControlledExecutionReceipt("BLOCKED", "NOT_RESERVED", False, False, False, blocker)
-        if not hmac.compare_digest(request.human_confirmation_phrase, typed_confirmation.strip()):
+        if request.authorization_source == "STANDING_MANDATE":
+            if (
+                request.request_version != AUTONOMOUS_EXECUTION_REQUEST_VERSION
+                or not request.authorization_reference
+                or request.human_confirmation_phrase
+                or request.human_confirmation_reference
+            ):
+                return MT5ControlledExecutionReceipt(
+                    "BLOCKED", "NOT_RESERVED", False, False, False, "MANDATE_AUTHORIZATION_INVALID"
+                )
+        elif not hmac.compare_digest(request.human_confirmation_phrase, typed_confirmation.strip()):
             return MT5ControlledExecutionReceipt(
                 "BLOCKED", "NOT_RESERVED", False, False, False, "HUMAN_CONFIRMATION_INVALID"
             )
         expected_ref = hash_text(
             f"{typed_confirmation.strip()}|{request.idempotency_key}|{request.expected_account_context_fingerprint}"
         )
-        if not hmac.compare_digest(request.human_confirmation_reference, expected_ref):
+        if request.authorization_source != "STANDING_MANDATE" and not hmac.compare_digest(request.human_confirmation_reference, expected_ref):
             return MT5ControlledExecutionReceipt(
                 "BLOCKED", "NOT_RESERVED", False, False, False, "HUMAN_CONFIRMATION_INVALID"
             )
@@ -130,6 +142,10 @@ class MT5LiveAdapterDisabled:
         ):
             return MT5ControlledExecutionReceipt(
                 "BLOCKED", "NOT_RESERVED", False, False, False, "ACCOUNT_CONTEXT_CHANGED"
+            )
+        if request.authorization_source == "STANDING_MANDATE" and current_context.get("account_environment") != "DEMO":
+            return MT5ControlledExecutionReceipt(
+                "BLOCKED", "NOT_RESERVED", False, False, False, "REAL_ACCOUNT_EXECUTION_FORBIDDEN"
             )
         try:
             payload = self.execution_client.submit_controlled(
@@ -226,6 +242,11 @@ class MT5LiveAdapterDisabled:
             or self.config.kill_switch_engaged
         ):
             return "CONTROLLED_EXECUTION_DISABLED"
+        if request is not None and request.authorization_source == "STANDING_MANDATE":
+            if not self.config.autonomous_execution_enabled:
+                return "AUTONOMOUS_EXECUTION_DISABLED"
+            if typed_confirmation:
+                return "MANDATE_AUTHORIZATION_INVALID"
         if request is not None and request.request_version == PENDING_EXECUTION_REQUEST_VERSION:
             order_type = str(
                 request.approved_semantic_parameters.get("order_type", "")
@@ -247,10 +268,11 @@ class MT5LiveAdapterDisabled:
                 return "PENDING_SUBMISSION_DISABLED"
         if not self.config.execution_auth_token:
             return "CONTROLLED_EXECUTION_AUTHENTICATION_MISSING"
-        if not hmac.compare_digest(
+        if request is None or request.authorization_source != "STANDING_MANDATE":
+            if not hmac.compare_digest(
             str(typed_confirmation or "").strip(), self.config.execution_confirmation_phrase
-        ):
-            return "HUMAN_CONFIRMATION_INVALID"
+            ):
+                return "HUMAN_CONFIRMATION_INVALID"
         return ""
 
     def _management_blocker(self, intent: str, typed_confirmation: str) -> str:

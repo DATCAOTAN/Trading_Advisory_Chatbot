@@ -2452,3 +2452,18 @@ The completed-bar monitor is now a trigger/checkpoint owned by one bounded produ
 - The operator CLI constructs this coordinator and closes its bridge client on normal exit or interruption. Streamlit continues to read persisted status only; reruns do not start work.
 - Verification: 29 coordinator/monitor/mandate tests and 307 focused/neighboring pipeline tests passed with two unchanged dependency warnings. Changed-path compileall passed. External LLM, MT5, controlled-submit, runtime `order_send`, and broker mutation counts were zero.
 - Next production dependency: connect the existing controlled execution, result, reconciliation, lifecycle, and management services through this coordinator with deterministic fake boundaries.
+
+# 56. MANDATE-CONTROLLED EXECUTION INTEGRATION
+
+The bounded coordinator now reaches the existing controlled-submit boundary without converting standing-mandate authority into human confirmation.
+
+- `MT5ControlledExecutionRequest` supports a distinct `controlled-mt5-autonomous-execution/v1` protected request built only from the exact candidate, mandate authorization, final validation and pre-submit report.
+- Human requests retain the previous schema and exact confirmation phrase. Mandate requests require no human phrase and cannot deserialize as human authority.
+- The app adapter rechecks the current account fingerprint and requires host-reported `account_environment=DEMO` before sending a mandate request. Autonomous execution remains disabled by default.
+- The host bridge reloads `TradingAuthorityStore` from the shared protected journal and independently validates the current authoritative mode, mandate integrity/version/revocation/window/kill switch, exact authorization, account hash, candidate/proposal/order bindings, protected parameters, expiry and idempotency.
+- Non-demo or unknown account environments fail closed before reservation. The bridge also has an independent default-false `MT5_BRIDGE_AUTONOMOUS_EXECUTION_ENABLED` gate.
+- MARKET requests without a fixed entry price use the current host-side bid/ask at mapping time; protected side, volume and protection values remain exact-authority bound. PENDING requests retain existing terminal capability and family gates.
+- The existing coordinator optionally invokes the existing adapter after a second immediate mandate revalidation. Accepted, rejected and unknown outcomes use the existing result states; unknown results are not retried and block later coordinator cycles through existing lifecycle/reconciliation admission.
+- Deterministic verification covered accepted, rejected, unknown, duplicate, revoked mandate, real/unknown account environment and existing human/pending paths. The focused execution/reconciliation/lifecycle/management set passed 157 tests with two unchanged dependency warnings.
+- Real LLM, MT5, HTTP controlled-submit, runtime `order_send` and broker-mutation counts were zero. Exactly one production `.order_send(` call-site remains in the host bridge and `src/` still has zero MetaTrader5 imports.
+- Next production dependency: Streamlit authority/supervisor controls, redacted observability, and restart/readiness closure. Operational broker acceptance remains separate.

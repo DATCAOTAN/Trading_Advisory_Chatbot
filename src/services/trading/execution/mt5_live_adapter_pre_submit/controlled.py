@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, Mapping
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 
 
 PENDING_EXECUTION_REQUEST_VERSION = "controlled-mt5-pending-execution/v1"
+AUTONOMOUS_EXECUTION_REQUEST_VERSION = "controlled-mt5-autonomous-execution/v1"
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,77 @@ class MT5ControlledExecutionRequest:
     idempotency_key: str = field(repr=False)
     expected_account_context_fingerprint: str
     execution_permission_requested: bool
+    authorization_source: str = "HUMAN_CONFIRMATION"
+    authorization_reference: str = ""
+
+    @classmethod
+    def from_mandate_artifacts(
+        cls,
+        candidate,
+        authorization,
+        final_validation,
+        pre_submit_report,
+        *,
+        expected_account_context_fingerprint: str,
+        execution_permission_requested: bool = True,
+    ) -> "MT5ControlledExecutionRequest":
+        protected_intent = dict(getattr(final_validation, "protected_intent", {}) or {})
+        fingerprint = str(expected_account_context_fingerprint or "").strip().lower()
+        if (
+            getattr(authorization, "authorization_source", "") != "STANDING_MANDATE"
+            or not callable(getattr(authorization, "integrity_valid", None))
+            or not authorization.integrity_valid()
+            or getattr(final_validation, "valid", False) is not True
+            or getattr(final_validation, "authorization_source", "") != "STANDING_MANDATE"
+            or getattr(final_validation, "authorization_id", "") != authorization.authorization_id
+            or getattr(pre_submit_report, "valid", False) is not True
+            or getattr(pre_submit_report, "pre_submit_ready", False) is not True
+            or getattr(pre_submit_report, "authorization_source", "") != "STANDING_MANDATE"
+            or getattr(pre_submit_report, "source_authorization_id", "") != authorization.authorization_id
+            or not protected_intent
+            or len(fingerprint) != 64
+            or any(character not in "0123456789abcdef" for character in fingerprint)
+            or not isinstance(execution_permission_requested, bool)
+            or execution_permission_requested is not True
+        ):
+            raise ValueError("MANDATE_EXECUTION_ARTIFACTS_INVALID")
+        bindings = (
+            (protected_intent.get("candidate_reference"), candidate.candidate_reference),
+            (protected_intent.get("candidate_provenance_hash"), candidate.provenance_hash),
+            (protected_intent.get("structured_order_hash"), candidate.structured_order_hash),
+            (protected_intent.get("authorization_id"), authorization.authorization_id),
+            (protected_intent.get("symbol"), authorization.symbol),
+            (protected_intent.get("broker_symbol"), authorization.broker_symbol),
+            (protected_intent.get("action"), authorization.order_family),
+        )
+        if any(left != right for left, right in bindings):
+            raise ValueError("MANDATE_EXECUTION_BINDING_MISMATCH")
+        intent_hash = hash_text(
+            json.dumps(protected_intent, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        )
+        if not hmac.compare_digest(intent_hash, str(getattr(pre_submit_report, "intent_hash", ""))):
+            raise ValueError("MANDATE_PRE_SUBMIT_HASH_MISMATCH")
+        return cls(
+            request_version=AUTONOMOUS_EXECUTION_REQUEST_VERSION,
+            approved_semantic_parameters=protected_intent,
+            canonical_semantic_hash=intent_hash,
+            approval_value_hash=final_validation.approval_integrity_hash,
+            lock_value_hash=authorization.artifact_hash,
+            approval_reference=final_validation.final_validation_id,
+            lock_reference=authorization.authorization_id,
+            source_artifact_reference=candidate.candidate_reference,
+            approval_timestamp=final_validation.created_at,
+            lock_timestamp=authorization.created_at,
+            human_confirmation_reference="",
+            human_confirmation_phrase="",
+            pre_submit_validation_reference=pre_submit_report.report_id,
+            pre_submit_validation_valid=True,
+            idempotency_key=authorization.deterministic_idempotency_key,
+            expected_account_context_fingerprint=fingerprint,
+            execution_permission_requested=True,
+            authorization_source="STANDING_MANDATE",
+            authorization_reference=authorization.authorization_id,
+        )
 
     @classmethod
     def from_artifacts(
@@ -223,7 +296,7 @@ class MT5ControlledExecutionRequest:
             execution_permission_requested=execution_permission_requested,
         )
     def as_protected_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "request_version": self.request_version,
             "approved_semantic_parameters": dict(self.approved_semantic_parameters),
             "canonical_semantic_hash": self.canonical_semantic_hash,
@@ -242,6 +315,12 @@ class MT5ControlledExecutionRequest:
             "expected_account_context_fingerprint": self.expected_account_context_fingerprint,
             "execution_permission_requested": self.execution_permission_requested,
         }
+        if self.authorization_source == "STANDING_MANDATE":
+            payload.update(
+                authorization_source=self.authorization_source,
+                authorization_reference=self.authorization_reference,
+            )
+        return payload
 
     def as_redacted_dict(self) -> Dict[str, Any]:
         return {

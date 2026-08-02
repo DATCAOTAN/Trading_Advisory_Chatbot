@@ -22,6 +22,9 @@ from src.services.trading.decision.operator_candidate_generation import (
 from src.services.trading.execution.mt5_live_adapter_pre_submit.approval_pre_submit import (
     ApprovalPreSubmitLifecycleService,
 )
+from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled import (
+    MT5ControlledExecutionRequest,
+)
 from src.services.trading.execution.mt5_live_adapter_pre_submit.trading_authority import (
     TradingAuthorityError,
     TradingAuthorityService,
@@ -65,6 +68,7 @@ class AutonomousTradingCoordinator:
         decision_orchestrator: Any | None = None,
         approval_service: ApprovalPreSubmitLifecycleService | None = None,
         mandate_context_provider: Any | None = None,
+        execution_adapter: Any | None = None,
         monitor_journal: AutonomousCandidateMonitorJournal | None = None,
         clock: Any | None = None,
     ) -> None:
@@ -74,6 +78,7 @@ class AutonomousTradingCoordinator:
         self.decision_orchestrator = decision_orchestrator or AutonomousDecisionOrchestrator()
         self.approval_service = approval_service
         self.mandate_context_provider = mandate_context_provider
+        self.execution_adapter = execution_adapter
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         # ponytail: one coordinator lock; use per-account locks only if measured throughput needs it.
         self._run_lock = threading.Lock()
@@ -268,13 +273,59 @@ class AutonomousTradingCoordinator:
                 authorization_source="STANDING_MANDATE",
             )
         ready = bool(approval.report and approval.report.pre_submit_ready)
+        if not ready or self.execution_adapter is None:
+            return self._candidate_result(
+                candidate, symbol, broker_symbol, timeframes, closed_bar_time,
+                account_scope,
+                "PRE_SUBMIT_READY_NON_EXECUTABLE" if ready else "BLOCKED",
+                "" if ready else (approval.approval.blockers[0] if approval.approval.blockers else "PRE_SUBMIT_BLOCKED"),
+                authorization_source="STANDING_MANDATE",
+                pre_submit_ready=ready,
+            )
+        revalidation = self.authority_service.validate_candidate_authorization(
+            authorization.authorization_id,
+            candidate,
+            account_fingerprint=account.account_context_fingerprint,
+            account_is_demo=account.account_is_demo,
+            current_kill_switch_engaged=context.get("kill_switch_engaged") is True,
+            evaluated_risk_per_trade=str(context["evaluated_risk_per_trade"]),
+            concurrent_positions=int(context["concurrent_positions"]),
+            trades_today=int(context["trades_today"]),
+            loss_today=str(context["loss_today"]),
+            now=self.clock(),
+        )
+        if revalidation:
+            return self._candidate_result(
+                candidate, symbol, broker_symbol, timeframes, closed_bar_time,
+                account_scope, "BLOCKED", revalidation[0],
+                authorization_source="STANDING_MANDATE", pre_submit_ready=True,
+            )
+        try:
+            request = MT5ControlledExecutionRequest.from_mandate_artifacts(
+                candidate,
+                authorization,
+                approval.final_validation,
+                approval.report,
+                expected_account_context_fingerprint=account.account_context_fingerprint,
+            )
+            receipt = self.execution_adapter.submit_prepared_request(request)
+        except (TypeError, ValueError, RuntimeError):
+            return self._candidate_result(
+                candidate, symbol, broker_symbol, timeframes, closed_bar_time,
+                account_scope, "BLOCKED", "CONTROLLED_EXECUTION_INTEGRATION_FAILED",
+                authorization_source="STANDING_MANDATE", pre_submit_ready=True,
+            )
+        status = {
+            "ACCEPTED": "RESULT_CONFIRMED",
+            "REJECTED": "RESULT_REJECTED",
+            "UNKNOWN": "RESULT_UNKNOWN",
+        }.get(receipt.status, "BLOCKED")
         return self._candidate_result(
             candidate, symbol, broker_symbol, timeframes, closed_bar_time,
-            account_scope,
-            "PRE_SUBMIT_READY_NON_EXECUTABLE" if ready else "BLOCKED",
-            "" if ready else (approval.approval.blockers[0] if approval.approval.blockers else "PRE_SUBMIT_BLOCKED"),
+            account_scope, status,
+            receipt.reason if status in {"BLOCKED", "RESULT_UNKNOWN"} else "",
             authorization_source="STANDING_MANDATE",
-            pre_submit_ready=ready,
+            pre_submit_ready=True,
         )
 
     @staticmethod

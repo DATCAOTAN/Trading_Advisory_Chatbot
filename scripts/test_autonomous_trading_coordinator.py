@@ -4,7 +4,11 @@ from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
 
-from scripts.test_approval_final_validation_pre_submit import _prepared
+from scripts.test_approval_final_validation_pre_submit import (
+    _capability,
+    _persisted_lifecycle,
+    _prepared,
+)
 from scripts.test_autonomous_candidate_monitor import FeatureService
 from scripts.test_operator_review_confirmation_lifecycle import NOW
 from src.services.trading.decision.autonomous_candidate_monitor import (
@@ -20,6 +24,16 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.trading_authorit
     TradingAuthorityService,
     TradingAuthorityStore,
 )
+from src.services.trading.execution.mt5_live_adapter_pre_submit.approval_pre_submit import (
+    ApprovalPreSubmitLifecycleService,
+)
+from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled import (
+    MT5ControlledExecutionReceipt,
+)
+from src.services.trading.execution.mt5_live_adapter_pre_submit.policy import (
+    MT5LiveAdapterPreSubmitConfig,
+)
+from scripts.test_standing_trading_mandate_authority import _CandidateJournalView
 
 
 def test_advisory_and_human_modes_stop_before_mandate_authorization(tmp_path):
@@ -156,6 +170,64 @@ def test_one_coordinator_operation_is_active_at_a_time(tmp_path):
     assert orchestrator.calls == 0
 
 
+def test_pre_submit_ready_mandate_uses_existing_execution_adapter_once(tmp_path):
+    state = _prepared(tmp_path / "candidate", "fresh_market", confirm=False)
+    candidate = replace(state["candidate"], operating_mode="autonomous_live")
+    state["candidate_journal"] = _CandidateJournalView(
+        state["candidate_journal"], candidate
+    )
+    authority = _authority(tmp_path / "authority", "autonomous_live")
+    mandate = _mandate(authority)
+    approval = ApprovalPreSubmitLifecycleService(
+        candidate_journal=state["candidate_journal"],
+        confirmation_store=state["review_store"],
+        pre_submit_store=state["pre_submit_store"],
+        config=MT5LiveAdapterPreSubmitConfig(kill_switch_engaged=False),
+        authority_service=authority,
+    )
+    adapter = _ExecutionAdapter()
+    coordinator, _ = _coordinator(
+        tmp_path,
+        candidate,
+        authority,
+        mandate_context_provider=lambda _candidate, _inputs: {
+            "mandate_id": mandate.mandate_id,
+            "evaluated_risk_per_trade": "0.5",
+            "concurrent_positions": 0,
+            "trades_today": 0,
+            "loss_today": "0",
+            "kill_switch_engaged": False,
+            "authorization_nonce": "coordinator-execution-1",
+            "terminal_capability": _capability({"candidate": candidate}),
+        },
+        approval_service=approval,
+        execution_adapter=adapter,
+        lifecycle=_persisted_lifecycle(state),
+    )
+
+    result = coordinator.run_once(symbol="XAUUSD", timeframes=("M15", "H1", "H4"))
+
+    assert result.status == "RESULT_CONFIRMED"
+    assert adapter.calls == 1
+    assert adapter.request.authorization_source == "STANDING_MANDATE"
+    assert adapter.typed_confirmation == ""
+
+
+class _ExecutionAdapter:
+    def __init__(self):
+        self.calls = 0
+        self.request = None
+        self.typed_confirmation = None
+
+    def submit_prepared_request(self, request, *, typed_confirmation=""):
+        self.calls += 1
+        self.request = request
+        self.typed_confirmation = typed_confirmation
+        return MT5ControlledExecutionReceipt(
+            "ACCEPTED", "RESULT_CONFIRMED", True, True, True
+        )
+
+
 class _Assembler:
     def __init__(self, lifecycle):
         self.lifecycle = lifecycle
@@ -192,6 +264,8 @@ def _coordinator(
     mandate_context_provider=None,
     lifecycle=None,
     account_context=None,
+    approval_service=None,
+    execution_adapter=None,
 ):
     lifecycle = lifecycle or SimpleNamespace(
         supervisor_status="HEALTHY",
@@ -217,6 +291,8 @@ def _coordinator(
             authority_service=authority,
             decision_orchestrator=orchestrator,
             mandate_context_provider=mandate_context_provider,
+            approval_service=approval_service,
+            execution_adapter=execution_adapter,
             monitor_journal=AutonomousCandidateMonitorJournal(
                 tmp_path / "monitor.jsonl"
             ),
