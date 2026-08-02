@@ -136,6 +136,9 @@ def test_operator_service_reloads_mode_and_mandate_and_rejects_real_account(tmp_
     assert status["mandates"][0]["mandate_id"] == command.mandate_id
     assert status["permission_state"]["controlled_management_enabled"] is False
     assert status["permission_state"]["management_kill_switch_engaged"] is True
+    assert status["permission_state"]["live_submission_allowed"] is False
+    assert status["permission_state"]["order_send_allowed"] is False
+    assert status["unresolved_execution_count"] == 0
     service.revoke_mandate(command.mandate_id, operator_grant=True)
     assert service.status()["mandates"][0]["revoked"] is True
 

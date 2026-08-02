@@ -1187,3 +1187,30 @@ Commit: this release documentation commit
 
 - Software release is complete locally with no production blocker.
 - Operational acceptance remains pending and requires a separately authorized demo-account procedure. No push was performed.
+
+---
+
+### Maintenance - Authoritative Dashboard Runtime State
+
+Date: 2026-08-02
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Made the existing Dashboard reload and display authoritative account, mode, lifecycle, reconciliation, unresolved-state, permission, and kill-switch state through the existing operator service.
+- Made BTCUSD selection resolve to BTCUSDm and activate the existing M1/H1/H4 profile; XAUUSD keeps configured defaults.
+- Reloaded market freshness, completed bars, capability, features, calendar, regime, and live-price labels for the selected symbol without silent fallback.
+- Replaced one stale bridge-documentation assertion exposed by regression with the current controlled-endpoint hard-block invariants.
+
+#### Verification
+
+- Focused Dashboard/runtime/multi-symbol/operator tests: 70 passed.
+- Browser: DEMO, human-confirmed mode, healthy lifecycle, zero discrepancies/unresolved states, BTCUSDm M1/H1/H4 and complete freshness/capability visibly rendered.
+- Full regression: 3,192 passed; 156 subtests passed; 3 unchanged dependency warnings.
+- Candidate generation, LLM, confirmation, pre-submit, controlled-submit, `order_send`, management and broker mutation: 0.
+
+#### Current state / next step
+
+- Dashboard/backend state alignment is complete; software execution permissions remain disabled and kill switches engaged.
+- Next: operator reviews the corrected Dashboard before separately authorizing any operational candidate-generation acceptance.

@@ -72,6 +72,15 @@ class TradingAuthorityOperatorService:
             for item in executions
             if item.get("latest_reconciliation")
         )
+        unresolved_execution_count = sum(
+            execution_states.get(state, 0)
+            for state in (
+                "RESERVED",
+                "SUBMISSION_STARTED",
+                "RESULT_UNKNOWN",
+                "RECONCILIATION_REQUIRED",
+            )
+        )
         pre_submit = self.pre_submit_store.summarize()
         return {
             "account_environment": account.get("account_environment", "UNKNOWN"),
@@ -89,7 +98,13 @@ class TradingAuthorityOperatorService:
             },
             "execution_state_counts": dict(sorted(execution_states.items())),
             "reconciliation_state_counts": dict(sorted(reconciliation_states.items())),
+            "unresolved_execution_count": unresolved_execution_count,
             "permission_state": {
+                "live_adapter_enabled": Config.TRADING_MT5_LIVE_ADAPTER_ENABLED,
+                "live_submission_allowed": Config.TRADING_MT5_PRE_SUBMIT_ALLOW_LIVE_SUBMISSION,
+                "order_send_allowed": Config.TRADING_MT5_PRE_SUBMIT_ALLOW_ORDER_SEND,
+                "controlled_execution_enabled": Config.TRADING_MT5_CONTROLLED_EXECUTION_ENABLED,
+                "pending_submission_enabled": Config.TRADING_MT5_PENDING_SUBMISSION_ENABLED,
                 "autonomous_policy_gate_enabled": Config.TRADING_AUTONOMOUS_POLICY_GATE_ENABLED,
                 "autonomous_open_eligibility_enabled": Config.TRADING_AUTONOMOUS_OPEN_ELIGIBILITY_ENABLED,
                 "autonomous_management_eligibility_enabled": Config.TRADING_AUTONOMOUS_MANAGEMENT_ELIGIBILITY_ENABLED,

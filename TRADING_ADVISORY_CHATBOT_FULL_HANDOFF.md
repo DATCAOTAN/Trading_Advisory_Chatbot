@@ -2495,3 +2495,14 @@ Production completion Stage 4 closes the bounded runtime without enabling extern
 - Static invariant: exactly one production `.order_send(` call-site, isolated in the host bridge; zero MetaTrader5 imports under `src/`.
 - Security: credentials, raw account identifiers, protected hashes/payloads, and exact ticket/deal/position identifiers are excluded from public documentation, UI status, and general logs. Protected journals retain only the minimum internal evidence required for integrity, idempotency, and reconciliation.
 - Release state: clean working tree after the release commit; no critical production blocker; branch and tag remain local until explicitly pushed.
+
+# 59. AUTHORITATIVE DASHBOARD RUNTIME STATE
+
+Post-release maintenance aligns the existing Streamlit Dashboard with current backend authority and market-profile state.
+
+- The Dashboard reloads `TradingAuthorityOperatorService.status(refresh_runtime=True)` and visibly reports redacted DEMO account match, authoritative mode, bridge/lifecycle health, reconciliation discrepancies, unresolved execution states, execution/submission/management permissions, and both kill switches.
+- The symbol selector now owns one explicit display intent. `BTCUSD` resolves through the existing mapping to `BTCUSDm` and activates `M1,H1,H4`; `XAUUSD` retains the configured default profile. Streamlit session state does not define either backend mapping or authority.
+- Market features, completed-bar timestamps, freshness, symbol capability, price label, calendar, and regime are reloaded for the selected symbol. A symbol/profile mismatch is displayed as a blocker and never falls back silently.
+- Browser verification showed `DEMO`, `human_confirmed_live`, `HEALTHY`, account match true, discrepancies 0, unresolved 0, disabled execution/submission/management permissions, and engaged kill switches. BTCUSD displayed `BTCUSDm`, `M1/H1/H4`, complete freshness and complete symbol capability with no stale XAUUSD metrics.
+- Verification: 70 focused Dashboard/runtime/multi-symbol/operator tests passed. Full regression passed with 3,192 tests and 156 subtests; three dependency warnings were unchanged. Compileall, diff, and safety checks passed.
+- Candidate generation, external LLM, confirmation, pre-submit creation, controlled-submit, runtime `order_send`, management mutation, broker mutation, and real-account action counts were zero.

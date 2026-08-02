@@ -307,7 +307,9 @@ class MT5BridgeMarketDataBoundaryTests(unittest.TestCase):
         self.assertNotIn("sk-or-", env_text)
         self.assertIn("host.docker.internal", docs)
         self.assertIn("outside docker", docs)
-        self.assertIn("no trade execution endpoint", docs)
+        self.assertIn("/execution/controlled-submit", docs)
+        self.assertIn("disabled and hard-blocked by default", docs)
+        self.assertIn("single isolated production `order_send` call-site", docs)
 
     def test_no_order_send_endpoint_or_oanda_rest_unit_call(self):
         bridge_server = (PROJECT_ROOT / "tools" / "mt5_bridge" / "server.py").read_text(encoding="utf-8")

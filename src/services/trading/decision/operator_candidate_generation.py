@@ -40,6 +40,15 @@ from src.services.trading.scoring import SignalScoringEngine
 
 
 AUTONOMOUS_RUNTIME_MODE = "autonomous_live"
+BTCUSD_OPERATOR_TIMEFRAMES = ("M1", "H1", "H4")
+
+
+def operator_timeframe_profile(symbol: str) -> tuple[str, ...]:
+    return (
+        BTCUSD_OPERATOR_TIMEFRAMES
+        if str(symbol).strip().upper() == "BTCUSD"
+        else tuple(Config.MARKET_DEFAULT_TIMEFRAMES)
+    )
 
 
 @dataclass(frozen=True)

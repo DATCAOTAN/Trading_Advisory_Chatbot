@@ -20,6 +20,7 @@ from src.services.trading.calendar import CalendarContextBuilder
 from src.services.trading.decision.operator_candidate_generation import (
     AuthoritativeAutonomousInputAssembler,
     ManualOperatorProposalInput,
+    operator_timeframe_profile,
 )
 from src.services.trading.decision.autonomous_runtime import AutonomousMonitorProcess
 from src.services.trading.execution import (
@@ -104,6 +105,7 @@ from src.services.trading.decision.autonomous_orchestrator import (
 from src.services.trading.market.live_feature_service import LiveFeatureService
 from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBundleBuilder
 from src.services.trading.market.regime_detector import MarketRegimeDetector
+from src.services.trading.market.timeframes import broker_symbol_for
 from src.services.trading.proposal import (
     HumanProposalConfirmationService,
     ProposalBoundaryFormatter,
@@ -204,16 +206,19 @@ def render(orchestrator):
     # ── Hàng 3: Dữ liệu thời gian thực ─────────────────────────────────
     st.markdown("#### 📡 Dữ Liệu Thời Gian Thực")
 
-    _render_market_data_provider_status(orchestrator)
-    _render_autonomous_decision_review_card(orchestrator)
+    selected_symbol, selected_timeframes = _render_runtime_profile_selector()
+    _render_market_data_provider_status(orchestrator, selected_symbol, selected_timeframes)
+    _render_autonomous_decision_review_card(
+        orchestrator, selected_symbol, selected_timeframes
+    )
 
     col_live1, col_live2 = st.columns(2)
 
     with col_live1:
-        st.markdown("**💰 Giá XAUUSD Live**")
+        st.markdown(f"**💰 Giá {selected_symbol} Live**")
         if st.button("🔄 Cập nhật giá", use_container_width=True, key="dash_price"):
             with st.spinner("Đang lấy giá..."):
-                price_info = orchestrator.live_service.get_live_price()
+                price_info = orchestrator.live_service.get_live_price(selected_symbol)
                 st.info(price_info)
 
     with col_live2:
@@ -265,24 +270,27 @@ def render(orchestrator):
 # =============================================================================
 # HELPERS NỘI BỘ
 # =============================================================================
-def _render_autonomous_decision_review_card(orchestrator):
+def _render_runtime_profile_selector() -> tuple[str, tuple[str, ...]]:
     selected_symbol = st.selectbox(
         "Canonical symbol",
         ("XAUUSD", "BTCUSD"),
         index=0 if Config.MARKET_DEFAULT_SYMBOL != "BTCUSD" else 1,
         key="autonomous_candidate_symbol",
     )
-    btc_m1_acceptance = st.checkbox(
+    btc_profile_active = selected_symbol == "BTCUSD"
+    st.checkbox(
         "Use BTCUSD M1 acceptance profile",
-        value=False,
-        disabled=selected_symbol != "BTCUSD",
-        key="autonomous_candidate_btc_m1_acceptance",
+        value=btc_profile_active,
+        disabled=True,
+        key=f"autonomous_candidate_btc_m1_acceptance_{selected_symbol}",
     )
-    selected_timeframes = (
-        ("M1", "H1", "H4")
-        if selected_symbol == "BTCUSD" and btc_m1_acceptance
-        else tuple(Config.MARKET_DEFAULT_TIMEFRAMES)
+    selected_timeframes = operator_timeframe_profile(selected_symbol)
+    st.caption(
+        f"Active profile: {selected_symbol} -> {broker_symbol_for(selected_symbol)} | "
+        f"{','.join(selected_timeframes)}"
     )
+    return selected_symbol, selected_timeframes
+def _render_autonomous_decision_review_card(orchestrator, selected_symbol, selected_timeframes):
     actions = st.columns(2)
     generation_active = st.session_state.get("autonomous_candidate_generation_active") is True
     if actions[0].button(
@@ -377,31 +385,34 @@ def _autonomous_monitor_process():
 
 
 def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> None:
-    with st.expander("Trading Authority and Runtime Supervisor", expanded=False):
+    with st.expander("Trading Authority and Runtime Supervisor", expanded=True):
         st.caption(
             "Protected demo-account authority and bounded completed-bar supervision. "
             "No control here bypasses execution, kill-switch, idempotency, or bridge checks."
         )
         service = _trading_authority_service()
         try:
-            refresh = st.button("Refresh Runtime Health", key="refresh_trading_runtime_health")
-            status = service.status(refresh_runtime=refresh)
+            st.button("Refresh Runtime Health", key="refresh_trading_runtime_health")
+            status = service.status(refresh_runtime=True)
         except Exception as exc:
             st.warning(f"Trading authority unavailable: {type(exc).__name__}")
             return
 
         lifecycle = status["lifecycle"]
-        columns = st.columns(4)
+        columns = st.columns(6)
         columns[0].metric("Account", status["account_environment"])
         columns[1].metric("Mode", status["mode"])
         columns[2].metric("Lifecycle", lifecycle["supervisor_status"])
-        columns[3].metric("Mandates", len(status["mandates"]))
+        columns[3].metric("Account match", str(lifecycle["account_context_match"]).lower())
+        columns[4].metric("Discrepancies", lifecycle["discrepancy_count"])
+        columns[5].metric("Unresolved", status["unresolved_execution_count"])
         st.caption(
             f"bridge_available={str(lifecycle['bridge_available']).lower()} | "
             f"account_match={str(lifecycle['account_context_match']).lower()} | "
+            f"terminal_trade_allowed={str(lifecycle['terminal_trade_allowed']).lower()} | "
+            f"account_trade_allowed={str(lifecycle['account_trade_allowed']).lower()} | "
             f"positions={lifecycle['active_position_count']} | trades_today={lifecycle['trades_today']} | "
-            f"kill_switch={str(Config.TRADING_EXECUTION_KILL_SWITCH).lower()} | "
-            f"autonomous_execution={str(Config.TRADING_EXECUTION_AUTONOMOUS_ENABLED).lower()}"
+            f"account_redacted={str(status['metadata_redacted']).lower()}"
         )
         pre_submit = status["pre_submit"]
         permissions = status["permission_state"]
@@ -411,15 +422,39 @@ def _render_trading_runtime_controls(symbol, timeframes, monitor_row) -> None:
             f"reconciliation_states={status['reconciliation_state_counts'] or {}}"
         )
         st.caption(
+            f"live_adapter={str(permissions['live_adapter_enabled']).lower()} | "
+            f"live_submission={str(permissions['live_submission_allowed']).lower()} | "
+            f"order_send={str(permissions['order_send_allowed']).lower()} | "
+            f"controlled_execution={str(permissions['controlled_execution_enabled']).lower()} | "
+            f"pending_submission={str(permissions['pending_submission_enabled']).lower()} | "
+            f"execution_kill_switch={str(permissions['execution_kill_switch_engaged']).lower()}"
+        )
+        st.caption(
             f"policy_gate={str(permissions['autonomous_policy_gate_enabled']).lower()} | "
             f"open_eligibility={str(permissions['autonomous_open_eligibility_enabled']).lower()} | "
             f"management_eligibility={str(permissions['autonomous_management_eligibility_enabled']).lower()} | "
             f"controlled_management={str(permissions['controlled_management_enabled']).lower()} | "
+            f"cancel_allowed={str(permissions['cancel_allowed']).lower()} | "
+            f"protection_modification={str(permissions['protection_modification_allowed']).lower()} | "
+            f"position_close={str(permissions['position_close_allowed']).lower()} | "
             f"management_kill_switch={str(permissions['management_kill_switch_engaged']).lower()}"
         )
+        runtime_blockers = []
+        if status["account_environment"] != "DEMO":
+            runtime_blockers.append("ACCOUNT_ENVIRONMENT_NOT_DEMO")
+        if not status["mode_integrity_valid"]:
+            runtime_blockers.append("MODE_INTEGRITY_INVALID")
+        if lifecycle["supervisor_status"] != "HEALTHY":
+            runtime_blockers.append(lifecycle["health_reason"])
+        if not lifecycle["bridge_available"]:
+            runtime_blockers.append("BRIDGE_UNAVAILABLE")
+        if not lifecycle["account_context_match"]:
+            runtime_blockers.append("ACCOUNT_CONTEXT_MISMATCH")
         if lifecycle["discrepancy_count"]:
-            st.warning(f"Lifecycle blocker: {lifecycle['health_reason']}")
-        if status["execution_state_counts"].get("RESULT_UNKNOWN", 0):
+            runtime_blockers.append("RECONCILIATION_DISCREPANCY")
+        if runtime_blockers:
+            st.warning("Runtime blockers: " + ", ".join(dict.fromkeys(runtime_blockers)))
+        if status["unresolved_execution_count"]:
             st.error("Unknown execution result requires reconciliation and blocks new work.")
         if pre_submit["warnings"]:
             st.error("Pre-submit journal is unavailable or corrupt.")
@@ -694,62 +729,103 @@ def _render_pending_candidate_handoff(run_result):
             st.warning(f"Pending candidate handoff blocked: {str(exc)}")
 
 
-def _render_market_data_provider_status(orchestrator):
+def _market_runtime_projection(result, symbol: str, timeframes: tuple[str, ...]) -> dict:
+    bundle = result.bundle
+    quality = result.quality_report
+    tick = bundle.tick
+    expected_broker_symbol = broker_symbol_for(symbol)
+    blockers = [
+        f"{issue.code}:{issue.timeframe}" if issue.timeframe else issue.code
+        for issue in quality.issues
+    ]
+    if bundle.symbol != symbol or bundle.broker_symbol != expected_broker_symbol:
+        blockers.append("SYMBOL_PROFILE_MISMATCH")
+    missing_metadata = bool(
+        tick is None
+        or any(
+            getattr(tick, name, None) is None
+            for name in (
+                "digits", "point", "tick_size", "minimum_distance_points",
+                "volume_min", "volume_max", "volume_step", "tick_value", "contract_size",
+            )
+        )
+    )
+    if missing_metadata:
+        blockers.append("SYMBOL_CAPABILITY_INCOMPLETE")
+    return {
+        "canonical_symbol": bundle.symbol,
+        "broker_symbol": bundle.broker_symbol,
+        "timeframes": tuple(timeframes),
+        "provider_health": getattr(bundle.provider_health, "status", "UNAVAILABLE"),
+        "quality_status": quality.status,
+        "tick_timestamp": tick.timestamp if tick else "n/a",
+        "bar_timestamps": {
+            timeframe: quality.latest_timestamp_by_timeframe.get(timeframe, "n/a")
+            for timeframe in timeframes
+        },
+        "symbol_capability": "COMPLETE" if not missing_metadata else "INCOMPLETE",
+        "blockers": tuple(dict.fromkeys(blockers)),
+    }
+
+
+def _render_market_data_provider_status(orchestrator, symbol, timeframes):
     try:
         service = orchestrator.live_service
-        health = service.provider_health()
-        tick = service.get_latest_tick("XAUUSD")
-        snapshot = service.get_market_snapshot("XAUUSD", "M15", 2)
-        account = service.get_account()
-        cols = st.columns(4)
-        cols[0].metric("Provider", getattr(service.provider, "provider_name", "unknown"))
-        cols[1].metric("Health", health.status)
-        cols[2].metric("Tick time", tick.timestamp or "n/a")
-        latest_bar = snapshot.bars[-1].timestamp if snapshot.bars else "n/a"
-        cols[3].metric("OHLCV time", latest_bar)
-        st.caption(
-            "Bridge URL is configured outside the dashboard; account is redacted. "
-            f"account_id_hash={account.account_id_hash[:12] if account.account_id_hash else 'n/a'} "
-            f"server={account.server_redacted or 'n/a'}"
+        feature_service = LiveFeatureService(
+            bundle_builder=MarketSnapshotBundleBuilder(service.provider)
         )
-        if health.status not in {"OK", "DEGRADED"}:
-            st.warning(f"Market data provider unavailable: {health.message}")
-        else:
-            try:
-                feature_service = LiveFeatureService(bundle_builder=MarketSnapshotBundleBuilder(service.provider))
-                result = feature_service.build_features("XAUUSD", Config.MARKET_DEFAULT_TIMEFRAMES, min(Config.MARKET_DEFAULT_CANDLE_COUNT, 120))
-                features = result.feature_snapshot
-                feature_cols = st.columns(5)
-                feature_cols[0].metric("Data quality", features.data_quality_status)
-                feature_cols[1].metric("Trend", features.trend_direction)
-                feature_cols[2].metric("Strength", f"{features.trend_strength:.2f}")
-                feature_cols[3].metric("Volatility", features.volatility_state)
-                feature_cols[4].metric("Spread", features.spread_state)
-                st.caption(
-                    f"Momentum={features.momentum_state} | Pullback={features.pullback_detected} | "
-                    f"Range/chop={features.range_chop_score:.2f}"
-                )
-                try:
-                    calendar_context = CalendarContextBuilder(service.calendar_provider).build("XAUUSD")
-                    regime = MarketRegimeDetector().detect(features, calendar_context)
-                    regime_cols = st.columns(4)
-                    regime_cols[0].metric("Calendar risk", calendar_context.calendar_risk_state)
-                    next_event = calendar_context.next_high_impact_event
-                    next_label = next_event.title[:28] if next_event else "n/a"
-                    regime_cols[1].metric("Next event", next_label)
-                    minutes = calendar_context.minutes_to_next_high_impact_event
-                    regime_cols[2].metric("Minutes", f"{minutes:.0f}" if minutes is not None else "n/a")
-                    regime_cols[3].metric("Regime", regime.primary_regime)
-                    st.caption(
-                        f"Regime confidence={regime.confidence:.2f} | "
-                        f"Secondary={', '.join(regime.secondary_regimes) or 'n/a'}"
-                    )
-                    if regime.blockers:
-                        st.warning("Regime blockers: " + ", ".join(regime.blockers[:5]))
-                except Exception as exc:
-                    st.caption(f"Calendar/regime snapshot unavailable: {type(exc).__name__}")
-            except Exception as exc:
-                st.caption(f"Market feature snapshot unavailable: {type(exc).__name__}")
+        result = feature_service.build_features(
+            symbol, timeframes, Config.MARKET_DEFAULT_CANDLE_COUNT
+        )
+        state = _market_runtime_projection(result, symbol, timeframes)
+        cols = st.columns(5)
+        cols[0].metric("Provider", getattr(service.provider, "provider_name", "unknown"))
+        cols[1].metric("Health", state["provider_health"])
+        cols[2].metric("Canonical", state["canonical_symbol"])
+        cols[3].metric("Broker", state["broker_symbol"])
+        cols[4].metric("Profile", "/".join(state["timeframes"]))
+        st.caption(
+            f"tick={state['tick_timestamp']} | quality={state['quality_status']} | "
+            f"symbol_capability={state['symbol_capability']}"
+        )
+        st.caption(
+            "Completed bars: "
+            + " | ".join(
+                f"{timeframe}={state['bar_timestamps'][timeframe]}"
+                for timeframe in state["timeframes"]
+            )
+        )
+        features = result.feature_snapshot
+        feature_cols = st.columns(5)
+        feature_cols[0].metric("Data quality", features.data_quality_status)
+        feature_cols[1].metric("Trend", features.trend_direction)
+        feature_cols[2].metric("Strength", f"{features.trend_strength:.2f}")
+        feature_cols[3].metric("Volatility", features.volatility_state)
+        feature_cols[4].metric("Spread", features.spread_state)
+        st.caption(
+            f"Momentum={features.momentum_state} | Pullback={features.pullback_detected} | "
+            f"Range/chop={features.range_chop_score:.2f}"
+        )
+        try:
+            calendar_context = CalendarContextBuilder(service.calendar_provider).build(symbol)
+            regime = MarketRegimeDetector().detect(features, calendar_context)
+            regime_cols = st.columns(4)
+            regime_cols[0].metric("Calendar risk", calendar_context.calendar_risk_state)
+            next_event = calendar_context.next_high_impact_event
+            regime_cols[1].metric("Next event", next_event.title[:28] if next_event else "n/a")
+            minutes = calendar_context.minutes_to_next_high_impact_event
+            regime_cols[2].metric("Minutes", f"{minutes:.0f}" if minutes is not None else "n/a")
+            regime_cols[3].metric("Regime", regime.primary_regime)
+            st.caption(
+                f"Regime confidence={regime.confidence:.2f} | "
+                f"Secondary={', '.join(regime.secondary_regimes) or 'n/a'}"
+            )
+            if regime.blockers:
+                st.warning("Regime blockers: " + ", ".join(regime.blockers[:5]))
+        except Exception as exc:
+            st.caption(f"Calendar/regime snapshot unavailable: {type(exc).__name__}")
+        if state["blockers"]:
+            st.warning("Market blockers: " + ", ".join(state["blockers"][:8]))
     except Exception as exc:
         st.warning(f"Market data provider status unavailable: {type(exc).__name__}")
 
