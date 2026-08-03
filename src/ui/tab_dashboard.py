@@ -303,7 +303,7 @@ def _render_autonomous_decision_review_card(
     strategy=None,
 ):
     monitor_row = _latest_monitor_row(selected_symbol, selected_timeframes)
-    active_mode = _render_trading_runtime_controls(
+    active_mode, runtime_blockers = _render_trading_runtime_controls(
         selected_symbol,
         selected_timeframes,
         monitor_row,
@@ -319,6 +319,7 @@ def _render_autonomous_decision_review_card(
         key=f"{key_prefix}generate_autonomous_candidate",
         disabled=(
             generation_active
+            or bool(runtime_blockers)
             or bool(requested_mode and active_mode != requested_mode)
         ),
         use_container_width=True,
@@ -335,8 +336,13 @@ def _render_autonomous_decision_review_card(
                 symbol=selected_symbol,
                 timeframes=selected_timeframes,
                 strategy=strategy,
-            )
+        )
         st.session_state["autonomous_candidate_generation_outcome"] = outcome
+    if runtime_blockers:
+        st.caption(
+            "Generate Candidate is unavailable until Refresh Runtime Health "
+            "reports no blockers."
+        )
     if actions[1].button(
         "Clear Current Candidate",
         key=f"{key_prefix}clear_autonomous_candidate",
@@ -427,6 +433,28 @@ def _mode_ui_capabilities(mode: str) -> dict[str, bool]:
     }
 
 
+def _candidate_runtime_blockers(status) -> tuple[str, ...]:
+    lifecycle = status["lifecycle"]
+    blockers = []
+    if status["account_environment"] != "DEMO":
+        blockers.append("ACCOUNT_ENVIRONMENT_NOT_DEMO")
+    if not status["mode_integrity_valid"]:
+        blockers.append("MODE_INTEGRITY_INVALID")
+    if lifecycle["supervisor_status"] != "HEALTHY":
+        blockers.append(lifecycle["health_reason"])
+    if not lifecycle["bridge_available"]:
+        blockers.append("BRIDGE_UNAVAILABLE")
+    if not lifecycle["account_context_match"]:
+        blockers.append("ACCOUNT_CONTEXT_MISMATCH")
+    if lifecycle["discrepancy_count"]:
+        blockers.append("RECONCILIATION_DISCREPANCY")
+    if status["unresolved_execution_count"]:
+        blockers.append("UNRESOLVED_EXECUTION_STATE")
+    if status["pre_submit"]["warnings"]:
+        blockers.append("PRE_SUBMIT_JOURNAL_UNAVAILABLE")
+    return tuple(dict.fromkeys(blockers))
+
+
 def _render_trading_runtime_controls(
     symbol,
     timeframes,
@@ -435,7 +463,7 @@ def _render_trading_runtime_controls(
     requested_mode=None,
     mode_idempotency_key=None,
     key_prefix="",
-) -> str:
+) -> tuple[str, tuple[str, ...]]:
     with st.expander("Trading Authority and Runtime Supervisor", expanded=True):
         st.caption(
             "Protected demo-account authority and bounded completed-bar supervision. "
@@ -450,7 +478,7 @@ def _render_trading_runtime_controls(
             status = service.status(refresh_runtime=True)
         except Exception as exc:
             st.warning(f"Trading authority unavailable: {type(exc).__name__}")
-            return "UNKNOWN"
+            return "UNKNOWN", ("RUNTIME_STATUS_UNAVAILABLE",)
 
         lifecycle = status["lifecycle"]
         columns = st.columns(6)
@@ -493,21 +521,9 @@ def _render_trading_runtime_controls(
             f"position_close={str(permissions['position_close_allowed']).lower()} | "
             f"management_kill_switch={str(permissions['management_kill_switch_engaged']).lower()}"
         )
-        runtime_blockers = []
-        if status["account_environment"] != "DEMO":
-            runtime_blockers.append("ACCOUNT_ENVIRONMENT_NOT_DEMO")
-        if not status["mode_integrity_valid"]:
-            runtime_blockers.append("MODE_INTEGRITY_INVALID")
-        if lifecycle["supervisor_status"] != "HEALTHY":
-            runtime_blockers.append(lifecycle["health_reason"])
-        if not lifecycle["bridge_available"]:
-            runtime_blockers.append("BRIDGE_UNAVAILABLE")
-        if not lifecycle["account_context_match"]:
-            runtime_blockers.append("ACCOUNT_CONTEXT_MISMATCH")
-        if lifecycle["discrepancy_count"]:
-            runtime_blockers.append("RECONCILIATION_DISCREPANCY")
+        runtime_blockers = _candidate_runtime_blockers(status)
         if runtime_blockers:
-            st.warning("Runtime blockers: " + ", ".join(dict.fromkeys(runtime_blockers)))
+            st.warning("Runtime blockers: " + ", ".join(runtime_blockers))
         if status["unresolved_execution_count"]:
             st.error("Unknown execution result requires reconciliation and blocks new work.")
         if pre_submit["warnings"]:
@@ -564,7 +580,7 @@ def _render_trading_runtime_controls(
                     st.warning(f"Mode change blocked: {str(exc)}")
 
         if not mode_ui["mandate_controls"]:
-            return status["mode"]
+            return status["mode"], runtime_blockers
 
         with st.form(f"{key_prefix}standing_mandate_form"):
             st.markdown("**Standing Trading Mandate**")
@@ -716,7 +732,7 @@ def _render_trading_runtime_controls(
                 st.caption(
                     f"latest={monitor_row['status']} | blocker={monitor_row['blocker'] or 'none'}"
                 )
-        return status["mode"]
+        return status["mode"], runtime_blockers
 
 
 def _render_manual_operator_candidate_form(orchestrator, active_mode: str) -> None:

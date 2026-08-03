@@ -128,6 +128,7 @@ def test_chat_ui_reuses_existing_authority_and_candidate_controls():
     assert 'st.success("Authoritative mode updated.")\n                    st.rerun()' in dashboard
     assert "Grant MT5 Demo Access" in dashboard
     assert "generation_request_id or secrets.token_hex(16)" in dashboard
+    assert "if latest_trading_request is not None and not user_query:" in chatbot
     assert "controlled-submit" not in chatbot
     assert ".order_send(" not in chatbot
     assert "LLMClient" not in Path(

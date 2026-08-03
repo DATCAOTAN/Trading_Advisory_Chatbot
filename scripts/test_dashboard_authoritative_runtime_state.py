@@ -7,7 +7,11 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.authority_runtim
 from src.services.trading.decision.operator_candidate_generation import (
     operator_timeframe_profile,
 )
-from src.ui.tab_dashboard import _market_runtime_projection, _mode_ui_capabilities
+from src.ui.tab_dashboard import (
+    _candidate_runtime_blockers,
+    _market_runtime_projection,
+    _mode_ui_capabilities,
+)
 
 
 def _market_result(*, symbol="BTCUSD", broker_symbol="BTCUSDm", issue=None):
@@ -178,3 +182,32 @@ def test_mode_form_submit_is_not_deadlocked_by_form_local_selection():
 
     assert "form_submit_button(mode_action)" in source
     assert "form_submit_button(mode_action, disabled=" not in source
+
+
+def test_candidate_generation_blockers_follow_authoritative_runtime_status():
+    status = {
+        "account_environment": "DEMO",
+        "mode_integrity_valid": True,
+        "unresolved_execution_count": 0,
+        "pre_submit": {"warnings": []},
+        "lifecycle": {
+            "supervisor_status": "CYCLE_SKIPPED",
+            "health_reason": "OVERLAPPING_CYCLE_PREVENTED",
+            "bridge_available": False,
+            "account_context_match": False,
+            "discrepancy_count": 0,
+        },
+    }
+
+    assert _candidate_runtime_blockers(status) == (
+        "OVERLAPPING_CYCLE_PREVENTED",
+        "BRIDGE_UNAVAILABLE",
+        "ACCOUNT_CONTEXT_MISMATCH",
+    )
+
+
+def test_generate_control_is_disabled_until_runtime_blockers_clear():
+    source = Path("src/ui/tab_dashboard.py").read_text(encoding="utf-8")
+
+    assert "or bool(runtime_blockers)" in source
+    assert "Generate Candidate is unavailable until Refresh Runtime Health" in source

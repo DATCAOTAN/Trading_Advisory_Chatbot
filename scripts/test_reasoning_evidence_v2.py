@@ -72,6 +72,51 @@ def test_rules_are_typed_and_bounded():
     assert [item.operator for item in strategy.entry_rules] == ["CROSSES_ABOVE", "GREATER_THAN"]
 
 
+def test_rule_mentions_do_not_create_default_timeframe_indicator_duplicates():
+    strategy = _request(
+        "Use EMA 20 and EMA 50 on H1, RSI 14 on H1 and ATR 14 for risk. "
+        "Only buy when EMA20 crosses above EMA50 and RSI is above 55."
+    )
+    assert strategy is not None
+    assert [item.output_alias for item in strategy.indicators] == [
+        "atr_14_m15",
+        "ema_20_h1",
+        "ema_50_h1",
+        "rsi_14_h1",
+    ]
+    assert strategy.entry_rules[0] == StrategyRule(
+        "CROSSES_ABOVE", "ema_20_h1", "ema_50_h1"
+    )
+
+
+def test_explicit_same_indicator_on_two_timeframes_is_preserved():
+    strategy = _request(
+        "Use EMA 20 on M15 and EMA 20 on H1, then confirm every trade on demo."
+    )
+    assert strategy is not None
+    assert [item.output_alias for item in strategy.indicators] == [
+        "ema_20_h1",
+        "ema_20_m15",
+    ]
+
+
+def test_vietnamese_rule_references_do_not_duplicate_declared_h1_indicators():
+    request = parse_conversational_trading_request(
+        "Hãy phân tích BTCUSD bằng EMA 20 và EMA 50 trên H1, RSI 14 trên H1 "
+        "và ATR 14 để quản lý rủi ro. Chỉ xem xét BUY khi EMA20 cắt lên "
+        "EMA50 và RSI lớn hơn 55. Phải hỏi tôi trước mỗi giao dịch và chỉ "
+        "dùng tài khoản MT5 demo.",
+        conversation_id="vietnamese-reasoning-v2",
+    )
+    assert request is not None and request.strategy is not None
+    aliases = [item.output_alias for item in request.strategy.indicators]
+    assert aliases == ["atr_14_m1", "ema_20_h1", "ema_50_h1", "rsi_14_h1"]
+    assert request.strategy.entry_rules == (
+        StrategyRule("CROSSES_ABOVE", "ema_20_h1", "ema_50_h1"),
+        StrategyRule("GREATER_THAN", "rsi_14_h1", constants=(55.0,)),
+    )
+
+
 def test_invalid_indicator_and_parameters_fail_closed():
     unsupported = _request("Use ADX 14 on H1 and ask before every trade on demo.")
     assert unsupported is not None

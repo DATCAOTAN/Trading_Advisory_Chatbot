@@ -1,6 +1,7 @@
 import json
 import uuid
 import datetime
+import threading
 from typing import List, Dict, Optional
 from pymongo import MongoClient
 import redis
@@ -13,11 +14,14 @@ class HistoryService:
     Quản lý bộ nhớ hội thoại đa phiên (Multi-session).
     """
     _instance = None
+    _instance_lock = threading.Lock()
     
     def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._init_service()
+        with cls._instance_lock:
+            if cls._instance is None:
+                instance = super().__new__(cls)
+                instance._init_service()
+                cls._instance = instance
         return cls._instance
 
     def _init_service(self):
@@ -92,7 +96,13 @@ class HistoryService:
             return messages[-limit:]
         return messages
 
-    def append_message(self, session_id: str, message: Dict):
+    def append_message(
+        self,
+        session_id: str,
+        message: Dict,
+        *,
+        include_vector_memory: bool = True,
+    ):
         """Lưu tin nhắn song song vào cả Redis, MongoDB và VectorDB (Long-term Memory)."""
         if not session_id:
             return
@@ -122,6 +132,9 @@ class HistoryService:
             print(f"❌ [HistoryService] Lỗi cập nhật MongoDB: {e}")
             
         # 3. Ghi vào Long-term Memory (Vector DB)
+        if not include_vector_memory:
+            return
+
         content = message.get("content", "").strip()
         # Lọc rác: Bỏ qua tin nhắn quá ngắn
         if len(content) > 15:

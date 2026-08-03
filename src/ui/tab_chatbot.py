@@ -199,13 +199,14 @@ def render(orchestrator, feature_flags: dict):
                 if metrics:
                     _render_trade_chart(metrics)
 
+    user_query = st.chat_input("Hoi ve xu huong vang, chien luoc SMC, du lieu vi mo...")
     latest_trading_request = _latest_conversational_trading_request(
         st.session_state.messages
     )
-    if latest_trading_request is not None:
+    if latest_trading_request is not None and not user_query:
         _render_conversational_trading_authorization(orchestrator, latest_trading_request)
 
-    if user_query := st.chat_input("Hoi ve xu huong vang, chien luoc SMC, du lieu vi mo..."):
+    if user_query:
         previous_context = _latest_conversational_context(st.session_state.messages)
         conversational_context = resolve_conversational_context(user_query, previous_context)
         trading_request = parse_conversational_trading_request(
@@ -334,6 +335,11 @@ def render(orchestrator, feature_flags: dict):
             assistant_msg["trading_request"] = trading_request.to_public_dict()
         assistant_msg["conversational_context"] = conversational_context.as_dict()
         st.session_state.messages.append(assistant_msg)
+        HistoryService().append_message(
+            st.session_state.current_session_id,
+            assistant_msg,
+            include_vector_memory=memory_save_allowed,
+        )
         if memory_save_allowed:
             memory_hash = _answer_sha256(full_answer)
             memory_matches_selected = True
@@ -364,7 +370,6 @@ def render(orchestrator, feature_flags: dict):
                 )
                 _store_evaluation_runtime_artifacts(runtime_artifacts)
                 return
-            HistoryService().append_message(st.session_state.current_session_id, assistant_msg)
             quality = "DEGRADED" if completion_result and completion_result["level"] == "warn" else "PASS"
             print(f"[MemoryPolicy] answer_quality={quality} action=stored_with_quality_flag")
             record_journal_review(
