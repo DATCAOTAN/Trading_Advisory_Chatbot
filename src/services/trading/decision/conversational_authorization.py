@@ -164,6 +164,14 @@ def parse_conversational_trading_request(
     }[mode]
     request_material = f"{conversation_id.strip()}|{query.strip()}"
     request_id = "conversation_trade_" + hashlib.sha256(request_material.encode("utf-8")).hexdigest()[:24]
+    has_local_timeframe = bool(
+        re.search(r"\b(?:M1|M5|M15|H1|H4|D1)\b", str(query or ""), re.IGNORECASE)
+    )
+    strategy_default_timeframes = (
+        operator_timeframe_profile(symbol)
+        if has_local_timeframe
+        else context.timeframes or operator_timeframe_profile(symbol)
+    )
     strategy = parse_conversational_strategy(
         query,
         canonical_symbol=symbol,
@@ -171,7 +179,7 @@ def parse_conversational_trading_request(
         confirmation_policy=confirmation_policy,
         account_scope=account_scope,
         request_id=request_id,
-        default_timeframes=context.timeframes or operator_timeframe_profile(symbol),
+        default_timeframes=strategy_default_timeframes,
     )
     strategy_issues = ()
     if strategy is not None:

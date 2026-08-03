@@ -631,7 +631,15 @@ def _nearby_timeframe_token(text: str, end: int) -> str:
         r"\s*(?:(?:ON|AT|TRÊN|TREN|KHUNG)\s+)?(M1|M5|M15|H1|H4|D1)\b",
         text[end:end + 40],
     )
-    return match.group(1) if match else ""
+    if match:
+        return match.group(1)
+    clause = re.split(r"[,.;]", text[end:end + 80], maxsplit=1)[0]
+    grouped = re.search(
+        r"\b(?:AND|VA)\s+(?:EMA|SMA|RSI|ATR|MACD|BOLLINGER(?:\s+BANDS)?|BBANDS)\b"
+        r"[^,.;]{0,40}?\b(?:(?:ON|AT|TRÊN|TREN|KHUNG)\s+)?(M1|M5|M15|H1|H4|D1)\b",
+        clause,
+    )
+    return grouped.group(1) if grouped else ""
 
 
 def _parse_rules(text: str, indicators: Sequence[IndicatorSpec]) -> list[StrategyRule]:
