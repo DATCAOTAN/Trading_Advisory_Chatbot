@@ -29,6 +29,76 @@ RESPONSE_FORMATS = {
 
 
 @dataclass(frozen=True)
+class TradeInstructionSemantics:
+    action: str = ""
+    direction: str = ""
+    instruction: bool = False
+    negated: bool = False
+    hypothetical: bool = False
+    concept_question: bool = False
+
+
+def normalize_trade_instruction(text: str) -> TradeInstructionSemantics:
+    """Classify bounded trade language without granting execution authority."""
+    value = _normalized(text)
+    concept = _contains(
+        value, " la gi", " what is", " nghia la gi", " explain buy", " explain sell"
+    )
+    hypothetical = _contains(
+        value, " neu ", " if ", " gia su", " co nen", " should i", " would ", " risk gi"
+    )
+    negated = bool(
+        re.search(
+            r"\b(?:khong|dung|do not|don't|never|chi phan tich|analysis only)\b"
+            r".{0,28}\b(?:buy|sell|mua|ban|long|short|trade|giao dich|vao lenh)\b",
+            value,
+        )
+    )
+    close = bool(
+        re.search(r"\b(?:close|exit|dong lenh|thoat lenh|chot vi the)\b", value)
+    )
+    buy = bool(
+        re.search(
+            r"\b(?:buy|mua|long|mo lenh mua|vao lenh mua|mo vi the long|enter long|open a buy)\b",
+            value,
+        )
+    )
+    sell = bool(
+        re.search(
+            r"\b(?:sell|ban|short|mo lenh ban|vao lenh ban|mo vi the short|enter short|open a sell)\b",
+            value,
+        )
+    )
+    generic = bool(
+        re.search(r"\b(?:trade|giao dich|vao lenh|tao lenh|tim co hoi giao dich)\b", value)
+    )
+    imperative = bool(
+        re.search(r"\b(?:hay|please|mo|vao|enter|open|tao|thuc hien)\b", value)
+    ) or bool(re.search(r"\b(?:buy|sell|long|short)\b\s+(?:when|khi)\b", value))
+    question = "?" in str(text or "") or concept or hypothetical
+    direct_command = value in {"buy", "sell", "mua", "ban", "long", "short", "trade", "giao dich"}
+    instruction = not negated and not question and (imperative or generic or close or direct_command)
+    direction = "BUY" if instruction and buy and not sell else "SELL" if instruction and sell and not buy else ""
+    action = (
+        "CLOSE_POSITION"
+        if instruction and close
+        else "OPEN_POSITION"
+        if instruction and direction
+        else "GENERIC_TRADE"
+        if instruction and generic
+        else ""
+    )
+    return TradeInstructionSemantics(
+        action=action,
+        direction=direction,
+        instruction=instruction,
+        negated=negated,
+        hypothetical=hypothetical,
+        concept_question=concept,
+    )
+
+
+@dataclass(frozen=True)
 class ConversationalIntentContext:
     intent_families: tuple[str, ...] = ()
     canonical_symbol: str = ""
@@ -127,7 +197,8 @@ def resolve_conversational_context(
     previous: ConversationalIntentContext | None = None,
 ) -> ConversationalIntentContext:
     normalized = _normalized(query)
-    families = _intent_families(normalized)
+    trade_semantics = normalize_trade_instruction(query)
+    families = _intent_families(normalized, trade_semantics)
     explicit: list[str] = []
     blockers: list[str] = []
 
@@ -189,7 +260,7 @@ def resolve_conversational_context(
             blockers.append("TIMEFRAME_REQUIRED")
         if not indicators:
             blockers.append("STRATEGY_INDICATORS_MISSING")
-        has_direction = _contains(normalized, " buy ", " sell ", " long ", " short ", " mua ", " ban ")
+        has_direction = bool(trade_semantics.direction)
         if not _has_rule(normalized) or not has_direction:
             blockers.append("ENTRY_ACTION_MISSING")
         if not has_direction:
@@ -244,7 +315,11 @@ def strategy_response_message(context: ConversationalIntentContext) -> str:
     )
 
 
-def _intent_families(normalized: str) -> tuple[str, ...]:
+def _intent_families(
+    normalized: str,
+    trade_semantics: TradeInstructionSemantics | None = None,
+) -> tuple[str, ...]:
+    trade_semantics = trade_semantics or normalize_trade_instruction(normalized)
     indicator = _contains(normalized, " ema", " rsi", " atr", " macd", " sma", " bollinger", " bbands")
     current = indicator and _contains(
         normalized,
@@ -269,7 +344,7 @@ def _intent_families(normalized: str) -> tuple[str, ...]:
         " how is",
         " explain",
     )
-    trade_language = _contains(
+    trade_language = trade_semantics.instruction or _contains(
         normalized,
         " giao dich",
         " trade",
@@ -280,7 +355,7 @@ def _intent_families(normalized: str) -> tuple[str, ...]:
         " stop loss",
         " take profit",
     )
-    strategy = indicator and trade_language
+    strategy = indicator and trade_language and not trade_semantics.negated
     advisory = _contains(
         normalized,
         " chi phan tich",

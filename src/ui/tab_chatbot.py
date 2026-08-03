@@ -11,6 +11,7 @@ import re
 import time
 import unicodedata
 import uuid
+from decimal import Decimal, InvalidOperation
 
 import streamlit as st
 
@@ -31,6 +32,21 @@ from src.services.trading.decision.conversational_authorization import (
 from src.services.semantic.conversational_context import (
     ConversationalIntentContext,
     resolve_conversational_context,
+)
+from src.services.trading.market.live_feature_service import LiveFeatureService
+from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBundleBuilder
+from src.services.trading.market.provider_registry import ProviderRegistry
+from src.services.trading.reasoning.strategy_evidence import plan_strategy_data
+from src.services.trading.proposal.editable_trade_draft import (
+    EditableTradeDraft,
+    EditableTradeDraftService,
+    EditableTradeDraftStore,
+    TradeDraftError,
+    TradeParameterPatch,
+    market_evidence_from_live_result,
+)
+from src.services.trading.execution.mt5_live_adapter_pre_submit.authority_runtime import (
+    TradingAuthorityOperatorService,
 )
 from src.ui.runtime_flags import get_knowledge_v3_flags
 from src.ui.tab_dashboard import _render_autonomous_decision_review_card
@@ -458,6 +474,12 @@ def _render_conversational_trading_authorization(
                     for item in strategy.entry_rules
                 )
             )
+    if (
+        request.trade_action in {"OPEN_POSITION", "GENERIC_TRADE"}
+        and st.session_state.get("current_session_id")
+    ):
+        _render_editable_trade_draft(request)
+        return
     if request.blockers:
         st.warning("Completion blockers: " + ", ".join(request.blockers))
         st.info("Provide the missing strategy fields in the next message. This specification remains NON_EXECUTABLE.")
@@ -488,6 +510,218 @@ def _render_conversational_trading_authorization(
         key_prefix=f"chat_trade_{request.request_id}_",
         strategy=request.strategy,
     )
+
+
+def _render_editable_trade_draft(request: ConversationalTradingRequest) -> None:
+    """Render one persisted non-executable draft; domain code owns all calculations."""
+    conversation_id = str(st.session_state.current_session_id)
+    store = EditableTradeDraftStore()
+    service = EditableTradeDraftService(store=store)
+    existing = store.latest_for_conversation(conversation_id)
+    evidence = None
+    evidence_error = ""
+    if existing is None or existing.source_request_id != request.request_id:
+        evidence, evidence_error = _load_trade_draft_evidence(request)
+    try:
+        draft = service.build_or_load(
+            request,
+            conversation_id=conversation_id,
+            evidence=evidence,
+        )
+    except TradeDraftError as exc:
+        st.error(f"Trade draft unavailable: {exc}")
+        return
+
+    st.markdown("#### Editable Trade Draft")
+    st.caption(
+        f"Draft={draft.draft_id} | revision={draft.revision} | NON_EXECUTABLE | "
+        f"evidence={draft.market_evidence_timestamp or 'UNAVAILABLE'}"
+    )
+    symbol = dict(draft.symbol.value or {})
+    entry = dict(draft.entry.value or {})
+    stop = dict(draft.stop.value or {})
+    target = dict(draft.target.value or {})
+    risk = dict(draft.risk.value or {})
+    sizing = dict(draft.sizing.value or {})
+    headline = st.columns(4)
+    headline[0].metric("Symbol", symbol.get("canonical_symbol") or "MISSING")
+    headline[1].metric("Broker", symbol.get("broker_symbol") or "MISSING")
+    headline[2].metric("Direction", draft.direction.value or "MISSING")
+    headline[3].metric("Revision", draft.revision)
+    st.caption(
+        f"Timeframes={','.join(symbol.get('timeframes') or ()) or 'MISSING'} | "
+        f"action={draft.action.value or 'MISSING'} | mode={draft.mode.value or 'MISSING'} | "
+        f"confirmation={draft.confirmation_policy.value or 'MISSING'}"
+    )
+    st.caption(
+        "Entry rule: "
+        + (_entry_rule_text(entry.get("rules") or ()) or "MISSING")
+        + f" | reference={_display_decimal(entry.get('reference_price'))}"
+    )
+    proposal = st.columns(4)
+    proposal[0].metric("Stop loss", _display_decimal(stop.get("price")))
+    proposal[1].metric("Take profit", _display_decimal(target.get("price")))
+    proposal[2].metric("Risk fraction", _display_decimal(risk.get("fraction")))
+    proposal[3].metric("Volume", _display_decimal(sizing.get("proposed_volume")))
+    st.caption(
+        f"Stop={stop.get('method') or 'MISSING'} ({draft.stop.source}) | "
+        f"Target={target.get('method') or 'MISSING'} ({draft.target.source}) | "
+        f"Sizing={sizing.get('method') or 'MISSING'} ({draft.sizing.source})"
+    )
+    st.caption(
+        f"Estimated risk={_display_decimal(sizing.get('actual_risk_amount'))} | "
+        f"actual fraction={_display_decimal(sizing.get('actual_risk_fraction'))} | "
+        "execution_authority=false | executable=false"
+    )
+    if evidence_error:
+        st.warning(f"Evidence warning: {evidence_error}")
+    if draft.blockers:
+        st.warning("Draft blockers: " + ", ".join(draft.blockers))
+    else:
+        st.success("Draft validation: VALID_NON_EXECUTABLE")
+    if draft.warnings:
+        st.caption("Warnings: " + ", ".join(draft.warnings))
+
+    with st.expander("Edit risk parameters", expanded=False):
+        _render_trade_draft_patch_form(service, draft, request)
+    st.info(
+        "Applying changes creates a new immutable draft revision. It does not create "
+        "a candidate, confirm a trade, grant submission authority, or send an order."
+    )
+
+
+def _render_trade_draft_patch_form(
+    service: EditableTradeDraftService,
+    draft: EditableTradeDraft,
+    request: ConversationalTradingRequest,
+) -> None:
+    stop = dict(draft.stop.value or {})
+    target = dict(draft.target.value or {})
+    risk = dict(draft.risk.value or {})
+    sizing = dict(draft.sizing.value or {})
+    prefix = f"trade_draft_{draft.draft_id}_{draft.revision}_"
+    stop_methods = ("USER_EXPLICIT", "ATR_MULTIPLE", "RECENT_STRUCTURE")
+    target_methods = ("USER_EXPLICIT", "REWARD_RISK_RATIO", "RECENT_STRUCTURE")
+    with st.form(prefix + "patch"):
+        stop_method = st.selectbox(
+            "Stop method",
+            stop_methods,
+            index=stop_methods.index(stop.get("method")) if stop.get("method") in stop_methods else 1,
+            key=prefix + "stop_method",
+        )
+        stop_loss = st.text_input("Stop price", value=_input_decimal(stop.get("price")), key=prefix + "stop_loss")
+        atr_multiplier = st.text_input("ATR multiplier", value=_input_decimal(stop.get("atr_multiplier")), key=prefix + "atr")
+        target_method = st.selectbox(
+            "Target method",
+            target_methods,
+            index=target_methods.index(target.get("method")) if target.get("method") in target_methods else 1,
+            key=prefix + "target_method",
+        )
+        take_profit = st.text_input("Take-profit price", value=_input_decimal(target.get("price")), key=prefix + "take_profit")
+        reward_risk_ratio = st.text_input("Reward/risk ratio", value=_input_decimal(target.get("reward_risk_ratio")), key=prefix + "rr")
+        risk_fraction = st.text_input("Risk fraction (0.01 = 1%)", value=_input_decimal(risk.get("fraction")), key=prefix + "risk")
+        requested_volume = st.text_input("Requested volume (optional)", value=_input_decimal(sizing.get("requested_volume")), key=prefix + "volume")
+        apply_changes = st.form_submit_button("Apply Parameter Changes", use_container_width=True)
+    if not apply_changes:
+        return
+    try:
+        patch = TradeParameterPatch(
+            expected_revision=draft.revision,
+            stop_method=stop_method if stop_method != stop.get("method") else None,
+            stop_loss=_changed_decimal(stop_loss, stop.get("price")),
+            atr_multiplier=_changed_decimal(atr_multiplier, stop.get("atr_multiplier")),
+            target_method=target_method if target_method != target.get("method") else None,
+            take_profit=_changed_decimal(take_profit, target.get("price")),
+            reward_risk_ratio=_changed_decimal(reward_risk_ratio, target.get("reward_risk_ratio")),
+            risk_fraction=_changed_decimal(risk_fraction, risk.get("fraction")),
+            requested_volume=_changed_decimal(requested_volume, sizing.get("requested_volume")),
+        )
+        if all(getattr(patch, name) is None for name in (
+            "stop_loss", "stop_method", "atr_multiplier", "take_profit", "target_method",
+            "reward_risk_ratio", "risk_fraction", "requested_volume", "direction",
+        )):
+            st.info("No parameter changes detected.")
+            return
+        evidence, evidence_error = _load_trade_draft_evidence(request)
+        if evidence_error:
+            st.warning(f"Evidence warning: {evidence_error}")
+        updated = service.apply_patch(draft.draft_id, patch, evidence=evidence)
+        st.success(f"Draft revision {updated.revision} created.")
+        st.rerun()
+    except (TradeDraftError, InvalidOperation) as exc:
+        st.error(f"Parameter update blocked: {exc}")
+
+
+def _load_trade_draft_evidence(request: ConversationalTradingRequest):
+    try:
+        provider = ProviderRegistry.build_provider()
+        feature_service = LiveFeatureService(
+            bundle_builder=MarketSnapshotBundleBuilder(provider)
+        )
+        strategy = request.strategy
+        if strategy is not None:
+            plan = plan_strategy_data(strategy)
+            result = feature_service.build_features(
+                request.canonical_symbol,
+                strategy.timeframes,
+                plan.candle_counts(),
+                strategy=strategy,
+                data_plan=plan,
+            )
+        else:
+            result = feature_service.build_features(
+                request.canonical_symbol,
+                request.timeframe_profile,
+            )
+        account = provider.get_account()
+        authority_service = TradingAuthorityOperatorService()
+        try:
+            authority = authority_service.status(refresh_runtime=False)
+        finally:
+            authority_service.close()
+        primary = (strategy.timeframes if strategy else request.timeframe_profile)[0]
+        return market_evidence_from_live_result(
+            result,
+            account,
+            primary_timeframe=primary,
+            account_environment=str(authority.get("account_environment") or "UNKNOWN"),
+        ), ""
+    except Exception as exc:
+        return None, type(exc).__name__
+
+
+def _entry_rule_text(rules) -> str:
+    output = []
+    for rule in rules:
+        values = rule.get("constants") or ()
+        output.append(
+            f"{rule.get('left')} {rule.get('operator')} "
+            f"{rule.get('right') or ','.join(str(item) for item in values)}"
+        )
+    return "; ".join(output)
+
+
+def _display_decimal(value) -> str:
+    return _input_decimal(value) or "MISSING"
+
+
+def _input_decimal(value) -> str:
+    if value in (None, ""):
+        return ""
+    try:
+        number = Decimal(str(value))
+        text = format(number, "f")
+        return text.rstrip("0").rstrip(".") if "." in text else text
+    except InvalidOperation:
+        return str(value)
+
+
+def _changed_decimal(text: str, current) -> Decimal | None:
+    value = str(text or "").strip()
+    if not value:
+        return None
+    number = Decimal(value)
+    return number if current in (None, "") or number != Decimal(str(current)) else None
 
 
 def _store_evaluation_runtime_artifacts(runtime_artifacts: dict | None) -> None:

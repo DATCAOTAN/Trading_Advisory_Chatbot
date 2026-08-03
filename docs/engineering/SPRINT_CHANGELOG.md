@@ -1380,3 +1380,31 @@ Commit: this commit
 
 - The conversational contract is complete and fail-closed for incomplete strategies.
 - Integrate the isolated branch only after separately preserving the overlapping local changes in the main working tree.
+
+---
+
+### Maintenance - Field-Aware Editable Trade Drafts
+
+Date: 2026-08-03
+Verification: `FULL_REGRESSION_PASS` with safe browser-runtime limitation
+Commit: this commit
+
+#### Implemented
+
+- Centralized bounded BUY/SELL/generic/exit/question/hypothetical/negation semantics across Vietnamese, English, and mixed input.
+- Added one immutable protected draft with field status, provenance, exact blockers, deterministic risk calculations, integrity, and optimistic revisions.
+- Preserved explicit and inherited values field by field; proposed only missing methods and never silently supplied a symbol.
+- Added dependency-aware typed edits and one Streamlit `NON_EXECUTABLE` Trade Draft Card.
+
+#### Verification
+
+- Focused conversational, draft, authorization, persistence, and generation neighbors: 107 passed.
+- Full regression: 3,285 passed and 156 subtests passed in 165.48 seconds with 2 unchanged dependency warnings.
+- Browser matrix covered inherited context, partial completion, risk/RR edits, missing symbol, concept, and negation behavior.
+- The exact-source Streamlit process later exited with native code 139 during unrelated RAG/evaluation work; no draft Python traceback or safety-boundary change was observed.
+- Candidate, confirmation, mandate, pre-submit, controlled-submit, runtime `order_send`, management, broker, and real-account mutation counts: 0.
+
+#### Current state / next step
+
+- Editable trade proposals are validated and revision-safe but remain non-executable.
+- Integrate the isolated commit only after the unrelated dirty main tree is preserved or resolved.

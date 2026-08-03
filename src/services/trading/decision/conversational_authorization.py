@@ -12,6 +12,7 @@ from src.services.trading.market.timeframes import broker_symbol_for
 from src.services.semantic.conversational_context import (
     ConversationalIntentContext,
     RESPONSE_FORMATS,
+    normalize_trade_instruction,
     resolve_conversational_context,
 )
 from src.services.trading.reasoning.strategy_evidence import (
@@ -37,6 +38,9 @@ class ConversationalTradingRequest:
     mandate_required: bool
     allowed_next_action: str
     response_format: str
+    trade_action: str = ""
+    trade_direction: str = ""
+    trade_instruction_text: str = ""
     blockers: tuple[str, ...] = ()
     strategy: ConversationalStrategyRequest | None = None
 
@@ -55,6 +59,9 @@ class ConversationalTradingRequest:
             "mandate_required": self.mandate_required,
             "allowed_next_action": self.allowed_next_action,
             "response_format": self.response_format,
+            "trade_action": self.trade_action,
+            "trade_direction": self.trade_direction,
+            "trade_instruction_text": self.trade_instruction_text,
             "blockers": list(self.blockers),
             "strategy": self.strategy.as_dict() if self.strategy else None,
             "execution_authority": False,
@@ -78,6 +85,8 @@ class ConversationalTradingRequest:
             strategy.timeframes if strategy and strategy.timeframes else operator_timeframe_profile(symbol)
         )
         response_format = str(payload.get("response_format") or "CLARIFICATION_OR_BLOCKER_RESPONSE")
+        trade_action = str(payload.get("trade_action") or "")
+        trade_direction = str(payload.get("trade_direction") or "")
         blockers = tuple(str(item) for item in payload.get("blockers") or ())
         missing_symbol_allowed = (
             response_format == "STRATEGY_COMPLETION_REQUIRED_CARD"
@@ -100,6 +109,9 @@ class ConversationalTradingRequest:
             or payload.get("executable") is not False
             or payload.get("metadata_redacted") is not True
             or response_format not in RESPONSE_FORMATS
+            or trade_action not in {"", "OPEN_POSITION", "GENERIC_TRADE", "CLOSE_POSITION"}
+            or trade_direction not in {"", "BUY", "SELL"}
+            or trade_action == "OPEN_POSITION" and not trade_direction
         ):
             raise ValueError("CONVERSATIONAL_TRADING_REQUEST_INVALID")
         return cls(
@@ -115,6 +127,9 @@ class ConversationalTradingRequest:
             mandate_required=payload.get("mandate_required") is True,
             allowed_next_action=str(payload.get("allowed_next_action") or "BLOCKED"),
             response_format=response_format,
+            trade_action=trade_action,
+            trade_direction=trade_direction,
+            trade_instruction_text=str(payload.get("trade_instruction_text") or "")[:500],
             blockers=blockers,
             strategy=strategy,
         )
@@ -134,7 +149,14 @@ def parse_conversational_trading_request(
     symbol = context.canonical_symbol
     account_scope = context.account_scope
     confirmation_policy = context.confirmation_policy
-    blockers = context.blockers
+    semantics = normalize_trade_instruction(query)
+    proposable = {
+        "STOP_POLICY_MISSING",
+        "EXIT_RULE_MISSING",
+        "RISK_POLICY_MISSING",
+        "POSITION_SIZING_POLICY_MISSING",
+    }
+    blockers = tuple(item for item in context.blockers if item not in proposable)
     next_action = {
         "advisory_only": "ANALYZE_ONLY",
         "human_confirmed_live": "GRANT_MT5_DEMO_ACCESS",
@@ -169,6 +191,9 @@ def parse_conversational_trading_request(
         mandate_required=mode == "autonomous_live",
         allowed_next_action="BLOCKED" if blockers or strategy_issues else next_action,
         response_format=context.response_format,
+        trade_action=semantics.action,
+        trade_direction=semantics.direction,
+        trade_instruction_text=str(query or "").strip()[:500],
         blockers=tuple(dict.fromkeys((*blockers, *strategy_issues))),
         strategy=strategy,
     )
