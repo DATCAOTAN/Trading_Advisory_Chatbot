@@ -2558,3 +2558,13 @@ Reasoning Engine v2 extends the existing conversational and candidate pipeline; 
 - All execution, submission, management and autonomous permission defaults remain unchanged and blocked. Broker mutation remains outside this reasoning boundary.
 - Verification: 267 focused and neighboring tests passed. The first full run exposed three backward-compatibility failures in the legacy three-argument feature-service call; the shared assembler fix restored that contract, and the final full regression passed with 3,224 tests and 156 subtests. Compileall, replay, diff and static safety checks passed.
 - Browser-visible localhost acceptance was blocked by the browser automation URL policy before any interaction. Streamlit health returned HTTP 200 and the MT5 bridge health endpoint returned HTTP 200; no candidate generation, provider call, confirmation, authority change or broker operation was attempted.
+
+# 64. CURRENT MARKET INDICATOR ROUTING
+
+- Current indicator-value questions now take market-state precedence over generic indicator/book preference. Conceptual questions remain book-first, while mixed questions retain current-market evidence.
+- Symbol extraction resolves canonical and broker aliases through the configured market symbol mapping. Unknown aliases remain explicit blockers and never fall back to XAUUSD.
+- Requested indicator specifications and timeframe flow through the typed query plan into completed OHLCV acquisition and the existing deterministic indicator registry. Stale data and insufficient history fail closed.
+- DecisionContext marks current indicator requests as market-required and book-optional. Evidence sufficiency requires market snapshot, OHLCV and technical snapshot before normal synthesis.
+- Browser acceptance issued one BTCUSDm H1 request and displayed EMA(20), RSI(14), the completed-bar timestamp and authoritative technical evidence. No candidate or execution path was invoked.
+- Verification: 65 focused compatibility tests passed; after the single full run exposed one fixed-date stale fixture, the corrected affected set passed 25 tests and 9 subtests. The full run itself recorded 3,237 passed and 156 subtests, so full-regression PASS is not claimed for this maintenance checkpoint.
+- Candidate generation, confirmation, mandate changes, pre-submit, controlled-submit, runtime `order_send`, broker mutation and real-account actions remained zero.

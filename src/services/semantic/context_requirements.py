@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 from src.services.semantic.query_plan import QueryPlan
+from src.services.trading.market.timeframes import normalize_timeframe
+from src.services.trading.reasoning.strategy_evidence import INDICATOR_REGISTRY
 
 
 @dataclass(frozen=True)
@@ -209,6 +211,8 @@ class ContextRequirementPlanner:
 
         elif primary == "market_state_analysis":
             symbol = self._symbol_target(query_plan)
+            indicators = [item.as_dict() for item in query_plan.requested_indicators]
+            parameters = self._market_parameters(query_plan) if indicators else {}
             needs.extend(
                 [
                     self._need(
@@ -218,6 +222,7 @@ class ContextRequirementPlanner:
                         "current market state",
                         freshness="fresh",
                         max_age=self.DEFAULT_MARKET_MAX_AGE_SECONDS,
+                        parameters={"timeframe": parameters["timeframe"]} if parameters else {},
                     ),
                     self._need(
                         "ohlcv",
@@ -226,8 +231,15 @@ class ContextRequirementPlanner:
                         "recent OHLCV market context",
                         freshness="fresh",
                         max_age=self.DEFAULT_OHLCV_MAX_AGE_SECONDS,
+                        parameters={**parameters, "indicators": indicators} if indicators else {},
                     ),
-                    self._need("technical_snapshot", symbol, False, "optional technical state"),
+                    self._need(
+                        "technical_snapshot",
+                        symbol,
+                        bool(indicators),
+                        "requested deterministic technical state" if indicators else "optional technical state",
+                        parameters={**parameters, "indicators": indicators} if indicators else {},
+                    ),
                     self._need("economic_event", "macro", False, "optional nearby macro event context"),
                 ]
             )
@@ -323,7 +335,26 @@ class ContextRequirementPlanner:
 
     @staticmethod
     def _symbol_target(query_plan: QueryPlan) -> str:
-        return query_plan.entities.symbols[0] if query_plan.entities.symbols else "XAUUSD"
+        return query_plan.entities.symbols[0] if query_plan.entities.symbols else ""
+
+    @staticmethod
+    def _market_parameters(query_plan: QueryPlan) -> Dict[str, Any]:
+        timeframe = normalize_timeframe(
+            query_plan.requested_indicators[0].timeframe
+            if query_plan.requested_indicators
+            else (query_plan.entities.timeframes[0] if query_plan.entities.timeframes else "H1")
+        )
+        required_bars = 100
+        if query_plan.requested_indicators:
+            required_bars = max(
+                (
+                    INDICATOR_REGISTRY[item.indicator_id].warmup(item.parameter_map())
+                    for item in query_plan.requested_indicators
+                    if item.indicator_id in INDICATOR_REGISTRY
+                ),
+                default=100,
+            )
+        return {"timeframe": timeframe, "limit": required_bars}
 
     @staticmethod
     def _event_target(query_plan: QueryPlan) -> str:

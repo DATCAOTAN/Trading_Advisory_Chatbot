@@ -586,6 +586,8 @@ class EvidenceSelector:
         technical = [item for item in all_items if item.evidence_type in {"ohlcv_summary", "technical_snapshot"}]
 
         required_roles = self.required_roles(plan_dict.get("primary_intent", ""), answer_type)
+        if plan_dict.get("requested_indicators") and "technical_snapshot" not in required_roles:
+            required_roles.append("technical_snapshot")
         bundle = EvidenceBundle(
             task_id=effective_task_id,
             query=query,
@@ -1140,6 +1142,8 @@ class EvidenceSufficiencyEvaluator:
             return any(item.evidence_type == "market_snapshot" and item.is_direct_evidence and item.freshness_status != "stale" for item in bundle.current_market_evidence)
         if role == "ohlcv":
             return any(item.evidence_type == "ohlcv_summary" and item.is_direct_evidence and item.freshness_status != "stale" for item in bundle.technical_evidence)
+        if role == "technical_snapshot":
+            return any(item.evidence_type == "technical_snapshot" and item.is_direct_evidence and item.freshness_status != "stale" for item in bundle.technical_evidence)
         if role == "knowledge_or_data":
             return bool(bundle.primary_evidence or bundle.current_market_evidence or bundle.event_evidence)
         return False
@@ -1193,7 +1197,7 @@ class AnswerContractBuilder:
                 answer_type=answer_type,
                 allowed_claim_types=["market_snapshot_summary", "ohlcv_summary", "technical_summary"],
                 required_sections=req_sections,
-                required_evidence_roles=["market_snapshot", "ohlcv"],
+                required_evidence_roles=list(bundle.required_evidence_roles),
                 required_source_refs=self._source_refs(bundle),
                 prohibited_claim_types=["current_claim_without_market_snapshot", "guaranteed_profit", "generic_filler"],
                 confidence_ceiling=bundle.confidence_ceiling,

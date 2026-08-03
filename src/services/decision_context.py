@@ -17,6 +17,11 @@ from src.services.semantic.context_execution import (
 from src.services.semantic.context_requirements import ContextNeed, ContextRequirements, ContextRequirementPlanner
 from src.services.semantic.context_sufficiency import ContextSufficiencyGate, ContextSufficiencyResult
 from src.services.semantic.query_plan import QueryPlan, QueryPlanAssembler
+from src.services.trading.market.timeframes import broker_symbol_for
+from src.services.trading.reasoning.strategy_evidence import (
+    IndicatorSpec,
+    calculate_indicator_snapshot,
+)
 
 
 def _safe_print(message: str) -> None:
@@ -369,21 +374,38 @@ class ExistingTechnicalSnapshotAdapter:
 
     INDICATOR_PREFIXES = ("ema_", "sma_", "rsi_", "macd")
 
-    def build(self, market_snapshot: Optional[MarketSnapshot], candles: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
+    def build(
+        self,
+        market_snapshot: Optional[MarketSnapshot],
+        candles: Optional[List[Dict[str, Any]]] = None,
+        indicator_specs: Optional[List[IndicatorSpec]] = None,
+    ) -> Optional[Dict[str, Any]]:
         if not market_snapshot and not candles:
             return None
         latest = (candles or [])[-1] if candles else {}
-        indicators = {
+        calculated = calculate_indicator_snapshot(indicator_specs, candles or []) if indicator_specs else {}
+        indicators = calculated.get("indicators") or {
             key: value
             for key, value in latest.items()
             if any(str(key).lower().startswith(prefix) for prefix in self.INDICATOR_PREFIXES)
         }
-        return {
+        snapshot = {
             "trend": market_snapshot.recent_trend if market_snapshot else "",
             "support_resistance": market_snapshot.support_resistance if market_snapshot else {},
             "indicators": indicators,
             "source": "existing_api",
         }
+        if indicator_specs:
+            snapshot.update(
+                {
+                    "canonical_symbol": market_snapshot.symbol if market_snapshot else "",
+                    "broker_symbol": broker_symbol_for(market_snapshot.symbol) if market_snapshot else "",
+                    "timeframe": indicator_specs[0].timeframe,
+                    "as_of_completed_bar": calculated.get("as_of_completed_bar", ""),
+                    "freshness": "FRESH",
+                }
+            )
+        return snapshot
 
 
 class DecisionContextBuilder:
@@ -462,8 +484,8 @@ class DecisionContextBuilder:
         context_requirements = context_requirements or self.requirement_planner.plan(query_plan)
         context_execution_plan = context_execution_plan or self.execution_planner.plan(context_requirements)
         normalized_query = AnswerModeClassifier.normalize(original_query)
-        symbols = self._symbols(original_query)
-        timeframe = self._timeframe(original_query)
+        symbols = list(query_plan.entities.symbols)
+        timeframe = query_plan.entities.timeframes[0] if query_plan.entities.timeframes else self._timeframe(original_query)
         needs = self._determine_needs_from_requirements(context_requirements, query_plan)
         _safe_print(
             "[DecisionContext] need "

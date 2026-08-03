@@ -2,7 +2,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.config import Config
@@ -16,6 +16,12 @@ from src.services.semantic.context_execution import (
 )
 from src.services.semantic.context_requirements import ContextNeed, ContextRequirements
 from src.services.semantic.query_plan import QueryPlan, QueryPlanAssembler
+from src.services.trading.market.timeframes import (
+    normalize_timeframe,
+    stale_seconds_for_timeframe,
+    timeframe_duration_seconds,
+)
+from src.services.trading.reasoning.strategy_evidence import IndicatorSpec
 
 
 def _utc_now() -> str:
@@ -616,7 +622,11 @@ class ContextAcquisitionExecutor:
     ) -> ContextAcquisitionResult:
         if not self.market_adapter:
             return self._result_from_task(task, need, "unavailable", reason="market adapter missing", task_ids=requested_by)
-        symbol = need.target or "XAUUSD"
+        symbol = need.target
+        if not symbol:
+            return self._result_from_task(
+                task, need, "unavailable", reason="symbol unresolved", error_code="symbol_unresolved", task_ids=requested_by
+            )
         timeframe = str(need.parameters.get("timeframe") or "1h")
         snapshot = self.market_adapter.get_snapshot(symbol=symbol, timeframe=timeframe, candles_output=[])
         return self._result_from_task(
@@ -643,11 +653,17 @@ class ContextAcquisitionExecutor:
     ) -> ContextAcquisitionResult:
         if not self.live_service:
             return self._result_from_task(task, need, "unavailable", reason="live service missing", task_ids=requested_by)
-        symbol = need.target or "XAUUSD"
+        symbol = need.target
+        if not symbol:
+            return self._result_from_task(
+                task, need, "unavailable", reason="symbol unresolved", error_code="symbol_unresolved", task_ids=requested_by
+            )
         timeframe = str(need.parameters.get("timeframe") or "1h")
         limit = int(need.parameters.get("limit") or 100)
         candles = self.live_service.get_historical_candles(symbol=symbol, timeframe=timeframe, limit=limit)
-        status = "success" if candles else "failed"
+        freshness, latest_timestamp = _ohlcv_freshness(candles, timeframe)
+        status = "success" if candles and freshness == "fresh" else "failed"
+        reason = "matched" if status == "success" else "stale ohlcv" if candles else "empty ohlcv"
         return self._result_from_task(
             task,
             need,
@@ -656,9 +672,10 @@ class ContextAcquisitionExecutor:
             source="existing_api",
             operation="LiveDataService.get_historical_candles",
             provenance={"provider": "existing_api", "symbol": symbol, "timeframe": timeframe},
-            freshness_status="fresh" if candles else "unknown",
-            reason="matched" if candles else "empty ohlcv",
-            error_code="" if candles else "empty_ohlcv",
+            freshness_status=freshness,
+            source_timestamp=latest_timestamp,
+            reason=reason,
+            error_code="" if status == "success" else "stale_ohlcv" if candles else "empty_ohlcv",
             retryable=not bool(candles),
             task_ids=requested_by,
             latency_ms=self._latency(started),
@@ -733,7 +750,32 @@ class ContextAcquisitionExecutor:
                 task_ids=requested_by,
                 latency_ms=self._latency(started),
             )
-        snapshot = self.technical_adapter.build(market.data if market else None, ohlcv.data if ohlcv else None)
+        indicator_specs = [
+            IndicatorSpec(
+                indicator_id=str(item.get("indicator_id") or ""),
+                timeframe=str(item.get("timeframe") or ""),
+                parameters=tuple(sorted((str(key), float(value)) for key, value in dict(item.get("parameters") or {}).items())),
+                output_alias=str(item.get("output_alias") or ""),
+            )
+            for item in need.parameters.get("indicators", [])
+            if isinstance(item, dict)
+        ]
+        try:
+            snapshot = self.technical_adapter.build(
+                market.data if market else None,
+                ohlcv.data if ohlcv else None,
+                indicator_specs=indicator_specs,
+            )
+        except ValueError as exc:
+            return self._result_from_task(
+                task,
+                need,
+                "failed",
+                reason=str(exc),
+                error_code="technical_evidence_invalid",
+                task_ids=requested_by,
+                latency_ms=self._latency(started),
+            )
         if not snapshot:
             return self._result_from_task(task, need, "failed", reason="technical snapshot empty", task_ids=requested_by)
         return self._result_from_task(
@@ -745,6 +787,7 @@ class ContextAcquisitionExecutor:
             operation="ExistingTechnicalSnapshotAdapter.build",
             provenance={"provider": snapshot.get("source", "existing_api"), "symbol": need.target},
             freshness_status="fresh",
+            source_timestamp=str(snapshot.get("as_of_completed_bar") or ""),
             reason="matched",
             task_ids=requested_by,
             latency_ms=self._latency(started),
@@ -1078,6 +1121,22 @@ class ContextAcquisitionExecutor:
                     f"reason={_knowledge_mismatch_reason(need, result)}"
                 )
         return matching
+
+
+def _ohlcv_freshness(candles: List[Dict[str, Any]], timeframe: str) -> tuple[str, str]:
+    if not candles:
+        return "unknown", ""
+    latest = str(candles[-1].get("timestamp") or "")
+    try:
+        opened_at = datetime.fromisoformat(latest.replace("Z", "+00:00"))
+        if opened_at.tzinfo is None:
+            opened_at = opened_at.replace(tzinfo=timezone.utc)
+        normalized = normalize_timeframe(timeframe)
+        closed_at = opened_at.astimezone(timezone.utc) + timedelta(seconds=timeframe_duration_seconds(normalized))
+        age = max((datetime.now(timezone.utc) - closed_at).total_seconds(), 0)
+        return ("fresh" if age <= stale_seconds_for_timeframe(normalized) else "stale"), latest
+    except (TypeError, ValueError):
+        return "unknown", latest
 
 
 def _knowledge_provenance(doc: Dict[str, Any]) -> Dict[str, Any]:

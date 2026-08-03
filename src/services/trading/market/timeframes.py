@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from typing import Iterable, List
 
 from src.config import Config
@@ -68,3 +70,55 @@ def broker_symbol_for(symbol: str) -> str:
         return str(value)
     value = getattr(Config, f"MT5_SYMBOL_MAP_{logical}", "")
     return str(value or logical)
+
+
+@dataclass(frozen=True)
+class SymbolResolution:
+    raw_symbol: str
+    canonical_symbol: str = ""
+    broker_symbol: str = ""
+    status: str = "UNRESOLVED"
+
+
+def resolve_symbol(symbol: str) -> SymbolResolution:
+    raw = str(symbol or "").strip()
+    normalized = _symbol_key(raw)
+    for canonical in _configured_symbols():
+        broker = broker_symbol_for(canonical)
+        if normalized in {_symbol_key(canonical), _symbol_key(broker)}:
+            return SymbolResolution(raw, canonical, broker, "RESOLVED")
+    return SymbolResolution(raw)
+
+
+def resolve_symbols_from_text(text: str) -> List[SymbolResolution]:
+    source = str(text or "")
+    configured = []
+    for canonical in _configured_symbols():
+        for alias in (canonical, broker_symbol_for(canonical)):
+            if alias and re.search(rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])", source, re.IGNORECASE):
+                configured.append(resolve_symbol(alias))
+    candidates = re.findall(r"\b[A-Za-z]{3,8}USD[A-Za-z0-9._-]*\b", source, re.IGNORECASE)
+    resolved = configured + [resolve_symbol(candidate) for candidate in candidates]
+    output: List[SymbolResolution] = []
+    seen = set()
+    for item in resolved:
+        key = (item.status, item.canonical_symbol or _symbol_key(item.raw_symbol))
+        if key not in seen:
+            seen.add(key)
+            output.append(item)
+    return output
+
+
+def _configured_symbols() -> List[str]:
+    prefixes = ("MARKET_BROKER_SYMBOL_", "MT5_SYMBOL_MAP_")
+    symbols = {
+        name.removeprefix(prefix)
+        for prefix in prefixes
+        for name in dir(Config)
+        if name.startswith(prefix) and getattr(Config, name, "")
+    }
+    return sorted(symbols)
+
+
+def _symbol_key(value: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())

@@ -1,5 +1,6 @@
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -130,8 +131,9 @@ class FakeLiveService:
         self.candle_calls += 1
         if self.empty_candles:
             return []
+        completed_h1_open = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
         return [
-            {"timestamp": "2026-07-05T00:00:00Z", "open": 2390, "high": 2410, "low": 2385, "close": 2400, "volume": 1, "rsi_14": 55}
+            {"timestamp": completed_h1_open.isoformat(), "open": 2390, "high": 2410, "low": 2385, "close": 2400, "volume": 1, "rsi_14": 55}
         ]
 
     def get_economic_calendar(self, impact="All"):

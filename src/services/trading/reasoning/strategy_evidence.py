@@ -4,12 +4,15 @@ import hashlib
 import json
 import math
 import re
+from types import SimpleNamespace
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from statistics import mean
 from typing import Any, Iterable, Mapping, Sequence
 
 from src.services.trading.market.indicators import atr, ema_series, rsi, sma
+from src.services.trading.market.timeframes import normalize_timeframe
 
 
 RULE_OPERATORS = {
@@ -344,7 +347,8 @@ def parse_conversational_strategy(
     request_id: str,
     default_timeframes: Sequence[str],
 ) -> ConversationalStrategyRequest | None:
-    normalized = " ".join(str(text or "").upper().replace("/", " / ").split())
+    normalized = _normalize_indicator_text(text)
+    indicators = list(parse_indicator_specs(text, default_timeframes))
     if not (
         any(
             alias.upper() in normalized
@@ -354,30 +358,6 @@ def parse_conversational_strategy(
         or re.search(r"\b(ADX|CCI|STOCH(?:ASTIC)?|VWAP|ICHIMOKU)\b", normalized)
     ):
         return None
-    default_timeframe = next(iter(default_timeframes), "H1")
-    indicators: list[IndicatorSpec] = []
-    for match in re.finditer(r"\b(EMA|SMA|RSI|ATR)\s*(\d{1,3})(?:\s*/\s*(\d{1,3}))?", normalized):
-        indicator_id, first, second = match.group(1), int(match.group(2)), match.group(3)
-        timeframe = _nearby_timeframe(normalized, match.end(), default_timeframe)
-        for period in (first, int(second) if second else None):
-            if period is None:
-                continue
-            indicators.append(_indicator(indicator_id, timeframe, {"period": period}))
-    for match in re.finditer(r"\bMACD(?:\s*(\d{1,3})\s*/\s*(\d{1,3})\s*/\s*(\d{1,3}))?", normalized):
-        values = tuple(int(value) for value in match.groups()) if all(match.groups()) else tuple(dict(INDICATOR_REGISTRY["MACD"].parameter_defaults).values())
-        indicators.append(_indicator("MACD", _nearby_timeframe(normalized, match.end(), default_timeframe), dict(zip(("fast_period", "slow_period", "signal_period"), values))))
-    for match in re.finditer(r"\b(?:BOLLINGER(?:\s+BANDS)?|BBANDS)(?:\s*(\d{1,3})(?:\s*[,/]\s*(\d+(?:\.\d+)?))?)?", normalized):
-        defaults = dict(INDICATOR_REGISTRY["BOLLINGER_BANDS"].parameter_defaults)
-        indicators.append(_indicator("BOLLINGER_BANDS", _nearby_timeframe(normalized, match.end(), default_timeframe), {"period": int(match.group(1) or defaults["period"]), "deviation": float(match.group(2) or defaults["deviation"])}))
-    for match in re.finditer(r"\b(ADX|CCI|STOCH(?:ASTIC)?|VWAP|ICHIMOKU)\s*(\d{1,3})?", normalized):
-        indicators.append(
-            _indicator(
-                match.group(1),
-                _nearby_timeframe(normalized, match.end(), default_timeframe),
-                {"period": int(match.group(2) or 14)},
-            )
-        )
-    indicators = list({item.output_alias: item for item in indicators}.values())
     rules = _parse_rules(normalized, indicators)
     provisional = ConversationalStrategyRequest(
         canonical_symbol=canonical_symbol,
@@ -394,6 +374,94 @@ def parse_conversational_strategy(
     )
     identity = strategy_identity(provisional)
     return ConversationalStrategyRequest(**{**provisional.__dict__, "identity": identity})
+
+
+def parse_indicator_specs(text: str, default_timeframes: Sequence[str]) -> tuple[IndicatorSpec, ...]:
+    normalized = _normalize_indicator_text(text)
+    default_timeframe = normalize_timeframe(next(iter(default_timeframes), "H1"))
+    indicators: list[IndicatorSpec] = []
+    explicit_timeframe_aliases: set[str] = set()
+    for match in re.finditer(r"\b(EMA|SMA|RSI|ATR)\s*(\d{1,3})(?:\s*/\s*(\d{1,3}))?", normalized):
+        indicator_id, first, second = match.group(1), int(match.group(2)), match.group(3)
+        timeframe = _nearby_timeframe(normalized, match.end(), default_timeframe)
+        for period in (first, int(second) if second else None):
+            if period is None:
+                continue
+            indicator = _indicator(indicator_id, timeframe, {"period": period})
+            indicators.append(indicator)
+            if _nearby_timeframe_token(normalized, match.end()):
+                explicit_timeframe_aliases.add(indicator.output_alias)
+    for match in re.finditer(r"\bMACD(?:\s*(\d{1,3})\s*/\s*(\d{1,3})\s*/\s*(\d{1,3}))?", normalized):
+        values = tuple(int(value) for value in match.groups()) if all(match.groups()) else tuple(dict(INDICATOR_REGISTRY["MACD"].parameter_defaults).values())
+        indicator = _indicator("MACD", _nearby_timeframe(normalized, match.end(), default_timeframe), dict(zip(("fast_period", "slow_period", "signal_period"), values)))
+        indicators.append(indicator)
+        if _nearby_timeframe_token(normalized, match.end()):
+            explicit_timeframe_aliases.add(indicator.output_alias)
+    for match in re.finditer(r"\b(?:BOLLINGER(?:\s+BANDS)?|BBANDS)(?:\s*(\d{1,3})(?:\s*[,/]\s*(\d+(?:\.\d+)?))?)?", normalized):
+        defaults = dict(INDICATOR_REGISTRY["BOLLINGER_BANDS"].parameter_defaults)
+        indicator = _indicator("BOLLINGER_BANDS", _nearby_timeframe(normalized, match.end(), default_timeframe), {"period": int(match.group(1) or defaults["period"]), "deviation": float(match.group(2) or defaults["deviation"])})
+        indicators.append(indicator)
+        if _nearby_timeframe_token(normalized, match.end()):
+            explicit_timeframe_aliases.add(indicator.output_alias)
+    for match in re.finditer(r"\b(ADX|CCI|STOCH(?:ASTIC)?|VWAP|ICHIMOKU)\s*(\d{1,3})?", normalized):
+        indicator = _indicator(
+                match.group(1),
+                _nearby_timeframe(normalized, match.end(), default_timeframe),
+                {"period": int(match.group(2) or 14)},
+            )
+        indicators.append(indicator)
+        if _nearby_timeframe_token(normalized, match.end()):
+            explicit_timeframe_aliases.add(indicator.output_alias)
+    explicit_keys = {
+        (item.indicator_id, item.parameters)
+        for item in indicators
+        if item.output_alias in explicit_timeframe_aliases
+    }
+    indicators = [
+        item
+        for item in indicators
+        if item.output_alias in explicit_timeframe_aliases
+        or (item.indicator_id, item.parameters) not in explicit_keys
+    ]
+    indicators = list({item.output_alias: item for item in indicators}.values())
+    return tuple(sorted(indicators, key=lambda item: item.output_alias))
+
+
+def calculate_indicator_snapshot(
+    specs: Sequence[IndicatorSpec],
+    candles: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    bars = [SimpleNamespace(**dict(candle)) for candle in candles]
+    values: dict[str, Any] = {}
+    blockers: list[str] = []
+    for spec in specs:
+        definition = INDICATOR_REGISTRY.get(spec.indicator_id)
+        if definition is None:
+            blockers.append(f"UNSUPPORTED_INDICATOR:{spec.indicator_id}")
+            continue
+        required = definition.warmup(spec.parameter_map())
+        if len(bars) < required:
+            blockers.append(f"INSUFFICIENT_COMPLETED_BARS:{spec.output_alias}:{required}")
+            continue
+        values[spec.output_alias] = {
+            "indicator_id": spec.indicator_id,
+            "parameters": spec.parameter_map(),
+            **_compute_indicator(spec, bars),
+        }
+    if blockers:
+        raise ValueError(",".join(blockers))
+    return {
+        "indicators": values,
+        "as_of_completed_bar": str(candles[-1].get("timestamp") or "") if candles else "",
+    }
+
+
+def _normalize_indicator_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(text or "").upper())
+    normalized = "".join(
+        character for character in normalized if not unicodedata.combining(character)
+    ).replace("Đ", "D")
+    return " ".join(normalized.replace("/", " / ").split())
 
 
 def validate_strategy(strategy: ConversationalStrategyRequest) -> tuple[str, ...]:
@@ -555,8 +623,12 @@ def _indicator(indicator_id: str, timeframe: str, parameters: Mapping[str, float
 
 
 def _nearby_timeframe(text: str, end: int, default: str) -> str:
+    return _nearby_timeframe_token(text, end) or default
+
+
+def _nearby_timeframe_token(text: str, end: int) -> str:
     match = re.search(r"\b(?:ON|AT|TRÊN|TREN)\s+(M1|M5|M15|H1|H4|D1)\b", text[end:end + 40])
-    return match.group(1) if match else default
+    return match.group(1) if match else ""
 
 
 def _parse_rules(text: str, indicators: Sequence[IndicatorSpec]) -> list[StrategyRule]:
@@ -568,10 +640,10 @@ def _parse_rules(text: str, indicators: Sequence[IndicatorSpec]) -> list[Strateg
             rules.append(StrategyRule("CROSSES_ABOVE", ema_aliases[0], ema_aliases[1]))
         if re.search(r"CROSS(?:ES)?\s+BELOW|CẮT\s+XUỐNG|CAT\s+XUONG", text):
             rules.append(StrategyRule("CROSSES_BELOW", ema_aliases[0], ema_aliases[1]))
-    for match in re.finditer(r"RSI(?:\s*\d+)?\s+(?:IS\s+)?(ABOVE|BELOW|GREATER THAN|LESS THAN|TRÊN|TREN|DƯỚI|DUOI)\s+(\d+(?:\.\d+)?)", text):
+    for match in re.finditer(r"RSI(?:\s*\d+)?\s+(?:IS\s+)?(ABOVE|BELOW|GREATER THAN|LESS THAN|TREN|DUOI|LON HON|NHO HON)\s+(\d+(?:\.\d+)?)", text):
         rsi_alias = next((name for name, spec in aliases.items() if spec.indicator_id == "RSI"), "")
         if rsi_alias:
-            operator = "GREATER_THAN" if match.group(1) in {"ABOVE", "GREATER THAN", "TRÊN", "TREN"} else "LESS_THAN"
+            operator = "GREATER_THAN" if match.group(1) in {"ABOVE", "GREATER THAN", "TREN", "LON HON"} else "LESS_THAN"
             rules.append(StrategyRule(operator, rsi_alias, constants=(float(match.group(2)),)))
     return rules
 

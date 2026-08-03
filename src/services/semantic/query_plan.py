@@ -6,11 +6,20 @@ from typing import Any, Dict, List, Optional
 from src.services.knowledge.answer_mode import AnswerMode, AnswerModeClassifier
 from src.services.knowledge.query_decomposer import QueryDecomposer
 from src.services.knowledge.query_intent import QueryIntent, QueryIntentRouter
+from src.services.trading.market.timeframes import resolve_symbol, resolve_symbols_from_text
+from src.services.trading.reasoning.strategy_evidence import (
+    INDICATOR_REGISTRY,
+    IndicatorSpec,
+    parse_indicator_specs,
+)
 
 
 @dataclass
 class QueryEntities:
     symbols: List[str] = field(default_factory=list)
+    broker_symbols: List[str] = field(default_factory=list)
+    raw_symbols: List[str] = field(default_factory=list)
+    unresolved_symbols: List[str] = field(default_factory=list)
     macro_events: List[str] = field(default_factory=list)
     organizations: List[str] = field(default_factory=list)
     authors: List[str] = field(default_factory=list)
@@ -23,6 +32,9 @@ class QueryEntities:
     def as_dict(self) -> Dict[str, Any]:
         return {
             "symbols": list(self.symbols),
+            "broker_symbols": list(self.broker_symbols),
+            "raw_symbols": list(self.raw_symbols),
+            "unresolved_symbols": list(self.unresolved_symbols),
             "macro_events": list(self.macro_events),
             "organizations": list(self.organizations),
             "authors": list(self.authors),
@@ -44,6 +56,9 @@ class QueryPlan:
     entities: QueryEntities = field(default_factory=QueryEntities)
     temporal_scope: str = "unknown"
     requested_analysis: List[str] = field(default_factory=list)
+    requested_indicators: List[IndicatorSpec] = field(default_factory=list)
+    current_market_request: bool = False
+    conceptual_request: bool = False
     user_action_intent: str = "unknown"
     requires_execution: bool = False
     conversation_dependency: str = "none"
@@ -65,6 +80,9 @@ class QueryPlan:
             "entities": self.entities.as_dict(),
             "temporal_scope": self.temporal_scope,
             "requested_analysis": list(self.requested_analysis),
+            "requested_indicators": [item.as_dict() for item in self.requested_indicators],
+            "current_market_request": self.current_market_request,
+            "conceptual_request": self.conceptual_request,
             "user_action_intent": self.user_action_intent,
             "requires_execution": self.requires_execution,
             "conversation_dependency": self.conversation_dependency,
@@ -154,15 +172,41 @@ class QueryPlanAssembler:
                     )
                 )
 
-        secondary = self._secondary_intents(decomposition, child_plans)
-        primary = self._primary_intent(normalized, query_intent, answer_mode, decomposition)
         entities = self._merge_child_entities(child_plans) if child_plans else self._entities(query, normalized, query_intent, decomposition)
+        default_timeframes = entities.timeframes or ["1h"]
+        requested_indicators = (
+            self._merge_child_indicators(child_plans)
+            if child_plans
+            else list(parse_indicator_specs(query, default_timeframes))
+        )
+        current_market_request = (
+            any(child.current_market_request for child in child_plans)
+            if child_plans
+            else self._is_current_market_request(normalized, entities, requested_indicators)
+        )
+        conceptual_request = (
+            any(child.conceptual_request for child in child_plans)
+            if child_plans
+            else self._is_conceptual_request(normalized)
+        )
+        secondary = self._secondary_intents(decomposition, child_plans)
+        primary = self._primary_intent(
+            normalized,
+            query_intent,
+            answer_mode,
+            decomposition,
+            current_market_request=current_market_request,
+        )
         temporal_scope = self._aggregate_temporal_scope(child_plans) if child_plans else self._temporal_scope(normalized, query_intent)
         requested_analysis = (
             self._dedupe([analysis for child in child_plans for analysis in child.requested_analysis])
             if child_plans
             else self._requested_analysis(primary, normalized, query_intent, answer_mode)
         )
+        if requested_indicators:
+            requested_analysis = self._dedupe(requested_analysis + ["technical_indicator_values"])
+        if conceptual_request and current_market_request:
+            requested_analysis = self._dedupe(requested_analysis + ["concept_explanation"])
         user_action_intent = self._aggregate_user_action(child_plans) if child_plans else self._user_action_intent(primary, normalized, answer_mode)
         requires_execution = any(child.requires_execution for child in child_plans) if child_plans else self._requires_execution(normalized)
         conversation_dependency = self._conversation_dependency(normalized)
@@ -176,10 +220,16 @@ class QueryPlanAssembler:
             entities=entities,
             temporal_scope=temporal_scope,
             requested_analysis=requested_analysis,
+            requested_indicators=requested_indicators,
+            current_market_request=current_market_request,
+            conceptual_request=conceptual_request,
             user_action_intent=user_action_intent,
             requires_execution=requires_execution,
             conversation_dependency=conversation_dependency,
-            ambiguity=[] if query_intent.intent_type != "unknown" else ["intent_unknown"],
+            ambiguity=(
+                [f"unresolved_symbol:{value}" for value in entities.unresolved_symbols]
+                or ([] if query_intent.intent_type != "unknown" else ["intent_unknown"])
+            ),
             constraints={"execution_allowed": False},
             confidence=self._aggregate_confidence(child_plans, query_intent, answer_mode),
             child_plans=child_plans,
@@ -293,14 +343,16 @@ class QueryPlanAssembler:
 
     @classmethod
     def _market_gold_intent(cls, plan: QueryPlan, base: QueryIntent) -> QueryIntent:
+        symbol = plan.entities.symbols[0] if plan.entities.symbols else ""
+        is_gold = symbol == "XAUUSD"
         return QueryIntent(
             intent_type="market_gold",
             domain_candidates=["market"],
-            subdomain_candidates=["gold"],
+            subdomain_candidates=["gold" if is_gold else symbol.lower()] if symbol else ["market"],
             source_preference="official_report_first",
-            preferred_organizations=["World Gold Council"],
+            preferred_organizations=["World Gold Council"] if is_gold else [],
             preferred_authors=list(base.preferred_authors),
-            event_type_candidates=["GOLD_MARKET"],
+            event_type_candidates=["GOLD_MARKET"] if is_gold else [],
             period_candidates=list(base.period_candidates),
             required_source_tier="tier1_or_tier2",
             confidence=max(float(base.confidence or 0.0), float(plan.confidence or 0.0), 0.90),
@@ -321,9 +373,19 @@ class QueryPlanAssembler:
                 intents.append(intent)
         return intents
 
-    def _primary_intent(self, normalized: str, intent: QueryIntent, answer_mode: AnswerMode, decomposition: Any = None) -> str:
+    def _primary_intent(
+        self,
+        normalized: str,
+        intent: QueryIntent,
+        answer_mode: AnswerMode,
+        decomposition: Any = None,
+        *,
+        current_market_request: bool = False,
+    ) -> str:
         if getattr(decomposition, "is_multi_intent", False):
             return "multi_intent"
+        if current_market_request:
+            return "market_state_analysis"
         if intent.source_preference == "book_first" and not self._is_operational_position_sizing(normalized):
             return "book_concept_explanation"
         if self._is_position_sizing(normalized):
@@ -356,7 +418,10 @@ class QueryPlanAssembler:
         authors = []
         organizations = []
         macro_events = []
-        symbols = self._symbols_from_text(normalized)
+        resolutions = resolve_symbols_from_text(query)
+        if any(term in normalized for term in [" gold", " vang"]):
+            resolutions.append(resolve_symbol("XAUUSD"))
+        symbols = self._dedupe([item.canonical_symbol for item in resolutions if item.status == "RESOLVED"])
         concepts = []
         strategies = []
         has_inflation_macro = self._has_inflation_macro_terms(normalized)
@@ -387,6 +452,9 @@ class QueryPlanAssembler:
         countries = ["US"] if any(event in {"CPI", "NFP", "GDP", "FOMC", "FOMC_MINUTES", "SEP"} for event in macro_events) else []
         return QueryEntities(
             symbols=symbols,
+            broker_symbols=self._dedupe([item.broker_symbol for item in resolutions if item.status == "RESOLVED"]),
+            raw_symbols=self._dedupe([item.raw_symbol for item in resolutions]),
+            unresolved_symbols=self._dedupe([item.raw_symbol for item in resolutions if item.status != "RESOLVED"]),
             macro_events=self._dedupe(macro_events),
             organizations=organizations,
             authors=authors,
@@ -613,13 +681,33 @@ class QueryPlanAssembler:
 
     @staticmethod
     def _symbols_from_text(normalized: str) -> List[str]:
-        symbols = []
+        symbols = [item.canonical_symbol for item in resolve_symbols_from_text(normalized) if item.status == "RESOLVED"]
         if any(term in normalized for term in [" xauusd", " gold", " vang"]):
             symbols.append("XAUUSD")
-        for token in re.findall(r"\b[A-Z]{3,6}USD\b", normalized.upper()):
-            if token not in symbols:
-                symbols.append(token)
-        return symbols
+        return QueryPlanAssembler._dedupe(symbols)
+
+    @staticmethod
+    def _is_current_market_request(
+        normalized: str,
+        entities: QueryEntities,
+        requested_indicators: List[IndicatorSpec],
+    ) -> bool:
+        if not QueryPlanAssembler._has_current_terms(normalized):
+            return False
+        indicator_mentioned = any(
+            alias in normalized
+            for definition in INDICATOR_REGISTRY.values()
+            for alias in definition.aliases
+        )
+        return bool(requested_indicators or indicator_mentioned)
+
+    @staticmethod
+    def _is_conceptual_request(normalized: str) -> bool:
+        text = QueryPlanAssembler._phrase_text(normalized)
+        return any(
+            term in text
+            for term in [" la gi ", " what is ", " giai thich ", " explain ", " cong thuc ", " formula ", " sach "]
+        )
 
     @staticmethod
     def _timeframes(query: str) -> List[str]:
@@ -645,6 +733,9 @@ class QueryPlanAssembler:
     def _merge_child_entities(child_plans: List[QueryPlan]) -> QueryEntities:
         return QueryEntities(
             symbols=QueryPlanAssembler._dedupe([value for child in child_plans for value in child.entities.symbols]),
+            broker_symbols=QueryPlanAssembler._dedupe([value for child in child_plans for value in child.entities.broker_symbols]),
+            raw_symbols=QueryPlanAssembler._dedupe([value for child in child_plans for value in child.entities.raw_symbols]),
+            unresolved_symbols=QueryPlanAssembler._dedupe([value for child in child_plans for value in child.entities.unresolved_symbols]),
             macro_events=QueryPlanAssembler._dedupe([value for child in child_plans for value in child.entities.macro_events]),
             organizations=QueryPlanAssembler._dedupe([value for child in child_plans for value in child.entities.organizations]),
             authors=QueryPlanAssembler._dedupe([value for child in child_plans for value in child.entities.authors]),
@@ -654,6 +745,10 @@ class QueryPlanAssembler:
             timeframes=QueryPlanAssembler._dedupe([value for child in child_plans for value in child.entities.timeframes]),
             countries=QueryPlanAssembler._dedupe([value for child in child_plans for value in child.entities.countries]),
         )
+
+    @staticmethod
+    def _merge_child_indicators(child_plans: List[QueryPlan]) -> List[IndicatorSpec]:
+        return list({item.output_alias: item for child in child_plans for item in child.requested_indicators}.values())
 
     @staticmethod
     def _aggregate_temporal_scope(child_plans: List[QueryPlan]) -> str:

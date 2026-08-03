@@ -1325,3 +1325,29 @@ Commit: this commit
 
 - Reasoning v2 is integrated and regression-verified; browser-visible acceptance remains limited by external browser URL policy.
 - Execution and submission permissions remain disabled; no release tag moves are planned.
+
+---
+
+### Maintenance - Current Market Indicator Routing
+
+Date: 2026-08-03
+Verification: `FOCUSED_AND_LIVE_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Routed current indicator questions to authoritative market-state evidence before generic book preference.
+- Resolved configured broker aliases to canonical symbols without suffix guessing or UI-local mappings.
+- Reused the indicator registry and completed-bar evidence engine for deterministic values and freshness checks.
+- Kept conceptual indicator questions book-first and preserved market evidence for mixed questions.
+
+#### Verification
+
+- Focused routing/evidence compatibility: 65 passed; affected post-regression matrix: 25 passed and 9 subtests passed.
+- Browser: one BTCUSDm H1 request rendered deterministic EMA(20), RSI(14), completed-bar timestamp and current technical evidence.
+- The single full run reported 3,237 passed, 156 subtests passed and one stale fixed-date test-fixture failure; the corrected fixture passed in the affected focused set.
+- Candidate generation, confirmation, mandate changes, pre-submit, controlled-submit, runtime `order_send`, and broker mutation: 0.
+
+#### Current state / next step
+
+- Current market indicator routing is live-verified; full-regression PASS was not claimed because the required single full run preceded the test-fixture correction.
