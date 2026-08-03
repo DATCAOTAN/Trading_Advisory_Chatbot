@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -761,6 +762,7 @@ def _redact_text(text: str) -> tuple[str, int]:
     for pattern in REGISTRY_SAFETY_PATTERNS:
         output, count = pattern.subn("[REDACTED_UNSAFE_DETAIL]", output)
         redactions += count
+    output = re.sub(r"(?<=\[REDACTED_UNSAFE_DETAIL\])[0-9.,%]+", "", output)
     return output, redactions
 
 
