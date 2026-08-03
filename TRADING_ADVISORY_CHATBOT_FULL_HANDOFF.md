@@ -2568,3 +2568,14 @@ Reasoning Engine v2 extends the existing conversational and candidate pipeline; 
 - Browser acceptance issued one BTCUSDm H1 request and displayed EMA(20), RSI(14), the completed-bar timestamp and authoritative technical evidence. No candidate or execution path was invoked.
 - Verification: 65 focused compatibility tests passed; after the single full run exposed one fixed-date stale fixture, the corrected affected set passed 25 tests and 9 subtests. The full run itself recorded 3,237 passed and 156 subtests, so full-regression PASS is not claimed for this maintenance checkpoint.
 - Candidate generation, confirmation, mandate changes, pre-submit, controlled-submit, runtime `order_send`, broker mutation and real-account actions remained zero.
+
+# 65. CONVERSATIONAL INTENT AND STRATEGY ROUTING
+
+- One typed, non-executable conversational context now carries normalized intent families, configured canonical/broker symbol binding, timeframe, indicator specifications, operating mode, confirmation policy, response format and granular blockers across parsing, QueryPlan, DecisionContext and Streamlit persistence.
+- Resolution is field-specific: the newest valid explicit value overrides prior normalized context; prior valid context is inherited when omitted; unresolved symbols and unsupported timeframes block without XAUUSD or timeframe fallback.
+- Current-market, concept, strategy, authorization, advisory, autonomous and mixed requests select centralized response formats. Strategy requests bypass book-first retrieval unless concept intent is also explicit.
+- The existing bounded rule parser now accepts local timeframe tokens with or without `on/at/khung`, preserving multi-indicator and multi-timeframe comparison/crossover bindings.
+- Incomplete strategies return `STRATEGY_COMPLETION_REQUIRED_CARD`, remain `NON_EXECUTABLE`, and list missing direction, action, risk, stop, exit, sizing, account or confirmation semantics without candidate generation.
+- Browser acceptance completed the two-turn BTCUSDm scenario: H1 EMA(20)/RSI(14) market evidence followed by inherited `BTCUSD/BTCUSDm`, explicit M1, `RSI(14) GREATER_THAN 10`, human-confirmed policy and granular completion blockers. Browser refresh automation was blocked by URL policy; persisted reload behavior passed focused tests.
+- Focused contract/routing/reasoning/evidence verification passed 92 tests. The first full run exposed two legacy fake-assembler compatibility failures; the shared call-site fix passed the affected 29-test set. Final full regression passed with 3,256 tests and 156 subtests; two dependency warnings were unchanged.
+- Candidate generation, dedicated routing LLM calls, confirmation, mandate changes, pre-submit, controlled-submit, runtime `order_send`, broker mutation and real-account actions remained zero.

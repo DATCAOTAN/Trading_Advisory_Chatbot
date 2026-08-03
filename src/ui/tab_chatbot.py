@@ -28,6 +28,10 @@ from src.services.trading.decision.conversational_authorization import (
     ConversationalTradingRequest,
     parse_conversational_trading_request,
 )
+from src.services.semantic.conversational_context import (
+    ConversationalIntentContext,
+    resolve_conversational_context,
+)
 from src.ui.runtime_flags import get_knowledge_v3_flags
 from src.ui.tab_dashboard import _render_autonomous_decision_review_card
 
@@ -202,9 +206,12 @@ def render(orchestrator, feature_flags: dict):
         _render_conversational_trading_authorization(orchestrator, latest_trading_request)
 
     if user_query := st.chat_input("Hoi ve xu huong vang, chien luoc SMC, du lieu vi mo..."):
+        previous_context = _latest_conversational_context(st.session_state.messages)
+        conversational_context = resolve_conversational_context(user_query, previous_context)
         trading_request = parse_conversational_trading_request(
             user_query,
             conversation_id=st.session_state.current_session_id,
+            context=conversational_context,
         )
         user_msg = {"role": "user", "content": user_query}
         from src.services.history_service import HistoryService
@@ -236,6 +243,7 @@ def render(orchestrator, feature_flags: dict):
                     enable_reranker=feature_flags["reranker"],
                     use_knowledge_v3=knowledge_v3_flags["use_knowledge_v3"],
                     knowledge_v3_fallback_to_legacy=knowledge_v3_flags["knowledge_v3_fallback_to_legacy"],
+                    conversational_context=conversational_context,
                 )
 
                 st.markdown(_render_badge(intent), unsafe_allow_html=True)
@@ -324,6 +332,7 @@ def render(orchestrator, feature_flags: dict):
                 assistant_msg["quality_status"] = "DEGRADED"
         if trading_request is not None:
             assistant_msg["trading_request"] = trading_request.to_public_dict()
+        assistant_msg["conversational_context"] = conversational_context.as_dict()
         st.session_state.messages.append(assistant_msg)
         if memory_save_allowed:
             memory_hash = _answer_sha256(full_answer)
@@ -396,11 +405,28 @@ def _latest_conversational_trading_request(messages) -> ConversationalTradingReq
     return None
 
 
+def _latest_conversational_context(messages) -> ConversationalIntentContext | None:
+    for message in reversed(messages):
+        payload = message.get("conversational_context") if isinstance(message, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        try:
+            return ConversationalIntentContext.from_dict(payload)
+        except ValueError:
+            return None
+    return None
+
+
 def _render_conversational_trading_authorization(
     orchestrator,
     request: ConversationalTradingRequest,
 ) -> None:
-    st.markdown("#### MT5 Trading Authorization")
+    heading = (
+        "#### Strategy Completion Required"
+        if request.response_format == "STRATEGY_COMPLETION_REQUIRED_CARD"
+        else "#### MT5 Trading Authorization"
+    )
+    st.markdown(heading)
     st.caption(
         f"mode={request.requested_mode} | confirmation={request.confirmation_policy} | "
         f"symbol={request.canonical_symbol} | broker={request.broker_symbol} | "
@@ -428,7 +454,8 @@ def _render_conversational_trading_authorization(
                 )
             )
     if request.blockers:
-        st.warning("Authorization blockers: " + ", ".join(request.blockers))
+        st.warning("Completion blockers: " + ", ".join(request.blockers))
+        st.info("Provide the missing strategy fields in the next message. This specification remains NON_EXECUTABLE.")
         return
     if request.requested_mode == "advisory_only":
         st.info(

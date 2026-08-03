@@ -162,6 +162,9 @@ class ContextRequirementPlanner:
                 )
             )
 
+        elif primary == "conversational_strategy_request":
+            pass
+
         elif primary == "multi_intent":
             if query_plan.child_plans:
                 child_requirements = [self.plan(child) for child in query_plan.child_plans]
@@ -243,6 +246,16 @@ class ContextRequirementPlanner:
                     self._need("economic_event", "macro", False, "optional nearby macro event context"),
                 ]
             )
+            if query_plan.conceptual_request:
+                needs.append(
+                    self._need(
+                        "static_knowledge",
+                        self._knowledge_target(query_plan),
+                        True,
+                        "concept portion of mixed market request",
+                        parameters=self._knowledge_constraints(query_plan),
+                    )
+                )
 
         elif primary == "trade_opportunity_analysis":
             symbol = self._symbol_target(query_plan)

@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import re
-import unicodedata
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from src.config import Config
 from src.services.trading.decision.operator_candidate_generation import (
     operator_timeframe_profile,
 )
 from src.services.trading.market.timeframes import broker_symbol_for
+from src.services.semantic.conversational_context import (
+    ConversationalIntentContext,
+    RESPONSE_FORMATS,
+    resolve_conversational_context,
+)
 from src.services.trading.reasoning.strategy_evidence import (
     ConversationalStrategyRequest,
     parse_conversational_strategy,
@@ -33,6 +36,7 @@ class ConversationalTradingRequest:
     mt5_authorization_required: bool
     mandate_required: bool
     allowed_next_action: str
+    response_format: str
     blockers: tuple[str, ...] = ()
     strategy: ConversationalStrategyRequest | None = None
 
@@ -50,6 +54,7 @@ class ConversationalTradingRequest:
             "mt5_authorization_required": self.mt5_authorization_required,
             "mandate_required": self.mandate_required,
             "allowed_next_action": self.allowed_next_action,
+            "response_format": self.response_format,
             "blockers": list(self.blockers),
             "strategy": self.strategy.as_dict() if self.strategy else None,
             "execution_authority": False,
@@ -72,12 +77,18 @@ class ConversationalTradingRequest:
         expected_profile = (
             strategy.timeframes if strategy and strategy.timeframes else operator_timeframe_profile(symbol)
         )
+        response_format = str(payload.get("response_format") or "CLARIFICATION_OR_BLOCKER_RESPONSE")
+        blockers = tuple(str(item) for item in payload.get("blockers") or ())
+        missing_symbol_allowed = (
+            response_format == "STRATEGY_COMPLETION_REQUIRED_CARD"
+            and bool({"SYMBOL_REQUIRED", "SYMBOL_UNRESOLVED"} & set(blockers))
+        )
         if (
             payload.get("intent_type") != "TRADING_AUTHORIZATION_REQUEST"
             or mode not in TRADING_MODES
             or not re.fullmatch(r"conversation_trade_[0-9a-f]{24}", str(payload.get("request_id") or ""))
-            or not symbol
-            or broker_symbol != broker_symbol_for(symbol)
+            or (not symbol and not missing_symbol_allowed)
+            or broker_symbol != (broker_symbol_for(symbol) if symbol else "")
             or timeframe_profile != expected_profile
             or bool(strategy) and (
                 strategy.canonical_symbol != symbol
@@ -88,6 +99,7 @@ class ConversationalTradingRequest:
             or payload.get("execution_authority") is not False
             or payload.get("executable") is not False
             or payload.get("metadata_redacted") is not True
+            or response_format not in RESPONSE_FORMATS
         ):
             raise ValueError("CONVERSATIONAL_TRADING_REQUEST_INVALID")
         return cls(
@@ -102,7 +114,8 @@ class ConversationalTradingRequest:
             mt5_authorization_required=payload.get("mt5_authorization_required") is True,
             mandate_required=payload.get("mandate_required") is True,
             allowed_next_action=str(payload.get("allowed_next_action") or "BLOCKED"),
-            blockers=tuple(str(item) for item in payload.get("blockers") or ()),
+            response_format=response_format,
+            blockers=blockers,
             strategy=strategy,
         )
 
@@ -111,24 +124,17 @@ def parse_conversational_trading_request(
     query: str,
     *,
     conversation_id: str,
+    context: ConversationalIntentContext | None = None,
 ) -> ConversationalTradingRequest | None:
-    normalized = _normalized(query)
-    if not normalized or not _has_trading_authorization_intent(normalized):
+    context = context or resolve_conversational_context(query)
+    if not str(query or "").strip() or not ({"strategy", "authorization", "advisory", "autonomous"} & set(context.intent_families)):
         return None
 
-    mode = _requested_mode(normalized)
-    symbol = _configured_symbol(normalized)
-    account_scope = "DEMO" if re.search(r"\b(demo|thu nghiem|test account)\b", normalized) else "UNKNOWN"
-    confirmation_policy = {
-        "advisory_only": "NO_EXECUTION",
-        "human_confirmed_live": "CONFIRM_EVERY_TRADE",
-        "autonomous_live": "STANDING_MANDATE",
-    }[mode]
-    blockers = (
-        ("DEMO_ACCOUNT_SCOPE_REQUIRED",)
-        if mode != "advisory_only" and account_scope != "DEMO"
-        else ()
-    )
+    mode = context.requested_mode
+    symbol = context.canonical_symbol
+    account_scope = context.account_scope
+    confirmation_policy = context.confirmation_policy
+    blockers = context.blockers
     next_action = {
         "advisory_only": "ANALYZE_ONLY",
         "human_confirmed_live": "GRANT_MT5_DEMO_ACCESS",
@@ -143,7 +149,7 @@ def parse_conversational_trading_request(
         confirmation_policy=confirmation_policy,
         account_scope=account_scope,
         request_id=request_id,
-        default_timeframes=operator_timeframe_profile(symbol),
+        default_timeframes=context.timeframes or operator_timeframe_profile(symbol),
     )
     strategy_issues = ()
     if strategy is not None:
@@ -155,93 +161,14 @@ def parse_conversational_trading_request(
         requested_mode=mode,
         confirmation_policy=confirmation_policy,
         canonical_symbol=symbol,
-        broker_symbol=broker_symbol_for(symbol),
-        timeframe_profile=(strategy.timeframes if strategy and strategy.timeframes else operator_timeframe_profile(symbol)),
+        broker_symbol=context.broker_symbol or (broker_symbol_for(symbol) if symbol else ""),
+        timeframe_profile=(strategy.timeframes if strategy and strategy.timeframes else context.timeframes or operator_timeframe_profile(symbol)),
         strategy_description=(strategy.strategy_description if strategy else "CURRENT_CONFIGURED_STRATEGY"),
         account_scope=account_scope,
         mt5_authorization_required=mode != "advisory_only",
         mandate_required=mode == "autonomous_live",
         allowed_next_action="BLOCKED" if blockers or strategy_issues else next_action,
+        response_format=context.response_format,
         blockers=tuple(dict.fromkeys((*blockers, *strategy_issues))),
         strategy=strategy,
     )
-
-
-def _requested_mode(normalized: str) -> str:
-    if _contains_any(
-        normalized,
-        "chi phan tich",
-        "analysis only",
-        "advisory only",
-        "khong giao dich",
-        "khong gui lenh",
-        "khong truy cap mt5",
-        "do not trade",
-        "do not submit",
-    ):
-        return "advisory_only"
-    if _contains_any(
-        normalized,
-        "hoi toi",
-        "bao toi",
-        "toi duyet",
-        "xac nhan",
-        "confirm",
-        "approve",
-        "ask before",
-        "before every trade",
-        "before each order",
-    ):
-        return "human_confirmed_live"
-    if _contains_any(
-        normalized,
-        "tu dong giao dich",
-        "tu giao dich",
-        "khong can hoi",
-        "autonomous",
-        "automatically trade",
-        "standing mandate",
-        "mandate",
-    ):
-        return "autonomous_live"
-    return "advisory_only"
-
-
-def _configured_symbol(normalized: str) -> str:
-    symbols = sorted(
-        {
-            name.removeprefix("MARKET_BROKER_SYMBOL_")
-            for name in dir(Config)
-            if name.startswith("MARKET_BROKER_SYMBOL_") and getattr(Config, name, "")
-        },
-        key=len,
-        reverse=True,
-    )
-    compact = normalized.replace("/", "").replace("_", "")
-    return next((symbol for symbol in symbols if symbol.lower() in compact), Config.MARKET_DEFAULT_SYMBOL)
-
-
-def _has_trading_authorization_intent(normalized: str) -> bool:
-    return _contains_any(
-        normalized,
-        "giao dich",
-        "vao lenh",
-        "gui lenh",
-        "trade",
-        "order",
-        "submit",
-        "mt5",
-        "mandate",
-        "xac nhan",
-        "confirm",
-    )
-
-
-def _contains_any(value: str, *markers: str) -> bool:
-    return any(marker in value for marker in markers)
-
-
-def _normalized(value: str) -> str:
-    text = unicodedata.normalize("NFKD", str(value or ""))
-    text = "".join(character for character in text if not unicodedata.combining(character))
-    return re.sub(r"\s+", " ", text.lower().replace("đ", "d")).strip()

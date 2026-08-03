@@ -12,6 +12,7 @@ from src.services.trading.reasoning.strategy_evidence import (
     IndicatorSpec,
     parse_indicator_specs,
 )
+from src.services.semantic.conversational_context import ConversationalIntentContext
 
 
 @dataclass
@@ -68,6 +69,7 @@ class QueryPlan:
     plan_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     child_plans: List["QueryPlan"] = field(default_factory=list)
     source_signals: Dict[str, Any] = field(default_factory=dict)
+    conversational_context: Dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -91,6 +93,7 @@ class QueryPlan:
             "confidence": self.confidence,
             "child_plans": [child.as_dict() for child in self.child_plans],
             "source_signals": dict(self.source_signals),
+            "conversational_context": dict(self.conversational_context),
         }
 
 
@@ -150,11 +153,18 @@ class QueryPlanAssembler:
         answer_mode: Optional[AnswerMode] = None,
         task_id: str = "",
         decompose: bool = True,
+        conversational_context: Optional[ConversationalIntentContext] = None,
     ) -> QueryPlan:
         query = original_query or ""
         normalized = AnswerModeClassifier.normalize(query)
         query_intent = query_intent or self.intent_router.route(query)
         answer_mode = answer_mode or self.answer_mode_classifier.classify(query, query_intent)
+        if (
+            conversational_context
+            and conversational_context.is_strategy_request
+            and not ({"current_market", "concept"} & set(conversational_context.intent_families))
+        ):
+            decompose = False
         decomposition = self.query_decomposer.decompose(query) if decompose else None
 
         child_plans: List[QueryPlan] = []
@@ -173,22 +183,34 @@ class QueryPlanAssembler:
                 )
 
         entities = self._merge_child_entities(child_plans) if child_plans else self._entities(query, normalized, query_intent, decomposition)
+        if conversational_context:
+            if conversational_context.canonical_symbol:
+                entities.symbols = [conversational_context.canonical_symbol]
+                entities.broker_symbols = [conversational_context.broker_symbol]
+            if conversational_context.timeframes:
+                entities.timeframes = list(conversational_context.timeframes)
         default_timeframes = entities.timeframes or ["1h"]
         requested_indicators = (
             self._merge_child_indicators(child_plans)
             if child_plans
             else list(parse_indicator_specs(query, default_timeframes))
         )
+        if conversational_context and conversational_context.indicators:
+            requested_indicators = list(conversational_context.indicators)
         current_market_request = (
             any(child.current_market_request for child in child_plans)
             if child_plans
             else self._is_current_market_request(normalized, entities, requested_indicators)
         )
+        if conversational_context and "current_market" in conversational_context.intent_families:
+            current_market_request = True
         conceptual_request = (
             any(child.conceptual_request for child in child_plans)
             if child_plans
             else self._is_conceptual_request(normalized)
         )
+        if conversational_context and "concept" in conversational_context.intent_families:
+            conceptual_request = True
         secondary = self._secondary_intents(decomposition, child_plans)
         primary = self._primary_intent(
             normalized,
@@ -197,17 +219,32 @@ class QueryPlanAssembler:
             decomposition,
             current_market_request=current_market_request,
         )
+        if conversational_context and conversational_context.is_strategy_request:
+            if "current_market" in conversational_context.intent_families:
+                primary = "market_state_analysis"
+            elif "concept" in conversational_context.intent_families:
+                primary = "book_concept_explanation"
+            else:
+                primary = "conversational_strategy_request"
         temporal_scope = self._aggregate_temporal_scope(child_plans) if child_plans else self._temporal_scope(normalized, query_intent)
         requested_analysis = (
             self._dedupe([analysis for child in child_plans for analysis in child.requested_analysis])
             if child_plans
             else self._requested_analysis(primary, normalized, query_intent, answer_mode)
         )
+        if primary == "conversational_strategy_request":
+            requested_analysis = ["strategy_normalization", "strategy_completeness"]
+        elif conversational_context and conversational_context.is_strategy_request:
+            requested_analysis = self._dedupe(
+                requested_analysis + ["strategy_normalization", "strategy_completeness"]
+            )
         if requested_indicators:
             requested_analysis = self._dedupe(requested_analysis + ["technical_indicator_values"])
         if conceptual_request and current_market_request:
             requested_analysis = self._dedupe(requested_analysis + ["concept_explanation"])
         user_action_intent = self._aggregate_user_action(child_plans) if child_plans else self._user_action_intent(primary, normalized, answer_mode)
+        if primary == "conversational_strategy_request":
+            user_action_intent = "define_strategy"
         requires_execution = any(child.requires_execution for child in child_plans) if child_plans else self._requires_execution(normalized)
         conversation_dependency = self._conversation_dependency(normalized)
 
@@ -230,7 +267,12 @@ class QueryPlanAssembler:
                 [f"unresolved_symbol:{value}" for value in entities.unresolved_symbols]
                 or ([] if query_intent.intent_type != "unknown" else ["intent_unknown"])
             ),
-            constraints={"execution_allowed": False},
+            constraints={
+                "execution_allowed": False,
+                "response_format": conversational_context.response_format if conversational_context else "",
+                "strategy_blockers": list(conversational_context.blockers) if conversational_context else [],
+                "requested_mode": conversational_context.requested_mode if conversational_context else "",
+            },
             confidence=self._aggregate_confidence(child_plans, query_intent, answer_mode),
             child_plans=child_plans,
             source_signals={
@@ -243,6 +285,7 @@ class QueryPlanAssembler:
                     "reason": getattr(decomposition, "reason", ""),
                 },
             },
+            conversational_context=conversational_context.as_dict() if conversational_context else {},
         )
         print(
             "[QueryPlan] "

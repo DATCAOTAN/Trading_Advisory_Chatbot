@@ -586,6 +586,8 @@ class EvidenceSelector:
         technical = [item for item in all_items if item.evidence_type in {"ohlcv_summary", "technical_snapshot"}]
 
         required_roles = self.required_roles(plan_dict.get("primary_intent", ""), answer_type)
+        if plan_dict.get("conceptual_request") and "direct_book_passage" not in required_roles:
+            required_roles.append("direct_book_passage")
         if plan_dict.get("requested_indicators") and "technical_snapshot" not in required_roles:
             required_roles.append("technical_snapshot")
         bundle = EvidenceBundle(

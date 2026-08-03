@@ -1351,3 +1351,32 @@ Commit: this commit
 #### Current state / next step
 
 - Current market indicator routing is live-verified; full-regression PASS was not claimed because the required single full run preceded the test-fixture correction.
+
+---
+
+### Maintenance - Conversational Intent and Strategy Routing
+
+Date: 2026-08-03
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added one typed, non-executable conversational context shared by parser, query/evidence planning and Streamlit persistence.
+- Centralized intent-to-response formats for current market, concept, strategy, authorization, advisory, autonomous and mixed requests.
+- Preserved configured symbol aliases and per-field conversation precedence without silent XAUUSD or timeframe fallback.
+- Routed incomplete strategy requests to granular completion blockers before retrieval/provider/candidate paths.
+- Preserved local timeframe bindings for multi-indicator numeric and crossover rules.
+
+#### Verification
+
+- Focused contract/routing/reasoning/evidence tests: 92 passed with 2 unchanged dependency warnings.
+- Affected compatibility rerun after the full-suite finding: 29 passed.
+- Final full regression: 3,256 passed and 156 subtests passed with 2 unchanged dependency warnings.
+- Browser: the two-turn BTCUSDm H1 to inherited BTCUSD/M1 strategy scenario rendered the expected non-executable completion card; automated refresh was URL-policy blocked and persistence was verified by focused tests.
+- Candidate generation, routing LLM, confirmation, mandate, pre-submit, controlled-submit, runtime `order_send`, and broker mutation: 0.
+
+#### Current state / next step
+
+- The conversational contract is complete and fail-closed for incomplete strategies.
+- Integrate the isolated branch only after separately preserving the overlapping local changes in the main working tree.

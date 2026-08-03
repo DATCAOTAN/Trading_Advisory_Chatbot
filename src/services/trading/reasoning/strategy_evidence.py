@@ -627,7 +627,10 @@ def _nearby_timeframe(text: str, end: int, default: str) -> str:
 
 
 def _nearby_timeframe_token(text: str, end: int) -> str:
-    match = re.search(r"\b(?:ON|AT|TRÊN|TREN)\s+(M1|M5|M15|H1|H4|D1)\b", text[end:end + 40])
+    match = re.match(
+        r"\s*(?:(?:ON|AT|TRÊN|TREN|KHUNG)\s+)?(M1|M5|M15|H1|H4|D1)\b",
+        text[end:end + 40],
+    )
     return match.group(1) if match else ""
 
 
@@ -640,11 +643,22 @@ def _parse_rules(text: str, indicators: Sequence[IndicatorSpec]) -> list[Strateg
             rules.append(StrategyRule("CROSSES_ABOVE", ema_aliases[0], ema_aliases[1]))
         if re.search(r"CROSS(?:ES)?\s+BELOW|CẮT\s+XUỐNG|CAT\s+XUONG", text):
             rules.append(StrategyRule("CROSSES_BELOW", ema_aliases[0], ema_aliases[1]))
-    for match in re.finditer(r"RSI(?:\s*\d+)?\s+(?:IS\s+)?(ABOVE|BELOW|GREATER THAN|LESS THAN|TREN|DUOI|LON HON|NHO HON)\s+(\d+(?:\.\d+)?)", text):
-        rsi_alias = next((name for name, spec in aliases.items() if spec.indicator_id == "RSI"), "")
-        if rsi_alias:
-            operator = "GREATER_THAN" if match.group(1) in {"ABOVE", "GREATER THAN", "TREN", "LON HON"} else "LESS_THAN"
-            rules.append(StrategyRule(operator, rsi_alias, constants=(float(match.group(2)),)))
+    comparison = re.compile(
+        r"\b(EMA|SMA|RSI|ATR)\s*(\d{1,3})?(?:\s+(?:(?:ON|AT|TRÊN|TREN|KHUNG)\s+)?(M1|M5|M15|H1|H4|D1))?\s*"
+        r"(?:IS\s+)?(>|<|ABOVE|BELOW|GREATER THAN|LESS THAN|TREN|DUOI|LON HON|NHO HON)\s*(\d+(?:\.\d+)?)"
+    )
+    for match in comparison.finditer(text):
+        indicator_id, period, timeframe, relation, threshold = match.groups()
+        candidates = [
+            name
+            for name, spec in aliases.items()
+            if spec.indicator_id == indicator_id
+            and (not period or int(spec.parameter_map().get("period", -1)) == int(period))
+            and (not timeframe or spec.timeframe == timeframe)
+        ]
+        if candidates:
+            operator = "GREATER_THAN" if relation in {">", "ABOVE", "GREATER THAN", "TREN", "LON HON"} else "LESS_THAN"
+            rules.append(StrategyRule(operator, candidates[0], constants=(float(threshold),)))
     return rules
 
 

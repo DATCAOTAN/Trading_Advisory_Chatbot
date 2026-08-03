@@ -62,6 +62,10 @@ from src.services.evidence import (
 )
 from src.services.live_data_service import get_live_service
 from src.services.semantic.query_plan import QueryPlanAssembler
+from src.services.semantic.conversational_context import (
+    ConversationalIntentContext,
+    strategy_response_message,
+)
 from src.services.semantic.context_acquisition import ContextAcquisitionExecutor
 from src.config import Config
 
@@ -144,9 +148,36 @@ class RAGOrchestrator:
         enable_reranker: Optional[bool] = None,
         use_knowledge_v3: Optional[bool] = None,
         knowledge_v3_fallback_to_legacy: Optional[bool] = None,
+        conversational_context: Optional[ConversationalIntentContext] = None,
     ) -> Tuple[Iterator[str], List[Dict], str, Optional[Dict]]:
         if chat_history is None:
             chat_history = []
+
+        if (
+            conversational_context
+            and conversational_context.is_strategy_request
+            and not ({"current_market", "concept"} & set(conversational_context.intent_families))
+        ):
+            query_plan = self.decision_context_builder.query_plan_assembler.assemble(
+                original_query=user_query,
+                conversational_context=conversational_context,
+            )
+            requirements = self.decision_context_builder.requirement_planner.plan(query_plan)
+            execution_plan = self.decision_context_builder.execution_planner.plan(requirements)
+            decision_context = self.decision_context_builder.build(
+                original_query=user_query,
+                query_plan=query_plan,
+                context_requirements=requirements,
+                context_execution_plan=execution_plan,
+            )
+            message = strategy_response_message(conversational_context)
+            return self._static_stream(message), [], "FINANCIAL_RAG", {
+                "is_bounded_response": True,
+                "query_plan": query_plan.as_dict(),
+                "decision_context": decision_context.as_dict(),
+                "response_format": conversational_context.response_format,
+                "provider_calls": 0,
+            }
 
         # =====================================================================
         # TẦNG 1: ROUTING TĨNH (Early Exit Gatekeeper)
@@ -184,9 +215,14 @@ class RAGOrchestrator:
 
         while current_loop < max_loops:
             current_loop += 1
+            query_plan_kwargs = {
+                "original_query": user_query,
+                "rewritten_query": current_query,
+            }
+            if conversational_context is not None:
+                query_plan_kwargs["conversational_context"] = conversational_context
             canonical_query_plan = self.decision_context_builder.query_plan_assembler.assemble(
-                original_query=user_query,
-                rewritten_query=current_query,
+                **query_plan_kwargs
             )
             canonical_query_intent = QueryPlanAssembler.intent_from_plan(canonical_query_plan)
             context_requirements = self.decision_context_builder.requirement_planner.plan(canonical_query_plan)
