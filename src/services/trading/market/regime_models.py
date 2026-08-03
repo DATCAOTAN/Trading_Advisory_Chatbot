@@ -40,6 +40,10 @@ class MarketRegimeSnapshot:
     warnings: List[str] = field(default_factory=list)
     source_feature_snapshot_id: str = ""
     source_calendar_context_id: str = ""
+    regime_version: str = "market-regime/v1"
+    reasoning_regime: str = ""
+    supporting_factors: List[str] = field(default_factory=list)
+    opposing_factors: List[str] = field(default_factory=list)
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -61,6 +65,10 @@ class MarketRegimeSnapshot:
             "warnings": list(self.warnings),
             "source_feature_snapshot_id": self.source_feature_snapshot_id,
             "source_calendar_context_id": self.source_calendar_context_id,
+            "regime_version": self.regime_version,
+            "reasoning_regime": self.reasoning_regime,
+            "supporting_factors": list(self.supporting_factors),
+            "opposing_factors": list(self.opposing_factors),
         }
 
 

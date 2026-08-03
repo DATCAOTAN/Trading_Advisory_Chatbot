@@ -406,6 +406,27 @@ def _render_conversational_trading_authorization(
         f"symbol={request.canonical_symbol} | broker={request.broker_symbol} | "
         f"profile={','.join(request.timeframe_profile)} | NON_EXECUTABLE"
     )
+    if request.strategy is not None:
+        strategy = request.strategy
+        st.caption(
+            f"Strategy={strategy.identity.strategy_id} | version={strategy.identity.strategy_version} | "
+            f"hash={strategy.identity.normalized_strategy_hash[:12]}"
+        )
+        st.caption(
+            "Indicators: "
+            + ", ".join(
+                f"{item.indicator_id}({','.join(f'{key}={value:g}' for key, value in item.parameters)})@{item.timeframe}"
+                for item in strategy.indicators
+            )
+        )
+        if strategy.entry_rules:
+            st.caption(
+                "Rules: "
+                + "; ".join(
+                    f"{item.left} {item.operator} {item.right or ','.join(f'{value:g}' for value in item.constants)}"
+                    for item in strategy.entry_rules
+                )
+            )
     if request.blockers:
         st.warning("Authorization blockers: " + ", ".join(request.blockers))
         return
@@ -433,6 +454,7 @@ def _render_conversational_trading_authorization(
         generation_request_id=request.request_id,
         show_manual_proposal=False,
         key_prefix=f"chat_trade_{request.request_id}_",
+        strategy=request.strategy,
     )
 
 

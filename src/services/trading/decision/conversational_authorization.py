@@ -11,6 +11,10 @@ from src.services.trading.decision.operator_candidate_generation import (
     operator_timeframe_profile,
 )
 from src.services.trading.market.timeframes import broker_symbol_for
+from src.services.trading.reasoning.strategy_evidence import (
+    ConversationalStrategyRequest,
+    parse_conversational_strategy,
+)
 
 
 TRADING_MODES = {"advisory_only", "human_confirmed_live", "autonomous_live"}
@@ -30,6 +34,7 @@ class ConversationalTradingRequest:
     mandate_required: bool
     allowed_next_action: str
     blockers: tuple[str, ...] = ()
+    strategy: ConversationalStrategyRequest | None = None
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +51,7 @@ class ConversationalTradingRequest:
             "mandate_required": self.mandate_required,
             "allowed_next_action": self.allowed_next_action,
             "blockers": list(self.blockers),
+            "strategy": self.strategy.as_dict() if self.strategy else None,
             "execution_authority": False,
             "executable": False,
             "metadata_redacted": True,
@@ -57,13 +63,28 @@ class ConversationalTradingRequest:
         symbol = str(payload.get("canonical_symbol") or "")
         broker_symbol = str(payload.get("broker_symbol") or "")
         timeframe_profile = tuple(payload.get("timeframe_profile") or ())
+        strategy_payload = payload.get("strategy")
+        strategy = (
+            ConversationalStrategyRequest.from_dict(strategy_payload)
+            if isinstance(strategy_payload, Mapping)
+            else None
+        )
+        expected_profile = (
+            strategy.timeframes if strategy and strategy.timeframes else operator_timeframe_profile(symbol)
+        )
         if (
             payload.get("intent_type") != "TRADING_AUTHORIZATION_REQUEST"
             or mode not in TRADING_MODES
             or not re.fullmatch(r"conversation_trade_[0-9a-f]{24}", str(payload.get("request_id") or ""))
             or not symbol
             or broker_symbol != broker_symbol_for(symbol)
-            or timeframe_profile != operator_timeframe_profile(symbol)
+            or timeframe_profile != expected_profile
+            or bool(strategy) and (
+                strategy.canonical_symbol != symbol
+                or strategy.requested_mode != mode
+                or strategy.confirmation_policy != str(payload.get("confirmation_policy") or "")
+                or strategy.account_scope != str(payload.get("account_scope") or "UNKNOWN")
+            )
             or payload.get("execution_authority") is not False
             or payload.get("executable") is not False
             or payload.get("metadata_redacted") is not True
@@ -82,6 +103,7 @@ class ConversationalTradingRequest:
             mandate_required=payload.get("mandate_required") is True,
             allowed_next_action=str(payload.get("allowed_next_action") or "BLOCKED"),
             blockers=tuple(str(item) for item in payload.get("blockers") or ()),
+            strategy=strategy,
         )
 
 
@@ -113,19 +135,35 @@ def parse_conversational_trading_request(
         "autonomous_live": "REVIEW_STANDING_MANDATE",
     }[mode]
     request_material = f"{conversation_id.strip()}|{query.strip()}"
+    request_id = "conversation_trade_" + hashlib.sha256(request_material.encode("utf-8")).hexdigest()[:24]
+    strategy = parse_conversational_strategy(
+        query,
+        canonical_symbol=symbol,
+        requested_mode=mode,
+        confirmation_policy=confirmation_policy,
+        account_scope=account_scope,
+        request_id=request_id,
+        default_timeframes=operator_timeframe_profile(symbol),
+    )
+    strategy_issues = ()
+    if strategy is not None:
+        from src.services.trading.reasoning.strategy_evidence import validate_strategy
+
+        strategy_issues = validate_strategy(strategy)
     return ConversationalTradingRequest(
-        request_id="conversation_trade_" + hashlib.sha256(request_material.encode("utf-8")).hexdigest()[:24],
+        request_id=request_id,
         requested_mode=mode,
         confirmation_policy=confirmation_policy,
         canonical_symbol=symbol,
         broker_symbol=broker_symbol_for(symbol),
-        timeframe_profile=operator_timeframe_profile(symbol),
-        strategy_description="CURRENT_CONFIGURED_STRATEGY",
+        timeframe_profile=(strategy.timeframes if strategy and strategy.timeframes else operator_timeframe_profile(symbol)),
+        strategy_description=(strategy.strategy_description if strategy else "CURRENT_CONFIGURED_STRATEGY"),
         account_scope=account_scope,
         mt5_authorization_required=mode != "advisory_only",
         mandate_required=mode == "autonomous_live",
-        allowed_next_action="BLOCKED" if blockers else next_action,
-        blockers=blockers,
+        allowed_next_action="BLOCKED" if blockers or strategy_issues else next_action,
+        blockers=tuple(dict.fromkeys((*blockers, *strategy_issues))),
+        strategy=strategy,
     )
 
 

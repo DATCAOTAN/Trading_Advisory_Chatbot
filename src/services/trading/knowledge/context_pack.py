@@ -73,7 +73,7 @@ class RuntimeContextPackBuilder:
 
 
 def _feature_summary(feature: FeatureSnapshot) -> dict[str, Any]:
-    return {
+    summary = {
         "feature_snapshot_id": feature.feature_snapshot_id,
         "source_snapshot_ids": list(feature.source_snapshot_ids),
         "symbol": feature.symbol,
@@ -94,6 +94,10 @@ def _feature_summary(feature: FeatureSnapshot) -> dict[str, Any]:
         "warnings": list(feature.warnings),
         "blockers": list(feature.blockers),
     }
+    evidence = getattr(feature, "reasoning_evidence_v2", None)
+    if evidence is not None:
+        summary["reasoning_evidence_v2"] = evidence.compact_context()
+    return summary
 
 
 def _calendar_summary(context: CalendarContext) -> dict[str, Any]:
@@ -120,6 +124,10 @@ def _regime_summary(regime: MarketRegimeSnapshot) -> dict[str, Any]:
         "source_feature_snapshot_id": regime.source_feature_snapshot_id,
         "source_calendar_context_id": regime.source_calendar_context_id,
         "primary_regime": regime.primary_regime,
+        "regime_version": regime.regime_version,
+        "reasoning_regime": regime.reasoning_regime,
+        "supporting_factors": list(regime.supporting_factors),
+        "opposing_factors": list(regime.opposing_factors),
         "secondary_regimes": list(regime.secondary_regimes),
         "confidence": round(float(regime.confidence), 4),
         "trend_direction": regime.trend_direction,

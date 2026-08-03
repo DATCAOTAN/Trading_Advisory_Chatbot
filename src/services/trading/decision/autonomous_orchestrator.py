@@ -174,6 +174,10 @@ class AutonomousDecisionInputs:
     account_context_reference: str = ""
     proposal_source: str = AUTONOMOUS_LLM_PROPOSAL_SOURCE
     proposal_source_reference: str = ""
+    strategy_id: str = ""
+    strategy_version: str = ""
+    normalized_strategy_hash: str = ""
+    reasoning_evidence_summary: str = ""
 
 
 @dataclass(frozen=True)
@@ -233,6 +237,10 @@ class AutonomousDecisionCandidate:
     account_context_reference: str = ""
     proposal_source: str = AUTONOMOUS_LLM_PROPOSAL_SOURCE
     proposal_source_reference: str = ""
+    strategy_id: str = ""
+    strategy_version: str = ""
+    normalized_strategy_hash: str = ""
+    reasoning_evidence_summary: str = field(default="", repr=False)
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -245,6 +253,9 @@ class AutonomousDecisionCandidate:
             "broker_symbol_reference": self.broker_symbol_reference,
             "proposal_source": self.proposal_source,
             "proposal_source_reference": self.proposal_source_reference,
+            "strategy_id": self.strategy_id,
+            "strategy_version": self.strategy_version,
+            "strategy_hash_prefix": self.normalized_strategy_hash[:12],
             "intent": self.intent,
             "direction_present": bool(self.direction),
             "side_present": bool(self.side),
@@ -301,6 +312,10 @@ class AutonomousDecisionCandidate:
             "broker_symbol": self.broker_symbol_reference,
             "proposal_source": self.proposal_source,
             "proposal_source_reference": self.proposal_source_reference,
+            "strategy_id": self.strategy_id,
+            "strategy_version": self.strategy_version,
+            "strategy_hash_prefix": self.normalized_strategy_hash[:12],
+            "reasoning_evidence_summary": self.reasoning_evidence_summary,
             "timeframe_profile": list(self.timeframe_profile),
             "method_selection_summary": self.method_selection_summary,
             "account_context_reference": self.account_context_reference,
@@ -692,6 +707,14 @@ class AutonomousDecisionOrchestrator:
             account_context_reference=_safe_or_empty(inputs.account_context_reference),
             proposal_source=_proposal_source(inputs),
             proposal_source_reference=_safe_or_empty(inputs.proposal_source_reference),
+            strategy_id=_safe_or_empty(inputs.strategy_id),
+            strategy_version=_safe_or_empty(inputs.strategy_version),
+            normalized_strategy_hash=(
+                inputs.normalized_strategy_hash
+                if _valid_hash(inputs.normalized_strategy_hash)
+                else ""
+            ),
+            reasoning_evidence_summary=str(inputs.reasoning_evidence_summary or "")[:2000],
         )
 
     def validate_candidate(
@@ -743,6 +766,18 @@ class AutonomousDecisionOrchestrator:
             candidate.proposal_source_reference
         ):
             issues.append("PROPOSAL_SOURCE_REFERENCE_INVALID")
+        strategy_values = (
+            candidate.strategy_id,
+            candidate.strategy_version,
+            candidate.normalized_strategy_hash,
+        )
+        if any(strategy_values) and (
+            not all(strategy_values)
+            or not _safe_reference(candidate.strategy_id)
+            or not _safe_reference(candidate.strategy_version)
+            or not _valid_hash(candidate.normalized_strategy_hash)
+        ):
+            issues.append("STRATEGY_BINDING_INVALID")
         eligible = (
             candidate.deterministic_eligibility_result
             == AutonomousDecisionEligibility.ELIGIBLE_CANDIDATE.value
@@ -1831,6 +1866,10 @@ def _canonical_provenance(
         "account_context_reference": inputs.account_context_reference,
         "proposal_source": _proposal_source(inputs),
         "proposal_source_reference": inputs.proposal_source_reference,
+        "strategy_id": inputs.strategy_id,
+        "strategy_version": inputs.strategy_version,
+        "normalized_strategy_hash": inputs.normalized_strategy_hash,
+        "reasoning_evidence_summary": inputs.reasoning_evidence_summary,
         "requested_intent": inputs.requested_intent.strip().upper(),
         "direction": inputs.direction.strip().upper(),
         "exposure_effect": inputs.exposure_effect.strip().upper(),
@@ -2015,9 +2054,25 @@ def _journal_row_valid(row: Mapping[str, Any]) -> bool:
 
 def _candidate_from_protected_dict(payload: Mapping[str, Any]) -> AutonomousDecisionCandidate:
     allowed = {item.name for item in fields(AutonomousDecisionCandidate)}
-    if set(payload) != allowed:
+    optional_v2 = {
+        "strategy_id",
+        "strategy_version",
+        "normalized_strategy_hash",
+        "reasoning_evidence_summary",
+    }
+    if frozenset(payload) not in {
+        frozenset(allowed),
+        frozenset(allowed - optional_v2),
+    }:
         raise ValueError("candidate payload fields do not match")
     values = dict(payload)
+    for name in (
+        "strategy_id",
+        "strategy_version",
+        "normalized_strategy_hash",
+        "reasoning_evidence_summary",
+    ):
+        values.setdefault(name, "")
     for name in (
         "proposed_semantic_parameter_references",
         "knowledge_evidence_references",

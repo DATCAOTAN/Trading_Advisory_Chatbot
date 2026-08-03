@@ -80,6 +80,7 @@ class FeatureSnapshot:
     warnings: List[str] = field(default_factory=list)
     blockers: List[str] = field(default_factory=list)
     source_snapshot_ids: List[str] = field(default_factory=list)
+    reasoning_evidence_v2: Any | None = None
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -104,6 +105,11 @@ class FeatureSnapshot:
             "warnings": list(self.warnings),
             "blockers": list(self.blockers),
             "source_snapshot_ids": list(self.source_snapshot_ids),
+            "reasoning_evidence_v2": (
+                self.reasoning_evidence_v2.as_dict()
+                if self.reasoning_evidence_v2 is not None
+                else None
+            ),
         }
 
 

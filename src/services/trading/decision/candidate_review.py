@@ -52,6 +52,10 @@ class AutonomousCandidateReviewView:
     freshness_status: str
     non_executable: bool
     safety_status: str
+    strategy_id: str
+    strategy_version: str
+    strategy_hash_prefix: str
+    reasoning_evidence_summary: str
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -89,6 +93,10 @@ class AutonomousCandidateReviewView:
             "freshness_status": self.freshness_status,
             "non_executable": self.non_executable,
             "safety_status": self.safety_status,
+            "strategy_id": self.strategy_id,
+            "strategy_version": self.strategy_version,
+            "strategy_hash_prefix": self.strategy_hash_prefix,
+            "reasoning_evidence_summary": self.reasoning_evidence_summary,
         }
 
 
@@ -201,6 +209,12 @@ def present_autonomous_candidate_review(
         freshness_status=freshness,
         non_executable=non_executable,
         safety_status="NON_EXECUTABLE" if non_executable else "BLOCKED_UNSAFE_FLAGS",
+        strategy_id=str(review_payload.get("strategy_id") or UNAVAILABLE),
+        strategy_version=str(review_payload.get("strategy_version") or UNAVAILABLE),
+        strategy_hash_prefix=str(review_payload.get("strategy_hash_prefix") or UNAVAILABLE),
+        reasoning_evidence_summary=str(
+            review_payload.get("reasoning_evidence_summary") or ""
+        ),
     )
 
 
@@ -394,4 +408,8 @@ def _unavailable_view() -> AutonomousCandidateReviewView:
         freshness_status=UNAVAILABLE,
         non_executable=True,
         safety_status="NON_EXECUTABLE",
+        strategy_id=UNAVAILABLE,
+        strategy_version=UNAVAILABLE,
+        strategy_hash_prefix=UNAVAILABLE,
+        reasoning_evidence_summary="",
     )

@@ -27,6 +27,7 @@ class OperatorCandidateGenerationOutcome:
     validation_valid: bool = False
     orchestrator_called: bool = False
     stored: bool = False
+    reasoning_evidence_summary: str = ""
 
 
 class OperatorCandidateGenerationController:
@@ -42,6 +43,7 @@ class OperatorCandidateGenerationController:
         symbol: str | None = None,
         timeframes: Iterable[str] | None = None,
         operator_proposal: ManualOperatorProposalInput | None = None,
+        strategy: Any | None = None,
     ) -> OperatorCandidateGenerationOutcome:
         normalized_request = str(request_id or "").strip()
         if not normalized_request:
@@ -65,6 +67,8 @@ class OperatorCandidateGenerationController:
                 build_kwargs["timeframes"] = timeframes
             if operator_proposal is not None:
                 build_kwargs["operator_proposal"] = operator_proposal
+            if strategy is not None:
+                build_kwargs["strategy"] = strategy
             inputs = self.input_assembler.build(**build_kwargs)
             run_result = (
                 self.decision_orchestrator.run_once(inputs, require_actionable=True)
@@ -126,9 +130,11 @@ class OperatorCandidateGenerationController:
                 stored=True,
             )
         except OperatorCandidateInputError as exc:
-            if exc.blockers == ("STRUCTURED_PROPOSAL_NOT_AVAILABLE",):
+            if exc.blockers and exc.blockers[0] == "STRUCTURED_PROPOSAL_NOT_AVAILABLE":
                 return OperatorCandidateGenerationOutcome(
-                    "NO_ACTION", "STRUCTURED_PROPOSAL_NOT_AVAILABLE"
+                    "NO_ACTION",
+                    ",".join(exc.blockers),
+                    reasoning_evidence_summary=exc.evidence_summary,
                 )
             return OperatorCandidateGenerationOutcome("BLOCKED", str(exc))
         except Exception:

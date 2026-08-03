@@ -44,6 +44,7 @@ class MarketRegimeDetector:
         if feature_snapshot.range_chop_score >= float(getattr(Config, "MARKET_REGIME_CHOP_SCORE_THRESHOLD", 0.72)):
             secondary.append("CHOPPY")
 
+        evidence = getattr(feature_snapshot, "reasoning_evidence_v2", None)
         return MarketRegimeSnapshot(
             regime_snapshot_id=_regime_id(feature_snapshot.feature_snapshot_id, calendar_context.context_id if calendar_context else "", created_at),
             created_at=created_at,
@@ -63,6 +64,16 @@ class MarketRegimeDetector:
             warnings=list(dict.fromkeys(warnings)),
             source_feature_snapshot_id=feature_snapshot.feature_snapshot_id,
             source_calendar_context_id=calendar_context.context_id if calendar_context else "",
+            regime_version=("market-regime/v2" if evidence else "market-regime/v1"),
+            reasoning_regime=(evidence.regime if evidence else ""),
+            supporting_factors=(
+                [item.code for item in evidence.reasons if item.severity == "INFO"]
+                if evidence else []
+            ),
+            opposing_factors=(
+                [item.code for item in evidence.reasons if item.severity in {"WARN", "ERROR"}]
+                if evidence else []
+            ),
         )
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -193,6 +194,12 @@ def render_autonomous_candidate_review_card(
         f"Schema={view.schema_version} | freshness={view.freshness_status} | "
         f"expires={view.expires_at}"
     )
+    if view.strategy_id != "UNAVAILABLE":
+        st.caption(
+            f"Strategy={view.strategy_id} | version={view.strategy_version} | "
+            f"hash={view.strategy_hash_prefix}"
+        )
+    render_reasoning_evidence_summary(view.reasoning_evidence_summary)
     if not view.structured_details_available:
         st.info(
             "Structured order details are unavailable for this candidate schema or intent."
@@ -294,3 +301,35 @@ def _render_structured_fields(view: AutonomousCandidateReviewView) -> None:
     risk[3].metric("Risk policy", view.risk_policy_summary)
     st.caption(f"Reasoning summary: {view.reasoning_summary}")
     st.caption(f"Method selection: {view.method_selection_summary}")
+
+
+def render_reasoning_evidence_summary(value: str) -> None:
+    if not value:
+        return
+    try:
+        evidence = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        st.warning("Reasoning evidence is unavailable or invalid.")
+        return
+    st.markdown("##### Reasoning Evidence v2")
+    st.caption(
+        f"Regime={evidence.get('regime', 'UNAVAILABLE')} | "
+        f"confidence={float(evidence.get('regime_confidence') or 0):.2f}"
+    )
+    scores = evidence.get("scores") or {}
+    if scores:
+        st.caption(
+            "Score breakdown: "
+            + " | ".join(f"{name}={float(score):.2f}" for name, score in scores.items())
+        )
+    for item in evidence.get("history") or ():
+        st.caption(
+            f"{item.get('timeframe')}: completed={item.get('completed_bars')}/"
+            f"{item.get('requested_bars')} | freshness={item.get('freshness')} | "
+            f"gaps={item.get('gaps')}"
+        )
+    for item in evidence.get("reasons") or ():
+        st.markdown(
+            f"- **{item.get('code')}**: {item.get('summary')} "
+            f"(actual={item.get('actual')}, required={item.get('required')})"
+        )

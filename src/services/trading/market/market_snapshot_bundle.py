@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Mapping
 
 from src.config import Config
 from src.services.trading.market.models import AccountSnapshot, MarketSnapshot, ProviderHealth, TickSnapshot
@@ -53,12 +53,12 @@ class MarketSnapshotBundleBuilder:
         self,
         symbol: str | None = None,
         timeframes: Iterable[str] | None = None,
-        candle_count: int | None = None,
+        candle_count: int | Mapping[str, int] | None = None,
     ) -> MarketSnapshotBundle:
         logical_symbol = str(symbol or default_symbol()).upper()
         broker_symbol = self.provider.normalize_symbol(logical_symbol)
         normalized_timeframes = normalize_timeframes(timeframes)
-        count = int(candle_count or getattr(Config, "MARKET_DEFAULT_CANDLE_COUNT", 300))
+        default_count = int(getattr(Config, "MARKET_DEFAULT_CANDLE_COUNT", 300))
         created_at = datetime.now(timezone.utc).isoformat()
         provider_name = getattr(self.provider, "provider_name", "unknown")
         warnings: list[str] = []
@@ -72,6 +72,11 @@ class MarketSnapshotBundleBuilder:
 
         snapshots: Dict[str, MarketSnapshot] = {}
         for timeframe in normalized_timeframes:
+            count = int(
+                candle_count.get(timeframe, default_count)
+                if isinstance(candle_count, Mapping)
+                else candle_count or default_count
+            )
             try:
                 snapshots[timeframe] = self.provider.get_ohlcv(logical_symbol, timeframe, count)
                 if not snapshots[timeframe].bars:

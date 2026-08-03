@@ -36,6 +36,11 @@ from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBun
 from src.services.trading.market.timeframes import broker_symbol_for
 from src.services.trading.market.regime_detector import MarketRegimeDetector
 from src.services.trading.reasoning import MethodSelectorService
+from src.services.trading.reasoning.strategy_evidence import (
+    ConversationalStrategyRequest,
+    plan_strategy_data,
+    validate_strategy,
+)
 from src.services.trading.scoring import SignalScoringEngine
 
 
@@ -65,8 +70,9 @@ class ManualOperatorProposalInput:
 class OperatorCandidateInputError(RuntimeError):
     """Public-safe failure raised before the decision orchestrator is called."""
 
-    def __init__(self, *blockers: str) -> None:
+    def __init__(self, *blockers: str, evidence_summary: str = "") -> None:
         self.blockers = tuple(dict.fromkeys(str(item) for item in blockers if item))
+        self.evidence_summary = str(evidence_summary or "")[:2000]
         super().__init__(
             ",".join(self.blockers) or "STRUCTURED_RUNTIME_INPUT_UNAVAILABLE"
         )
@@ -115,17 +121,56 @@ class AuthoritativeAutonomousInputAssembler:
         timeframes: Iterable[str] | None = None,
         now: datetime | None = None,
         operator_proposal: ManualOperatorProposalInput | None = None,
+        strategy: ConversationalStrategyRequest | None = None,
     ) -> AutonomousDecisionInputs:
         market_evaluated_at = _utc(now)
         symbol = str(symbol or Config.MARKET_DEFAULT_SYMBOL).strip().upper()
+        if strategy is not None:
+            strategy_issues = validate_strategy(strategy)
+            if (
+                strategy_issues
+                or strategy.canonical_symbol != symbol
+                or strategy.requested_mode != self.mode
+            ):
+                raise OperatorCandidateInputError(
+                    *(
+                        strategy_issues
+                        or (
+                            "STRATEGY_MODE_MISMATCH"
+                            if strategy.requested_mode != self.mode
+                            else "STRATEGY_SYMBOL_MISMATCH"
+                        ,)
+                    )
+                )
+            data_plan = plan_strategy_data(strategy)
+            selected_timeframes = strategy.timeframes
+            candle_count: Any = data_plan.candle_counts()
+        else:
+            data_plan = None
+            selected_timeframes = tuple(timeframes or Config.MARKET_DEFAULT_TIMEFRAMES)
+            candle_count = Config.MARKET_DEFAULT_CANDLE_COUNT
         try:
-            feature_result = self.feature_service.build_features(
-                symbol,
-                timeframes or Config.MARKET_DEFAULT_TIMEFRAMES,
-                Config.MARKET_DEFAULT_CANDLE_COUNT,
-            )
+            if strategy is None:
+                feature_result = self.feature_service.build_features(
+                    symbol, selected_timeframes, candle_count
+                )
+            else:
+                feature_result = self.feature_service.build_features(
+                    symbol,
+                    selected_timeframes,
+                    candle_count,
+                    strategy=strategy,
+                    data_plan=data_plan,
+                )
         except Exception as exc:
             raise OperatorCandidateInputError("MARKET_SNAPSHOT_UNAVAILABLE") from exc
+
+        if strategy is not None:
+            evidence = getattr(
+                feature_result.feature_snapshot, "reasoning_evidence_v2", None
+            )
+            if evidence is None or evidence.strategy_identity != strategy.identity:
+                raise OperatorCandidateInputError("STRATEGY_EVIDENCE_BINDING_INVALID")
 
         _validate_market_sources(
             feature_result,
@@ -183,12 +228,18 @@ class AuthoritativeAutonomousInputAssembler:
             lifecycle_status=lifecycle_status,
             timeframe_profile=tuple(
                 getattr(feature_result.feature_snapshot, "timeframes", ())
-                or timeframes
+                or selected_timeframes
                 or Config.MARKET_DEFAULT_TIMEFRAMES
             ),
             account_context_reference=autonomous_account_context_reference(
                 feature_result.bundle.account_id_hash
             ),
+            strategy_id=(strategy.identity.strategy_id if strategy else ""),
+            strategy_version=(strategy.identity.strategy_version if strategy else ""),
+            normalized_strategy_hash=(
+                strategy.identity.normalized_strategy_hash if strategy else ""
+            ),
+            reasoning_evidence_summary=_reasoning_evidence_summary(feature_result),
         )
         handoff_evaluated_at = (
             _utc(now) if now is not None else datetime.now(timezone.utc)
@@ -216,6 +267,18 @@ class AuthoritativeAutonomousInputAssembler:
                 maximum_age_seconds=Config.TRADING_AUTONOMOUS_DECISION_INPUT_MAX_AGE_SECONDS,
             )
         )
+        if proposal_result.blockers == ("STRUCTURED_PROPOSAL_NOT_AVAILABLE",):
+            evidence = getattr(feature_result.feature_snapshot, "reasoning_evidence_v2", None)
+            evidence_codes = (
+                tuple(item.code for item in evidence.reasons)
+                if evidence is not None
+                else ()
+            )
+            raise OperatorCandidateInputError(
+                "STRUCTURED_PROPOSAL_NOT_AVAILABLE",
+                *evidence_codes,
+                evidence_summary=inputs.reasoning_evidence_summary,
+            )
         _validate_proposal_result(proposal_result, feature_result, inputs)
         return AutonomousDecisionInputs(
             runtime_context=context,
@@ -230,7 +293,26 @@ class AuthoritativeAutonomousInputAssembler:
             timeframe_profile=inputs.timeframe_profile,
             account_context_reference=inputs.account_context_reference,
             proposal_source_reference=proposal_result.proposal_reference,
+            strategy_id=inputs.strategy_id,
+            strategy_version=inputs.strategy_version,
+            normalized_strategy_hash=inputs.normalized_strategy_hash,
+            reasoning_evidence_summary=inputs.reasoning_evidence_summary,
         )
+
+
+def _reasoning_evidence_summary(feature_result: Any) -> str:
+    evidence = getattr(feature_result.feature_snapshot, "reasoning_evidence_v2", None)
+    if evidence is None:
+        return ""
+    payload = {
+        "regime": evidence.regime,
+        "regime_confidence": evidence.regime_confidence,
+        "scores": dict(evidence.setup.scores),
+        "hard_blockers": list(evidence.setup.hard_blockers),
+        "reasons": [item.as_dict() for item in evidence.reasons[:12]],
+        "history": [item.as_dict() for item in evidence.history],
+    }
+    return json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
 
 def _manual_inputs(

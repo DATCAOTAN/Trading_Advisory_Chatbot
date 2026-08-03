@@ -1294,3 +1294,34 @@ Commit: this commit
 
 - Execution permissions remain disabled and execution/management kill switches remain engaged.
 - Next: complete full regression, then the operator may separately authorize one candidate-generation action.
+
+---
+
+### Reasoning Engine v2 - Configurable Strategy Evidence
+
+Date: 2026-08-03
+Verification: `FULL_REGRESSION_PASS` with browser-policy limitation
+Commit: this commit
+
+#### Implemented
+
+- Extended the existing conversational request with a validated typed strategy specification and stable strategy identity.
+- Reused the six supported indicator implementations through one bounded registry and rule engine.
+- Added per-timeframe completed-bar planning plus deterministic feature, regime, score and granular reason evidence.
+- Bound strategy identity through proposal provenance and the existing protected candidate lifecycle.
+- Added compact LLM context, existing Streamlit Review Card rendering and deterministic V1/V2 replay evaluation.
+
+#### Verification
+
+- Focused reasoning, conversation, proposal, candidate, review, market, multi-symbol and scoring suites: 267 passed.
+- Initial full regression: 3 failed and 3,221 passed; it identified a backward-compatibility defect in legacy feature-service calls.
+- Final full regression after the shared fix: 3,224 passed, 156 subtests passed, 3 unchanged dependency warnings.
+- Frozen replay: 12 scenarios, deterministic rate 100%, mean compact-context/raw-history ratio 4.04%, provider calls 0, broker mutations 0.
+- Compileall and diff checks passed. Streamlit and bridge health returned HTTP 200.
+- Browser-visible localhost acceptance was blocked by browser URL policy before interaction; candidate generation and provider calls remained 0.
+- Controlled-submit, runtime `order_send`, broker mutation, confirmation and authority changes: 0.
+
+#### Current state / next step
+
+- Reasoning v2 is integrated and regression-verified; browser-visible acceptance remains limited by external browser URL policy.
+- Execution and submission permissions remain disabled; no release tag moves are planned.

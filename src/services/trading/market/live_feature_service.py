@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from src.config import Config
 from src.services.trading.market.data_quality import DataQualityGate, DataQualityReport
@@ -45,7 +45,9 @@ class LiveFeatureService:
         self,
         symbol: str | None = None,
         timeframes: Iterable[str] | None = None,
-        candle_count: int | None = None,
+        candle_count: int | Mapping[str, int] | None = None,
+        strategy: Any | None = None,
+        data_plan: Any | None = None,
     ) -> LiveFeatureResult:
         normalized_timeframes = normalize_timeframes(timeframes)
         start = perf_counter()
@@ -57,6 +59,12 @@ class LiveFeatureService:
         bundle_latency_ms = (perf_counter() - start) * 1000
         start = perf_counter()
         quality_report = self.data_quality_gate.evaluate(bundle, normalized_timeframes)
-        feature_snapshot = self.feature_engine.compute(bundle, quality_report, normalized_timeframes[0])
+        feature_snapshot = self.feature_engine.compute(
+            bundle,
+            quality_report,
+            normalized_timeframes[0],
+            strategy=strategy,
+            data_plan=data_plan,
+        )
         feature_latency_ms = (perf_counter() - start) * 1000
         return LiveFeatureResult(bundle, quality_report, feature_snapshot, bundle_latency_ms, feature_latency_ms)

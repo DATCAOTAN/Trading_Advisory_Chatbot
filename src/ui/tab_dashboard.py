@@ -120,6 +120,7 @@ from src.ui.autonomous_candidate_review import (
     clear_autonomous_decision_run_result,
     render_autonomous_candidate_review_card,
     render_autonomous_candidate_confirmation_controls,
+    render_reasoning_evidence_summary,
 )
 from src.ui.operator_candidate_generation import (
     OperatorCandidateGenerationController,
@@ -299,6 +300,7 @@ def _render_autonomous_decision_review_card(
     generation_request_id=None,
     show_manual_proposal=True,
     key_prefix="",
+    strategy=None,
 ):
     monitor_row = _latest_monitor_row(selected_symbol, selected_timeframes)
     active_mode = _render_trading_runtime_controls(
@@ -332,6 +334,7 @@ def _render_autonomous_decision_review_card(
                 generation_request_id or secrets.token_hex(16),
                 symbol=selected_symbol,
                 timeframes=selected_timeframes,
+                strategy=strategy,
             )
         st.session_state["autonomous_candidate_generation_outcome"] = outcome
     if actions[1].button(
@@ -353,6 +356,9 @@ def _render_autonomous_decision_review_card(
             st.warning(f"Generation blocked: {outcome.blocker}")
         else:
             st.info(f"Generation={outcome.status} | reason={outcome.blocker}")
+            render_reasoning_evidence_summary(
+                getattr(outcome, "reasoning_evidence_summary", "")
+            )
 
     if monitor_row:
         st.caption(

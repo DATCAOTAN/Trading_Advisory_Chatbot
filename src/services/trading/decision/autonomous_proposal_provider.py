@@ -112,6 +112,7 @@ class AutonomousOrderProposalProvider:
             semantic_parameter_references=(
                 reference, request.risk_decision.decision_id,
                 request.method_selection.result_id, request.runtime_context.context_pack_id,
+                *_strategy_references(request),
             ),
             order_proposal=proposal,
             order_market_snapshot=snapshot,
@@ -210,6 +211,7 @@ def _input_blockers(request):
 def _prompt(request):
     feature, tick = request.feature_result.feature_snapshot, request.feature_result.bundle.tick
     primary = feature.indicator_snapshots.get(feature.primary_timeframe)
+    evidence = getattr(feature, "reasoning_evidence_v2", None)
     payload = {
         "role": "non_executable_autonomous_order_proposal",
         "instructions": [
@@ -249,6 +251,7 @@ def _prompt(request):
             "risk_reasons": list(request.risk_decision.reasons),
             "risk_blockers": [item.code for item in request.risk_decision.blockers],
         },
+        "reasoning_evidence_v2": evidence.compact_context() if evidence else None,
         "required_json_schema": {
             "status": "PROPOSE|NO_PROPOSAL",
             "order_type": "BUY|SELL|BUY_LIMIT|SELL_LIMIT|BUY_STOP|SELL_STOP|BUY_STOP_LIMIT|SELL_STOP_LIMIT|null",
@@ -275,6 +278,16 @@ def _prompt(request):
         },
     }
     return json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+def _strategy_references(request) -> tuple[str, ...]:
+    evidence = getattr(request.feature_result.feature_snapshot, "reasoning_evidence_v2", None)
+    if evidence is None:
+        return ()
+    return (
+        evidence.strategy_identity.strategy_id,
+        evidence.strategy_identity.normalized_strategy_hash,
+    )
 
 
 def _parse(raw):

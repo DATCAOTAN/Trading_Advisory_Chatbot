@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from src.config import Config
 from src.services.trading.market.data_quality import DataQualityReport
@@ -15,7 +15,15 @@ class FeatureEngine:
     def __init__(self, indicator_engine: IndicatorEngine | None = None):
         self.indicator_engine = indicator_engine or IndicatorEngine()
 
-    def compute(self, bundle: MarketSnapshotBundle, quality_report: DataQualityReport, primary_timeframe: str = "M15") -> FeatureSnapshot:
+    def compute(
+        self,
+        bundle: MarketSnapshotBundle,
+        quality_report: DataQualityReport,
+        primary_timeframe: str = "M15",
+        *,
+        strategy: Any | None = None,
+        data_plan: Any | None = None,
+    ) -> FeatureSnapshot:
         created_at = datetime.now(timezone.utc).isoformat()
         indicator_snapshots: Dict[str, IndicatorSnapshot] = {}
         warnings: List[str] = list(bundle.warnings) + list(quality_report.warnings)
@@ -34,6 +42,16 @@ class FeatureEngine:
         momentum_state = _momentum_state(primary)
         range_chop_score = _range_chop_score(primary, trend_strength)
         spread_state = _spread_state(bundle)
+
+        reasoning_evidence = None
+        if strategy is not None and data_plan is not None:
+            from src.services.trading.reasoning.strategy_evidence import build_reasoning_evidence
+
+            reasoning_evidence = build_reasoning_evidence(
+                strategy, bundle, quality_report, data_plan
+            )
+            blockers.extend(reasoning_evidence.setup.hard_blockers)
+            warnings.extend(reasoning_evidence.setup.warnings)
 
         snapshot = FeatureSnapshot(
             feature_snapshot_id=_feature_id(bundle.bundle_id, created_at),
@@ -57,6 +75,7 @@ class FeatureEngine:
             warnings=warnings,
             blockers=blockers,
             source_snapshot_ids=[bundle.bundle_id],
+            reasoning_evidence_v2=reasoning_evidence,
         )
         if quality_report.status in {"INVALID", "EMPTY"}:
             snapshot.trend_direction = "UNKNOWN"
