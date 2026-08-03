@@ -51,6 +51,40 @@ At the beginning of a new sprint, new agent session, or resumed task:
 - Prefer the shortest maintainable implementation that satisfies the acceptance criteria.
 - Let the sprint define WHAT and the boundaries; decide HOW only inside that scope.
 
+## Behavior-family completion
+
+- Treat user examples as seed cases, not the complete behavioral scope.
+- Trace the shared end-to-end typed contract before changing one visible case.
+- Expand only the bounded related intent, language, context, completeness, conflict, inheritance, state, and output families implied by the task.
+- Define deterministic precedence and invariants, then implement one coherent typed vertical slice.
+- Use a compact behavior matrix with table-driven and property/invariant tests.
+- Do not declare completion merely because one screenshot or sentence passes.
+- Bounded domain-family completion is required behavior, not permission to build a speculative generic framework.
+
+## Partial completion
+
+- Preserve every valid user-provided or authoritative inherited field.
+- Repair or complete only missing, invalid, conflicting, or dependency-blocked fields.
+- Recompute only explicit dependents of a changed field; preserve independent values and provenance.
+- Pass typed request, context, draft, and patch objects across layers.
+- Avoid long scalar parameter lists, globals, arbitrary dictionaries, repeated defaults, and UI session state as authority.
+
+## Quota and runtime efficiency
+
+- Use one primary implementation flow with targeted inspection and a concise preflight.
+- Prefer deterministic logic before bounded LLM calls; do not add retries or provider cascades without evidence.
+- Run focused tests while changing code, then one final full regression when required.
+- Run one final browser acceptance and one final Ponytail review; do not repeat audits or full suites without a new final-code change.
+- Runtime acceptance must prove commit, worktree or source mount, process/container, file marker or hash, port, health, and browser URL. Browser refresh alone is not source provenance.
+
+## Git preservation
+
+- Preserve unrelated staged, unstaged, conflicted, and untracked user work before integration.
+- Use isolated worktrees only when they materially reduce conflict or data-loss risk.
+- Do not stash, reset, restore, clean, or overwrite unrelated work to obtain a clean status.
+- Keep commits local unless the user explicitly requests a push.
+- Never run or recommend `git push origin main`.
+
 ## Ponytail and RTK
 
 - Follow Ponytail's minimal-change ladder: reuse existing code and contracts
