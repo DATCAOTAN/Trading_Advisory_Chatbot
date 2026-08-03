@@ -11,9 +11,9 @@ import uuid
 
 def test_memory_policy():
     """Verify that DEGRADED memory correctly persists in VectorDB and gets the warning prefix."""
-    # Mocking VectorService client
-    vec_svc = VectorService()
+    vec_svc = object.__new__(VectorService)
     vec_svc.client = MagicMock()
+    vec_svc._encode_dense = MagicMock(return_value=[[0.0] * 1024])
     
     # Fake search results
     class MockPayload:

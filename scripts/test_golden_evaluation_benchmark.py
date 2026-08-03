@@ -235,7 +235,7 @@ class GoldenEvaluationBenchmarkTests(unittest.TestCase):
             out = Path(temp) / "cli_report.json"
             completed = subprocess.run(
                 [
-                    str(PROJECT_ROOT / "venv" / "Scripts" / "python.exe"),
+                    sys.executable,
                     str(PROJECT_ROOT / "scripts" / "run_golden_benchmark.py"),
                     "--cases",
                     str(PROJECT_ROOT / DEFAULT_GOLDEN_CASES_PATH),

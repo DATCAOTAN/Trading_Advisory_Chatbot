@@ -460,6 +460,7 @@ def test_structured_project_provider_requests_supported_json_mode_without_fallba
     monkeypatch,
 ):
     calls = []
+    monkeypatch.setattr(Config, "GROQ_API_KEY", "hermetic-test-placeholder")
 
     class FakeProjectClient:
         def __init__(self, *args, **kwargs):
