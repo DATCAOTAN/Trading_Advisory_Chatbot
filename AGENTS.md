@@ -51,28 +51,100 @@ At the beginning of a new sprint, new agent session, or resumed task:
 - Prefer the shortest maintainable implementation that satisfies the acceptance criteria.
 - Let the sprint define WHAT and the boundaries; decide HOW only inside that scope.
 
-## Behavior-family completion
+## Seed-to-family problem solving
 
-- Treat user examples as seed cases, not the complete behavioral scope.
-- Trace the shared end-to-end typed contract before changing one visible case.
-- Expand only the bounded related intent, language, context, completeness, conflict, inheritance, state, and output families implied by the task.
-- Define deterministic precedence and invariants, then implement one coherent typed vertical slice.
-- Use a compact behavior matrix with table-driven and property/invariant tests.
-- Do not declare completion merely because one screenshot or sentence passes.
-- Bounded domain-family completion is required behavior, not permission to build a speculative generic framework.
+A user example, screenshot, failing query, or incorrect output is a seed failure, not a specification for an exact-case patch.
+
+For every concrete defect:
+
+1. Identify the first shared root failure mode.
+2. Infer the smallest bounded behavior family that shares that failure.
+3. Trace the affected end-to-end contract and authoritative data owners.
+4. Locate the existing shared boundary that should own the behavior.
+5. Implement one coherent fix at that boundary.
+6. Validate the bounded family with compact table-driven, property, or invariant tests.
+7. Preserve compatibility with previously working members of the same family.
+
+Do not:
+
+- hard-code the observed input;
+- add a branch for one exact sentence, symbol, indicator, timeframe, alias, or missing-field combination;
+- accumulate sentence templates or one-off regexes for natural-language variations;
+- patch downstream symptoms when an upstream shared contract is wrong;
+- solve only the literal screenshot or phrase when nearby equivalent cases share the same root cause;
+- create a speculative generic framework merely because one shared defect exists.
+
+Always ask:
+
+> What larger bounded behavior family does this observed failure reveal, and what is the smallest shared fix that solves that family without speculative over-generalization?
+
+### Natural-language semantic authority
+
+Natural-language variability belongs to the existing LLM semantic intent, query-rewrite, context-resolution, and structured-extraction layer.
+
+The intended boundary is:
+
+`raw user language`
+→ `LLM intent understanding`
+→ `semantic query rewrite`
+→ `strict structured extraction`
+→ `deterministic normalization`
+→ `deterministic validation`
+→ `domain logic`
+
+Rules:
+
+- Use the existing LLM semantic pipeline to absorb arbitrary wording, word order, filler words, multilingual phrasing, aliases, and conversational references.
+- Prefer strict structured LLM output or the repository's existing typed schema over parsing free-form model prose.
+- Query rewrite may normalize wording but must preserve explicit user facts.
+- The LLM must not invent missing values unless an existing validated policy or conversation-context rule explicitly permits completion.
+- A missing subfield must not erase recognized sibling fields.
+- A valid structured LLM result must not be overwritten by a weaker deterministic fallback.
+- Deterministic parsing may normalize aliases, types, operators, units, schemas, and supported values, and may provide a bounded fail-safe fallback.
+- Deterministic parsing must not become the primary semantic parser for arbitrary natural-language phrasing.
+- Do not accumulate regex cases to simulate general language understanding.
+- When LLM understanding is unavailable or structurally invalid, fail closed or use the existing bounded fallback without fabricating semantics.
+
+For trading requests specifically, the LLM may understand and structure:
+
+- intent/action;
+- symbol references and natural-language aliases;
+- indicators and conditions;
+- timeframe;
+- comparator/operator;
+- threshold/value;
+- conversational references and omitted-but-contextually-resolvable fields.
+
+The LLM must not itself authorize or decide:
+
+- broker symbol validity;
+- market freshness;
+- tick size/value;
+- account state;
+- deterministic SL/TP prices;
+- position sizing;
+- permissions;
+- confirmation;
+- execution authority;
+- broker mutation.
+
+Those remain deterministic and authoritative downstream responsibilities.
 
 ## Partial completion
 
 - Preserve every valid user-provided or authoritative inherited field.
 - Repair or complete only missing, invalid, conflicting, or dependency-blocked fields.
 - Recompute only explicit dependents of a changed field; preserve independent values and provenance.
+- A missing field must not erase valid sibling fields already recognized from the same user message or authoritative context.
 - Pass typed request, context, draft, and patch objects across layers.
 - Avoid long scalar parameter lists, globals, arbitrary dictionaries, repeated defaults, and UI session state as authority.
 
 ## Quota and runtime efficiency
 
 - Use one primary implementation flow with targeted inspection and a concise preflight.
-- Prefer deterministic logic before bounded LLM calls; do not add retries or provider cascades without evidence.
+- Prefer deterministic logic for validation, policy, calculations, safety, persistence, and execution.
+- For arbitrary natural-language understanding, prefer the existing bounded LLM intent/query-rewrite/structured-extraction path rather than accumulating regexes or sentence templates.
+- Do not add duplicate LLM calls, retries, or provider cascades without concrete evidence that they are necessary.
 - Run focused tests while changing code, then one final full regression when required.
 - Run one final browser acceptance and one final Ponytail review; do not repeat audits or full suites without a new final-code change.
 - Runtime acceptance must prove commit, worktree or source mount, process/container, file marker or hash, port, health, and browser URL. Browser refresh alone is not source provenance.
@@ -104,7 +176,7 @@ At the beginning of a new sprint, new agent session, or resumed task:
   - `rtk docker compose ps`
   - `rtk docker logs`
 - Do not replace the required Windows Python test command:
-  `.\venv\Scripts\python.exe -m pytest ...`
+  `\.\venv\Scripts\python.exe -m pytest ...`
 - Do not use bare `pytest`.
 - When compact RTK output is insufficient to diagnose a failure, run the exact
   original command once and inspect the full output.
