@@ -76,6 +76,10 @@ At the beginning of a new sprint, new agent session, or resumed task:
 - Run focused tests while changing code, then one final full regression when required.
 - Run one final browser acceptance and one final Ponytail review; do not repeat audits or full suites without a new final-code change.
 - Runtime acceptance must prove commit, worktree or source mount, process/container, file marker or hash, port, health, and browser URL. Browser refresh alone is not source provenance.
+- Use the minimum sufficient reasoning, inspection, implementation, testing, and reporting required to achieve a correct, safe, complete result.
+- Default to targeted inspection, one concise plan, one coherent implementation pass, focused verification, one final required validation, and a concise report.
+- Do not add speculative edge cases, abstractions, agents, documents, retries, broad searches, or repeated test runs unless concrete evidence shows they are necessary.
+- Behavior-family expansion remains required only for bounded related cases that share the same underlying contract. Stop at that boundary and do not expand into unrelated future possibilities.
 
 ## Git preservation
 
@@ -113,7 +117,7 @@ At the beginning of a new sprint, new agent session, or resumed task:
 - Search the repository for an existing responsibility before adding a new abstraction.
 - Reuse existing models, validators, stores, services, journals, and safety utilities where appropriate.
 - Do not create an interface, abstract base class, factory, registry, plugin system, or generic framework for a single implementation.
-- Do not generalize code until there are multiple concrete repeated use cases.
+- Do not create speculative generic abstractions without multiple concrete repeated use cases. When one observed failure exposes a shared bounded domain contract, complete that related behavior family through the existing or smallest suitable typed contract and compact tests; do not wait for each equivalent case to fail separately.
 - Do not split a small feature mechanically into models, policy, builder, gate, validator, formatter, store, and service unless those files own distinct real responsibilities.
 - Do not add configuration flags for behavior that does not require independent runtime configuration.
 - Do not create a new execution boundary merely to approve or revalidate an already-approved boundary.
