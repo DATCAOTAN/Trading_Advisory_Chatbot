@@ -1526,3 +1526,37 @@ Commit: this commit
 #### Next step
 
 - Thin UI + Authoritative Draft/Lifecycle Presentation Integration.
+
+---
+
+### Sprint 5 - Thin UI and Authoritative Draft Presentation
+
+Date: 2026-08-08
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Made the valid orchestrator result the explicit UI selection boundary before legacy conversational fallback.
+- Routed actionable request presentation directly to the latest persisted `EditableTradeDraft` revision.
+- Kept semantic unresolved input fields distinct from current Draft blockers and warnings.
+- Preserved existing Draft calculation, patch/revision, candidate review, confirmation, pre-submit, and execution contracts.
+
+#### Verification
+
+- Focused UI/Draft/semantic/query-plan/candidate-review neighbors: 105 passed with 2 unchanged dependency warnings.
+- Full regression: 3,359 passed and 156 subtests passed in 140.17 seconds with 3 unchanged dependency/UTC warnings.
+- Compileall, Docker Compose config, app restart, Streamlit health `200 ok`, documentation integrity, diff, Ponytail, and static safety checks passed.
+
+#### Current state
+
+- Valid QueryPlan results bypass UI raw trading parsing; legacy parsing remains only for absent/invalid-plan compatibility fallback.
+- Latest Draft state owns current Draft presentation; all outputs remain non-executable.
+
+#### Not verified / not implemented
+
+- Draft-to-Candidate DEMO lifecycle wiring, candidate lifecycle changes, confirmation, pre-submit, execution, and legacy fallback cleanup remain separate work.
+
+#### Next step
+
+- Explicit Draft-to-Candidate DEMO Lifecycle Integration.

@@ -260,26 +260,12 @@ def render(orchestrator, feature_flags: dict):
                     previous_structured_context=previous_structured_context,
                 )
 
-                query_plan_payload = runtime_artifacts.get("query_plan") if runtime_artifacts else None
-                semantic_context = (
-                    query_plan_payload.get("semantic_context")
-                    if isinstance(query_plan_payload, dict)
-                    else None
+                trading_request, conversational_context = _trading_request_from_runtime_artifacts(
+                    runtime_artifacts,
+                    user_query=user_query,
+                    conversation_id=st.session_state.current_session_id,
+                    messages=st.session_state.messages,
                 )
-                authoritative_semantic_plan = isinstance(semantic_context, dict) and isinstance(
-                    semantic_context.get("input"), dict
-                )
-                trading_payload = runtime_artifacts.get("trading_request") if runtime_artifacts else None
-                if isinstance(trading_payload, dict):
-                    trading_request = ConversationalTradingRequest.from_public_dict(trading_payload)
-                elif not authoritative_semantic_plan:
-                    previous_context = _latest_conversational_context(st.session_state.messages)
-                    conversational_context = resolve_conversational_context(user_query, previous_context)
-                    trading_request = parse_conversational_trading_request(
-                        user_query,
-                        conversation_id=st.session_state.current_session_id,
-                        context=conversational_context,
-                    )
 
                 st.markdown(_render_badge(intent), unsafe_allow_html=True)
                 stream_logger = _AnswerStreamLogger(
@@ -478,10 +464,52 @@ def _latest_resolved_semantic_state(messages) -> ResolvedSemanticState | None:
     return None
 
 
+def _trading_request_from_runtime_artifacts(
+    runtime_artifacts,
+    *,
+    user_query: str,
+    conversation_id: str,
+    messages,
+) -> tuple[ConversationalTradingRequest | None, ConversationalIntentContext | None]:
+    """Use a valid semantic plan as the UI's trading authority before legacy fallback."""
+    query_plan_payload = runtime_artifacts.get("query_plan") if isinstance(runtime_artifacts, dict) else None
+    semantic_context = (
+        query_plan_payload.get("semantic_context")
+        if isinstance(query_plan_payload, dict)
+        else None
+    )
+    authoritative_semantic_plan = isinstance(semantic_context, dict) and isinstance(
+        semantic_context.get("input"), dict
+    )
+    trading_payload = runtime_artifacts.get("trading_request") if isinstance(runtime_artifacts, dict) else None
+    if isinstance(trading_payload, dict):
+        return ConversationalTradingRequest.from_public_dict(trading_payload), None
+    if authoritative_semantic_plan:
+        return None, None
+
+    previous_context = _latest_conversational_context(messages)
+    conversational_context = resolve_conversational_context(user_query, previous_context)
+    return (
+        parse_conversational_trading_request(
+            user_query,
+            conversation_id=conversation_id,
+            context=conversational_context,
+        ),
+        conversational_context,
+    )
+
+
 def _render_conversational_trading_authorization(
     orchestrator,
     request: ConversationalTradingRequest,
 ) -> None:
+    if (
+        request.trade_action in {"OPEN_POSITION", "GENERIC_TRADE"}
+        and st.session_state.get("current_session_id")
+    ):
+        _render_editable_trade_draft(request)
+        return
+
     heading = (
         "#### Strategy Completion Required"
         if request.response_format == "STRATEGY_COMPLETION_REQUIRED_CARD"
@@ -514,12 +542,6 @@ def _render_conversational_trading_authorization(
                     for item in strategy.entry_rules
                 )
             )
-    if (
-        request.trade_action in {"OPEN_POSITION", "GENERIC_TRADE"}
-        and st.session_state.get("current_session_id")
-    ):
-        _render_editable_trade_draft(request)
-        return
     if request.blockers:
         st.warning("Completion blockers: " + ", ".join(request.blockers))
         st.info("Provide the missing strategy fields in the next message. This specification remains NON_EXECUTABLE.")
@@ -577,6 +599,13 @@ def _render_editable_trade_draft(request: ConversationalTradingRequest) -> None:
         f"Draft={draft.draft_id} | revision={draft.revision} | NON_EXECUTABLE | "
         f"evidence={draft.market_evidence_timestamp or 'UNAVAILABLE'}"
     )
+    semantic_unresolved = tuple(
+        getattr(request.strategy, "semantic_unresolved_fields", ())
+        if request.strategy is not None
+        else ()
+    )
+    if semantic_unresolved:
+        st.info("Semantic input unresolved: " + ", ".join(semantic_unresolved))
     symbol = dict(draft.symbol.value or {})
     entry = dict(draft.entry.value or {})
     stop = dict(draft.stop.value or {})
