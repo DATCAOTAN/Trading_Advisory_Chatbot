@@ -26,6 +26,7 @@ def semantic(**changes):
         "conditions": [],
         "context_references": [],
         "requested_mode": "",
+        "account_scope": "",
         "explicit_fields": [],
         "unresolved_fields": [],
         "negated": False,

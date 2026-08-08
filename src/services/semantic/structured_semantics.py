@@ -28,6 +28,7 @@ ACTION_VALUES = frozenset(
 )
 DIRECTION_VALUES = frozenset({"", "BUY", "SELL"})
 REQUESTED_MODES = frozenset({"", "advisory_only", "human_confirmed_live", "autonomous_live"})
+ACCOUNT_SCOPES = frozenset({"", "DEMO", "REAL"})
 RESULT_FIELDS = frozenset(
     {
         "schema_version",
@@ -43,6 +44,7 @@ RESULT_FIELDS = frozenset(
         "conditions",
         "context_references",
         "requested_mode",
+        "account_scope",
         "explicit_fields",
         "unresolved_fields",
         "negated",
@@ -118,6 +120,7 @@ class StructuredSemanticResult:
     conditions: tuple[SemanticCondition, ...]
     context_references: tuple[str, ...]
     requested_mode: str
+    account_scope: str
     explicit_fields: tuple[str, ...]
     unresolved_fields: tuple[str, ...]
     negated: bool
@@ -153,6 +156,11 @@ class StructuredSemanticResult:
             "SEMANTIC_REQUESTED_MODE_INVALID",
             normalize_upper=False,
         )
+        account_scope = _enum(
+            value["account_scope"],
+            ACCOUNT_SCOPES,
+            "SEMANTIC_ACCOUNT_SCOPE_INVALID",
+        )
 
         return cls(
             primary_intent=primary_intent,
@@ -167,6 +175,7 @@ class StructuredSemanticResult:
             conditions=tuple(SemanticCondition.from_payload(item) for item in _list(value["conditions"], "SEMANTIC_CONDITIONS_INVALID")),
             context_references=_text_list(value["context_references"], "SEMANTIC_CONTEXT_REFERENCES_INVALID"),
             requested_mode=requested_mode,
+            account_scope=account_scope,
             explicit_fields=_text_list(value["explicit_fields"], "SEMANTIC_EXPLICIT_FIELDS_INVALID"),
             unresolved_fields=_text_list(value["unresolved_fields"], "SEMANTIC_UNRESOLVED_FIELDS_INVALID"),
             negated=_bool(value["negated"], "SEMANTIC_NEGATED_INVALID"),
@@ -188,6 +197,7 @@ class StructuredSemanticResult:
             "conditions": [item.as_dict() for item in self.conditions],
             "context_references": list(self.context_references),
             "requested_mode": self.requested_mode,
+            "account_scope": self.account_scope,
             "explicit_fields": list(self.explicit_fields),
             "unresolved_fields": list(self.unresolved_fields),
             "negated": self.negated,

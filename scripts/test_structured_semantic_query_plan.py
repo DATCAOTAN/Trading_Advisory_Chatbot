@@ -23,6 +23,7 @@ def semantic(**changes) -> StructuredSemanticResult:
         "conditions": [],
         "context_references": [],
         "requested_mode": "",
+        "account_scope": "",
         "explicit_fields": ["symbols[0]", "indicators[0]"],
         "unresolved_fields": [],
         "negated": False,

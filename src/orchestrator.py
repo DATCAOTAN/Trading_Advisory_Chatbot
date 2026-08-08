@@ -62,12 +62,16 @@ from src.services.evidence import (
 )
 from src.services.live_data_service import get_live_service
 from src.services.semantic.query_plan import QueryPlanAssembler
+from src.services.semantic.resolved_semantics import ResolvedSemanticState
 from src.services.semantic.structured_interpreter import StructuredSemanticInterpreter
 from src.services.semantic.conversational_context import (
     ConversationalIntentContext,
     strategy_response_message,
 )
 from src.services.semantic.context_acquisition import ContextAcquisitionExecutor
+from src.services.trading.decision.conversational_authorization import (
+    project_conversational_trading_request,
+)
 from src.config import Config
 
 # Nhập các Mô-đun Modular RAG
@@ -168,6 +172,7 @@ class RAGOrchestrator:
         use_knowledge_v3: Optional[bool] = None,
         knowledge_v3_fallback_to_legacy: Optional[bool] = None,
         conversational_context: Optional[ConversationalIntentContext] = None,
+        previous_structured_context: Optional[ResolvedSemanticState] = None,
     ) -> Tuple[Iterator[str], List[Dict], str, Optional[Dict]]:
         if chat_history is None:
             chat_history = []
@@ -215,9 +220,42 @@ class RAGOrchestrator:
                 canonical_query_plan = self.decision_context_builder.query_plan_assembler.assemble(
                     original_query=user_query,
                     structured_semantics=semantic_interpretation.semantic,
+                    previous_structured_context=previous_structured_context,
                 )
                 context_requirements = self.decision_context_builder.requirement_planner.plan(canonical_query_plan)
                 context_execution_plan = self.decision_context_builder.execution_planner.plan(context_requirements)
+                trading_request = project_conversational_trading_request(
+                    canonical_query_plan,
+                    conversation_id=session_id,
+                )
+                if trading_request is not None:
+                    decision_context = self.decision_context_builder.build(
+                        original_query=user_query,
+                        query_plan=canonical_query_plan,
+                        context_requirements=context_requirements,
+                        context_execution_plan=context_execution_plan,
+                    )
+                    message = (
+                        "Structured trading semantics normalized.\n\n"
+                        f"- Symbol: {trading_request.canonical_symbol or 'missing'}"
+                        f" / {trading_request.broker_symbol or 'missing'}\n"
+                        f"- Mode: {trading_request.requested_mode}\n"
+                        "- Execution: NON_EXECUTABLE"
+                        + (
+                            f"\n- Required next information: {', '.join(trading_request.blockers)}"
+                            if trading_request.blockers
+                            else ""
+                        )
+                    )
+                    return self._static_stream(message), [], "FINANCIAL_RAG", {
+                        "is_bounded_response": True,
+                        "query_plan": canonical_query_plan.as_dict(),
+                        "decision_context": decision_context.as_dict(),
+                        "trading_request": trading_request.to_public_dict(),
+                        "semantic_provider_calls": semantic_provider_calls,
+                        "provider_calls": semantic_provider_calls,
+                        "retrieval_rewrite_calls": retrieval_rewrite_calls,
+                    }
                 if self._requires_retrieval_rewrite(context_requirements):
                     current_query = self.rewriter_module.process(user_query, chat_history)
                     retrieval_rewrite_calls = 1
@@ -351,6 +389,7 @@ class RAGOrchestrator:
                     "agent_runtime": self._build_agent_runtime_artifacts(orchestrator_output, decision_context),
                     "semantic_provider_calls": semantic_provider_calls,
                     "retrieval_rewrite_calls": retrieval_rewrite_calls,
+                    "query_plan": canonical_query_plan.as_dict(),
                     "context_capabilities_requested": [need.capability for need in context_requirements.needs],
                 }
                 structured_prompt = self._append_agent_handoff_to_prompt(

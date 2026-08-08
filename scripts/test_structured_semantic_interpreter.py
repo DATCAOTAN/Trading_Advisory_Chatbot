@@ -34,6 +34,7 @@ def semantic_payload(**changes):
         "conditions": [{"subject": "RSI", "operator": "GREATER_THAN", "value": 10}],
         "context_references": [],
         "requested_mode": "",
+        "account_scope": "",
         "explicit_fields": [
             "action",
             "direction",

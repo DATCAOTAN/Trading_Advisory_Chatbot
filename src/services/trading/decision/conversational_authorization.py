@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -18,7 +19,11 @@ from src.services.semantic.conversational_context import (
 from src.services.trading.reasoning.strategy_evidence import (
     ConversationalStrategyRequest,
     parse_conversational_strategy,
+    project_resolved_semantic_strategy,
+    validate_strategy,
 )
+from src.services.semantic.query_plan import QueryPlan
+from src.services.semantic.structured_semantics import SEMANTIC_SCHEMA_VERSION
 
 
 TRADING_MODES = {"advisory_only", "human_confirmed_live", "autonomous_live"}
@@ -109,7 +114,7 @@ class ConversationalTradingRequest:
             or payload.get("executable") is not False
             or payload.get("metadata_redacted") is not True
             or response_format not in RESPONSE_FORMATS
-            or trade_action not in {"", "OPEN_POSITION", "GENERIC_TRADE", "CLOSE_POSITION"}
+            or trade_action not in {"", "OPEN_POSITION", "GENERIC_TRADE", "CLOSE_POSITION", "MANAGE_POSITION"}
             or trade_direction not in {"", "BUY", "SELL"}
             or trade_action == "OPEN_POSITION" and not trade_direction
         ):
@@ -140,7 +145,13 @@ def parse_conversational_trading_request(
     *,
     conversation_id: str,
     context: ConversationalIntentContext | None = None,
+    query_plan: QueryPlan | None = None,
 ) -> ConversationalTradingRequest | None:
+    if query_plan is not None:
+        return project_conversational_trading_request(
+            query_plan,
+            conversation_id=conversation_id,
+        )
     context = context or resolve_conversational_context(query)
     if not str(query or "").strip() or not ({"strategy", "authorization", "advisory", "autonomous"} & set(context.intent_families)):
         return None
@@ -183,8 +194,6 @@ def parse_conversational_trading_request(
     )
     strategy_issues = ()
     if strategy is not None:
-        from src.services.trading.reasoning.strategy_evidence import validate_strategy
-
         strategy_issues = validate_strategy(strategy)
     return ConversationalTradingRequest(
         request_id=request_id,
@@ -203,5 +212,115 @@ def parse_conversational_trading_request(
         trade_direction=semantics.direction,
         trade_instruction_text=str(query or "").strip()[:500],
         blockers=tuple(dict.fromkeys((*blockers, *strategy_issues))),
+        strategy=strategy,
+    )
+
+
+def project_conversational_trading_request(
+    query_plan: QueryPlan,
+    *,
+    conversation_id: str,
+) -> ConversationalTradingRequest | None:
+    """Consume an authoritative structured QueryPlan without reparsing its raw query."""
+
+    semantic_context = query_plan.semantic_context
+    semantic = semantic_context.get("input") if isinstance(semantic_context, Mapping) else None
+    if not isinstance(semantic, Mapping) or semantic.get("schema_version") != SEMANTIC_SCHEMA_VERSION:
+        return None
+    primary_intent = str(semantic.get("primary_intent") or "")
+    action = str(semantic.get("action") or "")
+    if primary_intent not in {"STRATEGY", "TRADE_LIFECYCLE", "POSITION_MANAGEMENT"} and action not in {
+        "OPEN_POSITION",
+        "CLOSE_POSITION",
+        "MANAGE_POSITION",
+    }:
+        return None
+
+    requested_mode = str(semantic.get("requested_mode") or "") or "advisory_only"
+    account_scope = str(semantic.get("account_scope") or "") or "UNKNOWN"
+    confirmation_policy = {
+        "advisory_only": "NO_EXECUTION",
+        "human_confirmed_live": "CONFIRM_EVERY_TRADE",
+        "autonomous_live": "STANDING_MANDATE",
+    }.get(requested_mode)
+    if confirmation_policy is None:
+        return None
+    canonical_symbol = next(iter(query_plan.entities.symbols), "")
+    broker_symbol = next(iter(query_plan.entities.broker_symbols), "")
+    request_material = json.dumps(
+        {"conversation_id": conversation_id.strip(), "semantic_context": semantic_context},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    request_id = "conversation_trade_" + hashlib.sha256(request_material.encode("utf-8")).hexdigest()[:24]
+    strategy = project_resolved_semantic_strategy(
+        semantic_context,
+        canonical_symbol=canonical_symbol,
+        requested_mode=requested_mode,
+        confirmation_policy=confirmation_policy,
+        account_scope=account_scope,
+        request_id=request_id,
+    )
+    semantic_unresolved = tuple(
+        f"SEMANTIC_UNRESOLVED:{value}"
+        for value in semantic_context.get("unresolved_fields", ())
+        if str(value).strip()
+    )
+    blockers: list[str] = list(semantic_unresolved)
+    if not canonical_symbol:
+        blockers.append("SYMBOL_REQUIRED")
+    if requested_mode != "advisory_only" and account_scope != "DEMO":
+        blockers.append("DEMO_ACCOUNT_SCOPE_REQUIRED")
+    if action == "OPEN_POSITION" and not str(semantic.get("direction") or ""):
+        blockers.append("SEMANTIC_UNRESOLVED:direction")
+    if semantic.get("negated") is True:
+        blockers.append("NEGATED_TRADE_ACTION")
+    if semantic.get("hypothetical") is True:
+        blockers.append("HYPOTHETICAL_TRADE_ACTION")
+    if strategy is not None:
+        blockers.extend(validate_strategy(strategy))
+
+    blockers = list(dict.fromkeys(blockers))
+    response_format = (
+        "STRATEGY_COMPLETION_REQUIRED_CARD"
+        if blockers
+        else {
+            "advisory_only": "CLARIFICATION_OR_BLOCKER_RESPONSE",
+            "human_confirmed_live": "MT5_ACCESS_CARD",
+            "autonomous_live": "STANDING_MANDATE_CARD",
+        }[requested_mode]
+    )
+    next_action = {
+        "advisory_only": "ANALYZE_ONLY",
+        "human_confirmed_live": "GRANT_MT5_DEMO_ACCESS",
+        "autonomous_live": "REVIEW_STANDING_MANDATE",
+    }[requested_mode]
+    is_non_actionable = semantic.get("negated") is True or semantic.get("hypothetical") is True
+    trade_action = "" if is_non_actionable else action
+    if trade_action not in {"OPEN_POSITION", "CLOSE_POSITION", "MANAGE_POSITION"}:
+        trade_action = "GENERIC_TRADE" if primary_intent == "STRATEGY" and not is_non_actionable else ""
+    trade_direction = "" if is_non_actionable else str(semantic.get("direction") or "")
+    timeframe_profile = (
+        strategy.timeframes
+        if strategy and all(strategy.timeframes)
+        else tuple(query_plan.entities.timeframes) or operator_timeframe_profile(canonical_symbol)
+    )
+    return ConversationalTradingRequest(
+        request_id=request_id,
+        requested_mode=requested_mode,
+        confirmation_policy=confirmation_policy,
+        canonical_symbol=canonical_symbol,
+        broker_symbol=broker_symbol,
+        timeframe_profile=timeframe_profile,
+        strategy_description=(strategy.strategy_description if strategy else "STRUCTURED_SEMANTIC_PROJECTION"),
+        account_scope=account_scope,
+        mt5_authorization_required=requested_mode != "advisory_only",
+        mandate_required=requested_mode == "autonomous_live",
+        allowed_next_action="BLOCKED" if blockers else next_action,
+        response_format=response_format,
+        trade_action=trade_action,
+        trade_direction=trade_direction,
+        trade_instruction_text=str(query_plan.original_query or "")[:500],
+        blockers=tuple(blockers),
         strategy=strategy,
     )

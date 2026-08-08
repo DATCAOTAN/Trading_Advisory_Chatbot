@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 from src.services.semantic.structured_semantics import (
     SemanticCondition,
@@ -54,6 +54,45 @@ class ResolvedSemanticState:
             "field_sources": dict(self.field_sources),
             "unresolved_fields": list(self.unresolved_fields),
         }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "ResolvedSemanticState":
+        expected = {
+            "input",
+            "canonical_symbols",
+            "broker_symbols",
+            "unresolved_symbols",
+            "indicators",
+            "conditions",
+            "timeframes",
+            "field_sources",
+            "unresolved_fields",
+        }
+        if not isinstance(payload, Mapping) or set(payload) != expected:
+            raise ValueError("RESOLVED_SEMANTIC_STATE_INVALID")
+        field_sources = payload["field_sources"]
+        if not isinstance(field_sources, Mapping):
+            raise ValueError("RESOLVED_SEMANTIC_STATE_INVALID")
+        try:
+            state = cls(
+                semantic=StructuredSemanticResult.from_payload(payload["input"]),
+                canonical_symbols=_text_values(payload["canonical_symbols"]),
+                broker_symbols=_text_values(payload["broker_symbols"]),
+                unresolved_symbols=_text_values(payload["unresolved_symbols"]),
+                indicators=tuple(SemanticIndicator.from_payload(item) for item in _items(payload["indicators"])),
+                conditions=tuple(SemanticCondition.from_payload(item) for item in _items(payload["conditions"])),
+                field_sources=tuple(
+                    (str(field), str(source))
+                    for field, source in field_sources.items()
+                    if str(field).strip() and str(source) in FIELD_SOURCES
+                ),
+                unresolved_fields=_text_values(payload["unresolved_fields"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("RESOLVED_SEMANTIC_STATE_INVALID") from exc
+        if len(state.field_sources) != len(field_sources):
+            raise ValueError("RESOLVED_SEMANTIC_STATE_INVALID")
+        return state
 
 
 def resolve_structured_semantics(
@@ -185,3 +224,15 @@ def _dedupe(values: Iterable[str]) -> tuple[str, ...]:
             seen.add(key)
             output.append(value)
     return tuple(output)
+
+
+def _items(value: Any) -> list[Any]:
+    if not isinstance(value, list):
+        raise ValueError("RESOLVED_SEMANTIC_STATE_INVALID")
+    return value
+
+
+def _text_values(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ValueError("RESOLVED_SEMANTIC_STATE_INVALID")
+    return tuple(item.strip() for item in value)

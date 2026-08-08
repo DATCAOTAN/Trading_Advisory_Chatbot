@@ -33,6 +33,7 @@ from src.services.semantic.conversational_context import (
     ConversationalIntentContext,
     resolve_conversational_context,
 )
+from src.services.semantic.resolved_semantics import ResolvedSemanticState
 from src.services.trading.market.live_feature_service import LiveFeatureService
 from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBundleBuilder
 from src.services.trading.market.provider_registry import ProviderRegistry
@@ -223,13 +224,9 @@ def render(orchestrator, feature_flags: dict):
         _render_conversational_trading_authorization(orchestrator, latest_trading_request)
 
     if user_query:
-        previous_context = _latest_conversational_context(st.session_state.messages)
-        conversational_context = resolve_conversational_context(user_query, previous_context)
-        trading_request = parse_conversational_trading_request(
-            user_query,
-            conversation_id=st.session_state.current_session_id,
-            context=conversational_context,
-        )
+        previous_structured_context = _latest_resolved_semantic_state(st.session_state.messages)
+        conversational_context = None
+        trading_request = None
         user_msg = {"role": "user", "content": user_query}
         from src.services.history_service import HistoryService
 
@@ -260,8 +257,29 @@ def render(orchestrator, feature_flags: dict):
                     enable_reranker=feature_flags["reranker"],
                     use_knowledge_v3=knowledge_v3_flags["use_knowledge_v3"],
                     knowledge_v3_fallback_to_legacy=knowledge_v3_flags["knowledge_v3_fallback_to_legacy"],
-                    conversational_context=conversational_context,
+                    previous_structured_context=previous_structured_context,
                 )
+
+                query_plan_payload = runtime_artifacts.get("query_plan") if runtime_artifacts else None
+                semantic_context = (
+                    query_plan_payload.get("semantic_context")
+                    if isinstance(query_plan_payload, dict)
+                    else None
+                )
+                authoritative_semantic_plan = isinstance(semantic_context, dict) and isinstance(
+                    semantic_context.get("input"), dict
+                )
+                trading_payload = runtime_artifacts.get("trading_request") if runtime_artifacts else None
+                if isinstance(trading_payload, dict):
+                    trading_request = ConversationalTradingRequest.from_public_dict(trading_payload)
+                elif not authoritative_semantic_plan:
+                    previous_context = _latest_conversational_context(st.session_state.messages)
+                    conversational_context = resolve_conversational_context(user_query, previous_context)
+                    trading_request = parse_conversational_trading_request(
+                        user_query,
+                        conversation_id=st.session_state.current_session_id,
+                        context=conversational_context,
+                    )
 
                 st.markdown(_render_badge(intent), unsafe_allow_html=True)
                 stream_logger = _AnswerStreamLogger(
@@ -349,7 +367,17 @@ def render(orchestrator, feature_flags: dict):
                 assistant_msg["quality_status"] = "DEGRADED"
         if trading_request is not None:
             assistant_msg["trading_request"] = trading_request.to_public_dict()
-        assistant_msg["conversational_context"] = conversational_context.as_dict()
+        if conversational_context is not None:
+            assistant_msg["conversational_context"] = conversational_context.as_dict()
+        if runtime_artifacts is not None:
+            query_plan_payload = runtime_artifacts.get("query_plan")
+            semantic_context = (
+                query_plan_payload.get("semantic_context")
+                if isinstance(query_plan_payload, dict)
+                else None
+            )
+            if isinstance(semantic_context, dict):
+                assistant_msg["resolved_semantic_state"] = semantic_context
         st.session_state.messages.append(assistant_msg)
         HistoryService().append_message(
             st.session_state.current_session_id,
@@ -433,6 +461,18 @@ def _latest_conversational_context(messages) -> ConversationalIntentContext | No
             continue
         try:
             return ConversationalIntentContext.from_dict(payload)
+        except ValueError:
+            return None
+    return None
+
+
+def _latest_resolved_semantic_state(messages) -> ResolvedSemanticState | None:
+    for message in reversed(messages):
+        payload = message.get("resolved_semantic_state") if isinstance(message, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        try:
+            return ResolvedSemanticState.from_dict(payload)
         except ValueError:
             return None
     return None

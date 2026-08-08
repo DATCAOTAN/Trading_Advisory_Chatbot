@@ -2627,3 +2627,19 @@ Validated structured semantics can now enter the existing `QueryPlan` without be
 - Verification: 104 focused semantic/query-plan/context/capability/runtime-neighbor tests passed with two unchanged dependency warnings. Full regression passed with 3,335 tests and 156 subtests in 154.39 seconds; three unchanged dependency/UTC warnings remained. Compileall, Docker Compose config, Docker app restart, Streamlit health `200 ok`, diff, documentation integrity, and static safety checks passed.
 - External LLM, MT5, live market data, candidate generation, confirmation, export, pre-submit, controlled-submit, runtime `order_send`, and broker mutation counts were zero. Exactly one production `.order_send(` call-site remains in the host bridge, `src/` retains zero `MetaTrader5` imports, and semantic/planning constraints retain `execution_allowed=false`.
 - Verification level: `FULL_REGRESSION_PASS`. Next approved scope: Trading Semantic Cutover for the existing trading-language path; thin UI migration and Draft/Candidate lifecycle integration remain later work.
+
+# 70. TRADING SEMANTIC CUTOVER
+
+Valid trading semantics now use the same authoritative path as the rest of the application:
+
+`StructuredSemanticResult -> ResolvedSemanticState -> QueryPlan -> deterministic trading projection -> existing ConversationalTradingRequest / ConversationalStrategyRequest -> existing validation and evidence`.
+
+- `QueryPlan.semantic_context` is the semantic authority. `ConversationalTradingRequest` and `ConversationalStrategyRequest` are non-executable downstream projections and do not reinterpret raw language.
+- The Streamlit chat path calls the orchestrator first. When it receives an authoritative semantic QueryPlan, it uses the returned typed projection and persists only the resolved semantic state for the next turn. It invokes the old raw conversational parser only when no valid semantic plan exists.
+- The existing legacy parser remains a bounded compatibility fallback. Valid semantic plans bypass `normalize_trade_instruction`, `parse_conversational_strategy`, and `parse_indicator_specs` in the trading projection path.
+- Missing semantic children remain explicit: an RSI condition without a period retains RSI, timeframe, comparator, and threshold; it carries a semantic unresolved marker and cannot proceed into evidence as a complete strategy. No default period or execution authority is invented.
+- Structured semantics now carry `account_scope` as non-authoritative meaning. Deterministic downstream mode policy still requires DEMO for non-advisory requests and keeps every request non-executable.
+- Existing `CLOSE_POSITION` and `MANAGE_POSITION` semantic actions can be represented as non-executable typed lifecycle meaning. Confirm, reject, and status semantics remain unsupported by the current semantic schema and no lifecycle behavior changed.
+- Verification: 16 new cutover tests plus 98 neighboring semantic, QueryPlan, conversational, authorization, and reasoning-evidence tests passed (114 total, two dependency warnings). Full regression passed with 3,351 tests and 156 subtests in 134.20 seconds; three unchanged dependency/UTC warnings remained. Compileall, Docker Compose config, Docker app restart, Streamlit health `200 ok`, diff, and static safety checks passed.
+- No external LLM, MT5, live market data, candidate generation, confirmation, pre-submit, controlled-submit, runtime `order_send`, or broker mutation operation ran. `src/` has zero `MetaTrader5` imports and exactly one production `.order_send(` call-site remains in the host bridge.
+- Verification level: `FULL_REGRESSION_PASS`. Thin UI cleanup, authoritative Draft blocker presentation, and Draft-to-Candidate lifecycle integration remain later work; confirmation, pre-submit, execution, bridge, and permission behavior are unchanged.

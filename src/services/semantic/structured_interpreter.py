@@ -10,6 +10,7 @@ from typing import Any
 from src.config import Config
 from src.services.semantic.structured_semantics import (
     ACTION_VALUES,
+    ACCOUNT_SCOPES,
     DIRECTION_VALUES,
     PRIMARY_INTENTS,
     REQUESTED_MODES,
@@ -91,6 +92,7 @@ class StructuredSemanticInterpreter:
             "conditions": [{"subject": "RSI", "operator": "GREATER_THAN", "value": 10}],
             "context_references": ["previous_symbol"],
             "requested_mode": sorted(REQUESTED_MODES),
+            "account_scope": sorted(ACCOUNT_SCOPES),
             "explicit_fields": ["field paths explicitly present in the message"],
             "unresolved_fields": ["field paths that remain incomplete"],
             "negated": False,

@@ -1491,3 +1491,38 @@ Commit: this commit
 
 - Structured semantic routing and existing capability planning are universal for valid semantic artifacts; execution remains disabled and unchanged.
 - Trading raw-language cutover is next; thin UI migration and Draft/Candidate lifecycle integration remain later.
+
+---
+
+### Sprint 4 - Trading Semantic Cutover
+
+Date: 2026-08-08
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Projected valid resolved `QueryPlan` facts into the existing typed trading and strategy contracts without raw re-parsing.
+- Moved the chat ingress to orchestrator-first; the UI consumes the authoritative returned projection and retains resolved state for explicit next-turn inheritance.
+- Preserved incomplete indicator siblings and marked only unresolved semantic fields; domain validation remains responsible for complete-strategy evidence admission.
+- Added non-authoritative semantic account scope and projected existing close/manage lifecycle meaning without lifecycle mutation.
+- Retained the legacy conversational parser only for invalid/unavailable semantic-plan compatibility fallback.
+
+#### Verification
+
+- Focused cutover plus semantic, QueryPlan, conversation, authorization, and reasoning-evidence suites: 114 passed, 2 unchanged dependency warnings.
+- Full regression: 3,351 passed, 156 subtests passed in 134.20 seconds, 3 unchanged dependency/UTC warnings.
+- Compileall, Docker Compose configuration, app restart, Streamlit health `200 ok`, and diff checks passed.
+
+#### Current state
+
+- Valid QueryPlan semantics are authoritative for migrated trading ingress; all projections remain `NON_EXECUTABLE`.
+- Execution, confirmation, pre-submit, controlled submission, bridge behavior, and permissions are unchanged and blocked by default.
+
+#### Not verified / not implemented
+
+- Full thin-UI cleanup, authoritative Draft blocker presentation, Draft-to-Candidate lifecycle wiring, and legacy parser removal remain later work.
+
+#### Next step
+
+- Thin UI + Authoritative Draft/Lifecycle Presentation Integration.

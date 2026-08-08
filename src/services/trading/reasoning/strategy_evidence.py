@@ -128,6 +128,7 @@ class ConversationalStrategyRequest:
     risk_policy_reference: str
     request_id: str
     identity: StrategyIdentity
+    semantic_unresolved_fields: tuple[str, ...] = ()
 
     @property
     def timeframes(self) -> tuple[str, ...]:
@@ -146,6 +147,7 @@ class ConversationalStrategyRequest:
             "risk_policy_reference": self.risk_policy_reference,
             "request_id": self.request_id,
             "identity": self.identity.as_dict(),
+            "semantic_unresolved_fields": list(self.semantic_unresolved_fields),
         }
 
     @classmethod
@@ -184,6 +186,9 @@ class ConversationalStrategyRequest:
                 strategy_id=str(identity_payload.get("strategy_id") or ""),
                 strategy_version=str(identity_payload.get("strategy_version") or ""),
                 normalized_strategy_hash=str(identity_payload.get("normalized_strategy_hash") or ""),
+            ),
+            semantic_unresolved_fields=tuple(
+                str(item) for item in payload.get("semantic_unresolved_fields", ())
             ),
         )
         issues = validate_strategy(value)
@@ -376,6 +381,75 @@ def parse_conversational_strategy(
     return ConversationalStrategyRequest(**{**provisional.__dict__, "identity": identity})
 
 
+def project_resolved_semantic_strategy(
+    semantic_context: Mapping[str, Any],
+    *,
+    canonical_symbol: str,
+    requested_mode: str,
+    confirmation_policy: str,
+    account_scope: str,
+    request_id: str,
+) -> ConversationalStrategyRequest | None:
+    """Project resolved semantic facts into the existing typed strategy contract."""
+
+    indicators_payload = semantic_context.get("indicators")
+    conditions_payload = semantic_context.get("conditions")
+    unresolved_payload = semantic_context.get("unresolved_fields")
+    if not all(isinstance(value, list) for value in (indicators_payload, conditions_payload, unresolved_payload)):
+        return None
+
+    indicators: list[IndicatorSpec] = []
+    aliases_by_subject: dict[str, list[str]] = {}
+    for item in indicators_payload:
+        if not isinstance(item, Mapping):
+            return None
+        indicator_id = str(item.get("indicator_id") or "").upper()
+        timeframe = str(item.get("timeframe") or "")
+        parameters = item.get("parameters")
+        if not indicator_id or not isinstance(parameters, Mapping):
+            return None
+        try:
+            spec = _indicator(indicator_id, timeframe, parameters)
+        except (TypeError, ValueError):
+            return None
+        indicators.append(spec)
+        aliases_by_subject.setdefault(indicator_id, []).append(spec.output_alias)
+
+    unresolved = tuple(str(item) for item in unresolved_payload if str(item).strip())
+    rules: list[StrategyRule] = []
+    for index, item in enumerate(conditions_payload):
+        if not isinstance(item, Mapping):
+            return None
+        subject = str(item.get("subject") or "").upper()
+        aliases = aliases_by_subject.get(subject, ())
+        operator = str(item.get("operator") or "")
+        value = item.get("value")
+        if len(aliases) != 1 or isinstance(value, bool) or not isinstance(value, (int, float)):
+            unresolved = tuple(dict.fromkeys((*unresolved, f"conditions[{index}].subject_binding")))
+            continue
+        rules.append(StrategyRule(operator=operator, left=aliases[0], constants=(float(value),)))
+
+    if not indicators and not rules and not unresolved:
+        return None
+    provisional = ConversationalStrategyRequest(
+        canonical_symbol=canonical_symbol,
+        requested_mode=requested_mode,
+        confirmation_policy=confirmation_policy,
+        account_scope=account_scope,
+        indicators=tuple(sorted(indicators, key=lambda item: item.output_alias)),
+        entry_rules=tuple(rules),
+        exit_rules=(),
+        strategy_description="STRUCTURED_SEMANTIC_PROJECTION",
+        risk_policy_reference="CONFIGURED_RISK_POLICY",
+        request_id=request_id,
+        identity=StrategyIdentity("", "reasoning-strategy/v2", ""),
+        semantic_unresolved_fields=unresolved,
+    )
+    return ConversationalStrategyRequest(
+        **{**provisional.__dict__, "identity": strategy_identity(provisional)}
+    )
+
+
 def parse_indicator_specs(text: str, default_timeframes: Sequence[str]) -> tuple[IndicatorSpec, ...]:
     normalized = _normalize_indicator_text(text)
     default_timeframe = normalize_timeframe(next(iter(default_timeframes), "H1"))
@@ -466,10 +540,13 @@ def _normalize_indicator_text(text: str) -> str:
 
 def validate_strategy(strategy: ConversationalStrategyRequest) -> tuple[str, ...]:
     issues: list[str] = []
+    unresolved = set(strategy.semantic_unresolved_fields)
+    if unresolved:
+        issues.append("SEMANTIC_FIELDS_UNRESOLVED")
     if not strategy.indicators:
         issues.append("STRATEGY_INDICATORS_MISSING")
     aliases: set[str] = set()
-    for spec in strategy.indicators:
+    for index, spec in enumerate(strategy.indicators):
         definition = INDICATOR_REGISTRY.get(spec.indicator_id)
         if definition is None:
             issues.append("UNSUPPORTED_INDICATOR")
@@ -480,7 +557,16 @@ def validate_strategy(strategy: ConversationalStrategyRequest) -> tuple[str, ...
             issues.append("DUPLICATE_OUTPUT_ALIAS")
         aliases.add(spec.output_alias)
         values = spec.parameter_map()
-        if set(values) != set(definition.parameters):
+        missing_parameters = set(definition.parameters) - set(values)
+        unresolved_parameters = {
+            name
+            for name in missing_parameters
+            if (
+                f"indicators[{index}].parameters.{name}" in unresolved
+                or f"indicators[{index}].parameters" in unresolved
+            )
+        }
+        if set(values) - set(definition.parameters) or missing_parameters != unresolved_parameters:
             issues.append("INDICATOR_PARAMETER_INVALID")
             continue
         parameter_ranges = {name: (minimum, maximum, integer) for name, minimum, maximum, integer in definition.parameter_ranges}
@@ -515,6 +601,8 @@ def strategy_identity(strategy: ConversationalStrategyRequest) -> StrategyIdenti
         "exit_rules": [item.as_dict() for item in strategy.exit_rules],
         "risk_policy_reference": strategy.risk_policy_reference,
     }
+    if strategy.semantic_unresolved_fields:
+        material["semantic_unresolved_fields"] = list(strategy.semantic_unresolved_fields)
     digest = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return StrategyIdentity("strategy_" + digest[:24], "reasoning-strategy/v2", digest)
 
@@ -618,8 +706,9 @@ def build_reasoning_evidence(
 
 
 def _indicator(indicator_id: str, timeframe: str, parameters: Mapping[str, float]) -> IndicatorSpec:
-    suffix = "_".join(str(int(value)) if float(value).is_integer() else str(value) for value in parameters.values())
-    return IndicatorSpec(indicator_id, timeframe, tuple(sorted((key, float(value)) for key, value in parameters.items())), f"{indicator_id.lower()}_{suffix}_{timeframe.lower()}")
+    normalized = tuple(sorted((str(key), float(value)) for key, value in parameters.items()))
+    suffix = "_".join(str(int(value)) if float(value).is_integer() else str(value) for _, value in normalized) or "unresolved"
+    return IndicatorSpec(indicator_id, timeframe, normalized, f"{indicator_id.lower()}_{suffix}_{timeframe.lower()}")
 
 
 def _nearby_timeframe(text: str, end: int, default: str) -> str:
