@@ -312,3 +312,39 @@ def test_explicit_draft_button_binds_current_id_and_revision_to_candidate_servic
     assert calls[0][0:2] == (draft.draft_id, draft.revision)
     assert calls[0][2]["strategy"] is request.strategy
     assert ("warning", "Candidate creation blocked: MARKET_DATA_STALE") in streamlit.messages
+
+
+def test_matching_draft_candidate_renders_existing_review_controls_without_acting(monkeypatch):
+    request = _request()
+    draft = _draft(revision=4)
+    _install_draft_renderer(monkeypatch, request, draft)
+    candidate = SimpleNamespace(
+        candidate_reference="candidate-draft-bound",
+        proposal_source="EDITABLE_TRADE_DRAFT",
+        proposal_source_reference="draft-bound-reference",
+        operating_mode="human_confirmed_live",
+    )
+    calls = []
+    monkeypatch.setattr(tab_chatbot, "draft_candidate_source_reference", lambda _draft: "draft-bound-reference")
+    monkeypatch.setattr(
+        tab_chatbot,
+        "get_autonomous_decision_run_result",
+        lambda _session: SimpleNamespace(candidate=candidate, validation=SimpleNamespace()),
+    )
+    monkeypatch.setattr(tab_chatbot, "render_autonomous_candidate_review_card", lambda *_args: None)
+    monkeypatch.setattr(tab_chatbot, "_operator_candidate_review_controller", lambda: "controller")
+    monkeypatch.setattr(
+        tab_chatbot,
+        "render_autonomous_candidate_confirmation_controls",
+        lambda reference, controller, **kwargs: calls.append((reference, controller, kwargs)),
+    )
+
+    tab_chatbot._render_editable_trade_draft(request, orchestrator=SimpleNamespace(live_service=object()))
+
+    assert calls == [
+        (
+            "candidate-draft-bound",
+            "controller",
+            {"key_prefix": "editable_draft_editable_trade_draft_test_4_"},
+        )
+    ]

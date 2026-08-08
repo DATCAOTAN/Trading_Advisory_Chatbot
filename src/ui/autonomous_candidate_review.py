@@ -16,6 +16,7 @@ from src.services.trading.decision.candidate_review import (
     AutonomousCandidateReviewView,
     present_autonomous_candidate_review,
 )
+from src.services.trading.proposal.intent_store import load_candidate_confirmation
 
 
 AUTONOMOUS_DECISION_RUN_RESULT_SESSION_KEY = "autonomous_decision_run_result"
@@ -94,6 +95,31 @@ class OperatorCandidateReviewController:
         )
         session_state[AUTONOMOUS_CANDIDATE_REVIEW_OUTCOME_SESSION_KEY] = outcome
         return outcome
+
+    def current_outcome(
+        self, candidate_reference: str
+    ) -> OperatorCandidateReviewOutcome | None:
+        """Reload the persisted decision for one exact Candidate, if it exists."""
+        try:
+            record = load_candidate_confirmation(
+                self.confirmation_service.journal.store, candidate_reference
+            )
+        except RuntimeError as exc:
+            return OperatorCandidateReviewOutcome(
+                candidate_reference,
+                "BLOCKED",
+                "NOT_REQUESTED",
+                "",
+                str(exc),
+            )
+        if record is None:
+            return None
+        return OperatorCandidateReviewOutcome(
+            candidate_reference,
+            record.proposal_boundary_status,
+            record.human_confirmation_state,
+            record.journal_record_id,
+        )
 
     def advance_to_pre_submit(
         self,
@@ -253,7 +279,17 @@ def render_autonomous_candidate_confirmation_controls(
         use_container_width=True,
     ):
         controller.act(st.session_state, candidate_reference, "REJECT")
-    outcome = st.session_state.get(AUTONOMOUS_CANDIDATE_REVIEW_OUTCOME_SESSION_KEY)
+    outcome = controller.current_outcome(candidate_reference)
+    if outcome is None:
+        session_outcome = st.session_state.get(
+            AUTONOMOUS_CANDIDATE_REVIEW_OUTCOME_SESSION_KEY
+        )
+        outcome = (
+            session_outcome
+            if isinstance(session_outcome, OperatorCandidateReviewOutcome)
+            and session_outcome.candidate_reference == candidate_reference
+            else None
+        )
     if isinstance(outcome, OperatorCandidateReviewOutcome):
         message = (
             f"Review={outcome.status} | confirmation={outcome.confirmation_state} | "

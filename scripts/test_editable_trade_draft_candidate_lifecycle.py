@@ -25,6 +25,15 @@ from src.services.trading.proposal.editable_trade_draft import (
     TradeDraftMarketEvidence,
     TradeParameterPatch,
 )
+from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_artifact_capture import (
+    ProtectedAccountContextCapture,
+)
+from src.services.trading.proposal.confirmation_service import (
+    HumanProposalConfirmationService,
+)
+from src.services.trading.proposal.intent_journal import ProposalIntentJournalService
+from src.services.trading.proposal.intent_store import ProposalIntentJournalStore
+from src.services.trading.proposal.policies import ProposalBoundaryPolicy
 
 
 def _field(value, *, status="VALID"):
@@ -260,6 +269,50 @@ def test_revision_change_creates_a_distinct_historical_candidate_only_after_new_
     assert first.run_result.candidate.proposal_source_reference != second.run_result.candidate.proposal_source_reference
     assert store.load(draft.draft_id).candidate_reference == ""
     assert len(candidate_service.decision_orchestrator.journal.records()) == 2
+
+
+def test_historical_candidate_confirmation_remains_bound_after_draft_revision_changes(tmp_path):
+    draft = _draft()
+    candidate_service, store, _assembler = _candidate_service(tmp_path, draft)
+    created = _create(candidate_service, draft)
+    revised = EditableTradeDraftService(store=store).apply_patch(
+        draft.draft_id,
+        TradeParameterPatch(draft.revision, risk_fraction=Decimal("0.015")),
+        evidence=_evidence(),
+    )
+    confirmation_store = ProposalIntentJournalStore(tmp_path / "proposal-intents.jsonl")
+    confirmation_service = HumanProposalConfirmationService(
+        journal=ProposalIntentJournalService(store=confirmation_store)
+    )
+    account = ProtectedAccountContextCapture(
+        status="OK",
+        account_context_fingerprint="a" * 64,
+        account_id_hash="c" * 64,
+        server_redacted="offline-demo",
+        currency="USD",
+        trade_mode="DEMO",
+        redacted=True,
+        captured_at=NOW.isoformat(),
+    )
+
+    result = confirmation_service.review_candidate(
+        candidate_service.decision_orchestrator.journal,
+        created.run_result.candidate.candidate_reference,
+        account,
+        account.account_context_fingerprint,
+        operator_action="CONFIRM",
+        user_acknowledgement_text=ProposalBoundaryPolicy().confirmation_phrase,
+        confirmation_nonce="draft-history-confirmation-0001",
+        expected_candidate_reference=created.run_result.candidate.candidate_reference,
+        now=NOW,
+    )
+
+    assert result.intent.proposal_boundary_status == "CONFIRMED_FOR_PROPOSAL_WORKFLOW"
+    assert result.intent.candidate_reference == created.run_result.candidate.candidate_reference
+    assert result.intent.candidate_provenance_hash == created.run_result.candidate.provenance_hash
+    assert created.run_result.candidate.proposal_source_reference != draft_candidate_source_reference(revised)
+    assert created.run_result.candidate.proposal_source_reference in result.intent.source_refs
+    assert confirmation_store.read_latest()[0].candidate_reference == created.run_result.candidate.candidate_reference
 
 
 def test_authoritative_mode_and_typed_strategy_bindings_are_required(tmp_path):

@@ -1594,3 +1594,37 @@ Commit: this commit
 #### Next step
 
 - Explicit Candidate Review + Confirmation Lifecycle Integration.
+
+---
+
+### Sprint 6B - Explicit Candidate Review + Confirmation Lifecycle Integration
+
+Date: 2026-08-08
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Connected the existing Candidate Review Card to the existing protected Confirm/Reject service only when the visible Candidate exactly matches the current Draft provenance.
+- Reloaded persisted review status by exact candidate reference so a Streamlit session outcome cannot appear on another Candidate after a rerun or Draft edit.
+- Reused the existing confirmation intent journal and its one-decision-per-candidate idempotency; conflicting terminal actions return the original immutable decision.
+- Proved historical C(N) review remains bound to C(N)'s protected Draft-revision source after Draft N+1 is created.
+
+#### Verification
+
+- Focused/neighboring Draft, Candidate, confirmation, idempotency, Review Card, UI, and pre-submit-safety tests: 104 passed with 2 unchanged dependency warnings.
+- Full regression: 3,373 passed and 156 subtests passed in 145.92 seconds with 3 unchanged dependency/UTC warnings.
+- Compileall, Docker Compose configuration, app restart/healthy state, Streamlit health `200 ok`, and diff checks passed.
+
+#### Current state
+
+- Confirm and Reject are explicit, candidate-bound, duplicate-safe, auditable, non-executable review decisions.
+- Rendering and Candidate creation do not create review authority; confirmation does not invoke pre-submit.
+
+#### Not verified / not implemented
+
+- Browser/runtime review action, pre-submit readiness, controlled submission, reconciliation mutation, and broker execution were not run.
+
+#### Next step
+
+- Confirmed Candidate -> Deterministic Pre-Submit Readiness Integration.

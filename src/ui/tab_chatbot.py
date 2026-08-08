@@ -62,10 +62,14 @@ from src.ui.runtime_flags import get_knowledge_v3_flags
 from src.ui.autonomous_candidate_review import (
     clear_autonomous_decision_run_result,
     get_autonomous_decision_run_result,
+    render_autonomous_candidate_confirmation_controls,
     render_autonomous_candidate_review_card,
     store_autonomous_decision_run_result,
 )
-from src.ui.tab_dashboard import _render_autonomous_decision_review_card
+from src.ui.tab_dashboard import (
+    _operator_candidate_review_controller,
+    _render_autonomous_decision_review_card,
+)
 
 
 class _AnswerStreamLogger:
@@ -808,6 +812,12 @@ def _render_draft_candidate_action(
         and candidate.proposal_source_reference == draft_candidate_source_reference(draft)
     ):
         render_autonomous_candidate_review_card(candidate, run_result.validation)
+        if candidate.operating_mode == "human_confirmed_live":
+            render_autonomous_candidate_confirmation_controls(
+                candidate.candidate_reference,
+                _operator_candidate_review_controller(),
+                key_prefix=key_prefix + "_",
+            )
 
 
 def _load_trade_draft_evidence(request: ConversationalTradingRequest):

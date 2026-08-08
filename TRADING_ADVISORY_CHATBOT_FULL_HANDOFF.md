@@ -2667,3 +2667,17 @@ An operator can now explicitly create one existing non-executable candidate from
 - No browser/runtime candidate action, external LLM, MT5 market-data request, confirmation, pre-submit artifact, controlled-submit call, runtime `order_send` call, or broker mutation ran for this sprint. Static source checks retain exactly one production `.order_send(` call-site in the host bridge and zero `MetaTrader5` imports under `src/`.
 - Docker Compose configuration passed; the existing `app` service restarted without rebuild, became healthy, and Streamlit health returned `200 ok`. Documentation integrity passed with 11 tests. Final Ponytail review found no unnecessary abstraction or safety regression.
 - Verification level: `FULL_REGRESSION_PASS`. Next approved scope: Explicit Candidate Review + Confirmation Lifecycle Integration.
+
+# 73. EXPLICIT CANDIDATE REVIEW AND CONFIRMATION LIFECYCLE
+
+The existing review controls and protected confirmation journal now form the explicit, non-executing decision boundary for a revision-bound Candidate.
+
+- The lifecycle is `Draft N -> Candidate C(N) -> Review Card -> explicit Confirm or Reject -> persisted review decision`. It stops before approval, final validation, pre-submit, controlled submission, reconciliation mutation, and broker execution.
+- The Review Card passes the exact `candidate_reference` to the existing `HumanProposalConfirmationService`; the service reloads and validates the protected Candidate, expected reference, freshness, provenance/source bindings, structured-order hash, and matching protected DEMO account context before persisting a decision.
+- Existing `ProposalIntentJournalStore` idempotency owns terminal review decisions. Repeated confirm or reject returns the existing persisted result, and a conflicting terminal action cannot silently replace the first decision.
+- The UI reloads the persisted decision for the exact visible Candidate after an action. A prior session-only outcome is not rendered for a later Candidate. Rendering a Draft, creating a Candidate, and rendering the Review Card remain non-mutating.
+- A historical Candidate C(N) can retain its original protected Draft-revision provenance after Draft N+1 exists; confirmation of C(N) remains bound to C(N) and never becomes confirmation of N+1. No new candidate is created as a side effect of review.
+- Confirmed and rejected proposal intents remain `dry_run_only` and non-executable. The existing pre-submit lifecycle is still a separately invoked later service; this review path does not call it.
+- Verification: 104 focused/neighboring lifecycle, Draft, review, idempotency, UI, and pre-submit-safety tests passed. Full regression passed with 3,373 tests and 156 subtests in 145.92 seconds; three unchanged dependency/UTC warnings remained. Compileall, Docker Compose configuration, app restart/health, Streamlit health `200 ok`, and diff checks passed.
+- No browser/runtime review action, external LLM, MT5 market-data request, pre-submit artifact, controlled-submit, runtime `order_send`, or broker mutation ran. Static source checks retain zero `MetaTrader5` imports under `src/` and exactly one production `.order_send(` call-site in the host bridge.
+- Verification level: `FULL_REGRESSION_PASS`. Next approved scope: Confirmed Candidate -> Deterministic Pre-Submit Readiness Integration.

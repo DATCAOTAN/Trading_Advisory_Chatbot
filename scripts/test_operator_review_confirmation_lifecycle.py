@@ -146,6 +146,22 @@ def test_duplicate_rejection_is_idempotent(tmp_path):
     assert len(state["review_store"].read_latest()) == 1
 
 
+def test_conflicting_terminal_review_returns_the_existing_decision(tmp_path):
+    for first_action, second_action, expected_status in (
+        ("CONFIRM", "REJECT", "CONFIRMED_FOR_PROPOSAL_WORKFLOW"),
+        ("REJECT", "CONFIRM", "REJECTED"),
+    ):
+        state = _state(tmp_path / first_action.lower(), "fresh_market")
+
+        first = _review(state, first_action)
+        second = _review(state, second_action)
+
+        assert first.intent.proposal_boundary_status == expected_status
+        assert second.intent.proposal_boundary_status == "DUPLICATE"
+        assert second.journal_record.operator_action == first_action
+        assert len(state["review_store"].read_latest()) == 1
+
+
 def test_tampered_persisted_candidate_fails_closed_before_confirmation(tmp_path):
     state = _state(tmp_path, "fresh_market")
     path = state["candidate_journal"].path
@@ -356,6 +372,22 @@ def test_controller_reloads_authoritative_candidate_not_session_object(tmp_path)
 
     assert outcome.status == "CONFIRMED_FOR_PROPOSAL_WORKFLOW"
     assert record.order_type == "BUY_LIMIT"
+
+
+def test_controller_reloads_persisted_review_state_for_the_exact_candidate(tmp_path):
+    state = _state(tmp_path, "fresh_market")
+    _confirm(state)
+    controller = OperatorCandidateReviewController(
+        state["service"],
+        state["candidate_journal"],
+        lambda: (state["account"], "a" * 64),
+    )
+
+    outcome = controller.current_outcome(state["candidate"].candidate_reference)
+
+    assert outcome.status == "CONFIRMED_FOR_PROPOSAL_WORKFLOW"
+    assert outcome.confirmation_state == "CONFIRMED_PROPOSAL_WORKFLOW"
+    assert outcome.candidate_reference == state["candidate"].candidate_reference
 
 
 def test_confirmation_journal_record_hash_survives_reload(tmp_path):
