@@ -138,31 +138,60 @@ class OperatorCandidateReviewController:
                 "PRE_SUBMIT_SERVICE_UNAVAILABLE",
             )
         else:
-            evidence = dict(self.pre_submit_evidence_provider(candidate_reference))
-            result = self.pre_submit_service.run(
-                candidate_reference, now=now, **evidence
-            )
-            blockers = (
-                result.final_validation.blockers
-                if result.final_validation is not None
-                else result.approval.blockers
-            )
-            outcome = OperatorCandidatePreSubmitOutcome(
-                candidate_reference=candidate_reference,
-                status=(result.report.status if result.report else "BLOCKED"),
-                final_validation_valid=bool(
-                    result.final_validation and result.final_validation.valid
-                ),
-                pre_submit_ready=bool(result.report and result.report.pre_submit_ready),
-                journal_record_id=(
-                    result.journal_record.journal_record_id
-                    if result.journal_record
-                    else ""
-                ),
-                blocker=(blockers[0] if blockers else ""),
-            )
+            try:
+                evidence = dict(self.pre_submit_evidence_provider(candidate_reference))
+                result = self.pre_submit_service.run(
+                    candidate_reference, now=now, **evidence
+                )
+                blockers = (
+                    result.final_validation.blockers
+                    if result.final_validation is not None
+                    else result.approval.blockers
+                )
+                outcome = OperatorCandidatePreSubmitOutcome(
+                    candidate_reference=candidate_reference,
+                    status=(result.report.status if result.report else "BLOCKED"),
+                    final_validation_valid=bool(
+                        result.final_validation and result.final_validation.valid
+                    ),
+                    pre_submit_ready=bool(result.report and result.report.pre_submit_ready),
+                    journal_record_id=(
+                        result.journal_record.journal_record_id
+                        if result.journal_record
+                        else ""
+                    ),
+                    blocker=(blockers[0] if blockers else ""),
+                )
+            except RuntimeError as exc:
+                outcome = OperatorCandidatePreSubmitOutcome(
+                    candidate_reference, "BLOCKED", False, False, "", str(exc)
+                )
         session_state[AUTONOMOUS_CANDIDATE_PRE_SUBMIT_OUTCOME_SESSION_KEY] = outcome
         return outcome
+
+    def current_pre_submit_outcome(
+        self, candidate_reference: str
+    ) -> OperatorCandidatePreSubmitOutcome | None:
+        if self.pre_submit_service is None:
+            return None
+        try:
+            record = self.pre_submit_service.pre_submit_store.load_candidate_pre_submit(
+                candidate_reference
+            )
+        except RuntimeError as exc:
+            return OperatorCandidatePreSubmitOutcome(
+                candidate_reference, "BLOCKED", False, False, "", str(exc)
+            )
+        if record is None:
+            return None
+        return OperatorCandidatePreSubmitOutcome(
+            candidate_reference=candidate_reference,
+            status=str(record.get("status", "BLOCKED")),
+            final_validation_valid=record.get("valid") is True,
+            pre_submit_ready=record.get("pre_submit_state")
+            == "PRE_SUBMIT_READY_NON_EXECUTABLE",
+            journal_record_id=str(record.get("journal_record_id", "")),
+        )
 
 
 def store_autonomous_decision_run_result(
@@ -301,6 +330,43 @@ def render_autonomous_candidate_confirmation_controls(
             st.info(message)
         else:
             st.error(message + (f" | blocker={outcome.blocker}" if outcome.blocker else ""))
+
+        if outcome.status == "CONFIRMED_FOR_PROPOSAL_WORKFLOW":
+            if st.button(
+                "Validate Pre-Submit (Non-Executable)",
+                key=f"{key_prefix}validate_autonomous_candidate_pre_submit",
+                use_container_width=True,
+            ):
+                controller.advance_to_pre_submit(st.session_state, candidate_reference)
+
+    pre_submit_outcome = controller.current_pre_submit_outcome(candidate_reference)
+    if pre_submit_outcome is None:
+        session_pre_submit = st.session_state.get(
+            AUTONOMOUS_CANDIDATE_PRE_SUBMIT_OUTCOME_SESSION_KEY
+        )
+        pre_submit_outcome = (
+            session_pre_submit
+            if isinstance(session_pre_submit, OperatorCandidatePreSubmitOutcome)
+            and session_pre_submit.candidate_reference == candidate_reference
+            else None
+        )
+    if isinstance(pre_submit_outcome, OperatorCandidatePreSubmitOutcome):
+        message = (
+            f"Pre-submit={pre_submit_outcome.status} | "
+            f"final_validation={pre_submit_outcome.final_validation_valid} | "
+            f"candidate={pre_submit_outcome.candidate_reference}"
+        )
+        if pre_submit_outcome.pre_submit_ready:
+            st.success(message + " | submission_disabled=true")
+        else:
+            st.error(
+                message
+                + (
+                    f" | blocker={pre_submit_outcome.blocker}"
+                    if pre_submit_outcome.blocker
+                    else ""
+                )
+            )
 
 
 def _render_status(view: AutonomousCandidateReviewView) -> None:

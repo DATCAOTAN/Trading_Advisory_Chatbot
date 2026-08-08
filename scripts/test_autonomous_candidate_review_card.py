@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 from scripts.test_autonomous_decision_orchestrator import NOW, make_inputs, service
 from scripts.test_structured_market_pending_order_candidate import structured_inputs
@@ -330,8 +331,39 @@ def test_review_ui_only_exposes_explicit_non_executable_actions():
     source = Path("src/ui/autonomous_candidate_review.py").read_text(encoding="utf-8")
     assert "Confirm Candidate (Non-Executable)" in source
     assert "Reject Candidate" in source
+    assert "Validate Pre-Submit (Non-Executable)" in source
     for forbidden in ("controlled-submit", "controlled-manage", ".order" + "_send("):
         assert forbidden not in source
+
+
+def test_confirmed_candidate_requires_a_separate_pre_submit_click(monkeypatch):
+    controller = SimpleNamespace(
+        confirmation_service=SimpleNamespace(
+            policy=SimpleNamespace(confirmation_phrase="CONFIRM")
+        ),
+        current_outcome=lambda _reference: review_ui.OperatorCandidateReviewOutcome(
+            "candidate-1", "CONFIRMED_FOR_PROPOSAL_WORKFLOW", "CONFIRMED", "review-1"
+        ),
+        current_pre_submit_outcome=lambda _reference: None,
+        advance_calls=[],
+    )
+    controller.advance_to_pre_submit = lambda session, reference: controller.advance_calls.append(
+        (session, reference)
+    )
+
+    fake = ConfirmationControlStreamlit()
+    monkeypatch.setattr(review_ui, "st", fake)
+
+    review_ui.render_autonomous_candidate_confirmation_controls(
+        "candidate-1", controller, key_prefix="test_"
+    )
+    assert controller.advance_calls == []
+
+    fake.clicked.add("Validate Pre-Submit (Non-Executable)")
+    review_ui.render_autonomous_candidate_confirmation_controls(
+        "candidate-1", controller, key_prefix="test_"
+    )
+    assert len(controller.advance_calls) == 1
 
 
 class FakeColumn:
@@ -340,6 +372,11 @@ class FakeColumn:
 
     def metric(self, label, value, **_kwargs):
         self.owner.metrics.append((label, value))
+
+
+class ConfirmationControlColumn(FakeColumn):
+    def button(self, label, **_kwargs):
+        return label in self.owner.clicked
 
 
 class FakeStreamlit:
@@ -371,3 +408,19 @@ class FakeStreamlit:
 
     def columns(self, count):
         return [FakeColumn(self) for _ in range(count)]
+
+
+class ConfirmationControlStreamlit(FakeStreamlit):
+    def __init__(self):
+        super().__init__()
+        self.clicked = set()
+        self.session_state = {}
+
+    def text_input(self, *_args, **_kwargs):
+        return ""
+
+    def button(self, label, **_kwargs):
+        return label in self.clicked
+
+    def columns(self, count):
+        return [ConfirmationControlColumn(self) for _ in range(count)]

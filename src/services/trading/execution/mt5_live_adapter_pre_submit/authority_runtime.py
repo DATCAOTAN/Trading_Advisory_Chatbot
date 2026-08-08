@@ -3,14 +3,21 @@ from __future__ import annotations
 import secrets
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from src.config import Config
 from src.services.trading.execution.mt5_live_adapter_pre_submit.adapter import (
     MT5LiveAdapterDisabled,
 )
+from src.services.trading.execution.mt5_live_adapter_pre_submit.approval_pre_submit import (
+    terminal_capability_from_lifecycle,
+)
 from src.services.trading.execution.mt5_live_adapter_pre_submit.lifecycle_supervisor import (
     MT5PositionLifecycleSupervisor,
+)
+from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_artifact_capture import (
+    ProtectedAccountContextCapture,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.store import (
     MT5PreSubmitJournalStore,
@@ -159,6 +166,23 @@ class TradingAuthorityOperatorService:
             revocation_nonce=secrets.token_hex(16),
         )
         return record.to_public_dict()
+
+    def pre_submit_evidence(self, candidate: Any) -> dict[str, Any]:
+        """Collect current read-only evidence for the existing pre-submit lifecycle."""
+        account = self._demo_account()
+        capture = ProtectedAccountContextCapture.from_read_only_payload(
+            account, datetime.now(timezone.utc)
+        )
+        lifecycle = self.lifecycle_supervisor.run_once()
+        return {
+            "account_context": capture,
+            "expected_account_fingerprint": capture.account_context_fingerprint,
+            "terminal_capability": terminal_capability_from_lifecycle(
+                candidate, lifecycle, capture.account_context_fingerprint
+            ),
+            "current_lifecycle_status": lifecycle,
+            "account_is_demo": True,
+        }
 
     def close(self) -> None:
         self.account_adapter.close()

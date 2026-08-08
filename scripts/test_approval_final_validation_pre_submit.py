@@ -20,6 +20,7 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.approval_pre_sub
     PRE_SUBMIT_STATE,
     ApprovalPreSubmitLifecycleService,
     TerminalCapabilityEvidence,
+    terminal_capability_from_lifecycle,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.lifecycle_supervisor import (
     MT5RuntimeSupervisorStatus,
@@ -388,6 +389,81 @@ def test_controller_rerun_uses_ids_and_keeps_one_pre_submit_record(tmp_path):
         session[AUTONOMOUS_CANDIDATE_PRE_SUBMIT_OUTCOME_SESSION_KEY],
         "protected_intent",
     )
+    reloaded = controller.current_pre_submit_outcome(
+        state["candidate"].candidate_reference
+    )
+    assert reloaded and reloaded.pre_submit_ready
+    assert reloaded.journal_record_id == first.journal_record_id
+
+
+def test_confirmation_does_not_advance_to_pre_submit_automatically(tmp_path):
+    state = _prepared(tmp_path, "fresh_market", confirm=False)
+
+    class UnexpectedPreSubmitService:
+        def run(self, *_args, **_kwargs):
+            pytest.fail("confirmation must not invoke pre-submit")
+
+    controller = OperatorCandidateReviewController(
+        state["service"],
+        state["candidate_journal"],
+        lambda: (state["account"], "a" * 64),
+        pre_submit_service=UnexpectedPreSubmitService(),
+        pre_submit_evidence_provider=lambda _reference: pytest.fail(
+            "confirmation must not collect pre-submit evidence"
+        ),
+    )
+
+    outcome = controller.act(
+        {},
+        state["candidate"].candidate_reference,
+        "CONFIRM",
+        state["service"].policy.confirmation_phrase,
+        now=NOW,
+    )
+
+    assert outcome.status == "CONFIRMED_FOR_PROPOSAL_WORKFLOW"
+    assert not state["pre_submit_store"].path.exists()
+
+
+def test_runtime_evidence_failure_blocks_without_pre_submit_record(tmp_path):
+    state = _prepared(tmp_path, "fresh_market")
+    controller = OperatorCandidateReviewController(
+        state["service"],
+        state["candidate_journal"],
+        lambda: (state["account"], "a" * 64),
+        pre_submit_service=_service(state),
+        pre_submit_evidence_provider=lambda _reference: (_ for _ in ()).throw(
+            RuntimeError("DEMO_ACCOUNT_REQUIRED")
+        ),
+    )
+
+    outcome = controller.advance_to_pre_submit(
+        {}, state["candidate"].candidate_reference, now=NOW
+    )
+
+    assert outcome.status == "BLOCKED"
+    assert outcome.blocker == "DEMO_ACCOUNT_REQUIRED"
+    assert not state["pre_submit_store"].path.exists()
+
+
+def test_lifecycle_capability_binds_current_candidate_and_account(tmp_path):
+    state = _prepared(tmp_path, "fresh_pending")
+    lifecycle = MT5RuntimeSupervisorStatus(
+        supervisor_status="HEALTHY",
+        last_successful_cycle=NOW.isoformat(),
+        terminal_trade_allowed=True,
+        account_trade_allowed=True,
+    )
+
+    capability = terminal_capability_from_lifecycle(
+        state["candidate"], lifecycle, "a" * 64
+    )
+
+    assert capability.integrity_valid()
+    assert capability.symbol == "XAUUSD"
+    assert capability.broker_symbol == "XAUUSDm"
+    assert capability.trade_allowed is True
+    assert state["candidate"].order_type in capability.supported_order_types
 
 
 def _run(tmp_path, scenario):

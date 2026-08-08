@@ -66,6 +66,14 @@ class MT5PreSubmitJournalStore:
                 os.fsync(handle.fileno())
             return payload, True
 
+    def load_candidate_pre_submit(self, candidate_reference: str) -> dict | None:
+        """Return the strict, persisted record for one exact Candidate."""
+        for row in reversed(self._read_strict()):
+            reference = str(row.get("source_candidate_reference", ""))
+            if hmac.compare_digest(reference, candidate_reference):
+                return row
+        return None
+
     def _read_strict(self) -> list[dict]:
         if not self.path.exists():
             return []

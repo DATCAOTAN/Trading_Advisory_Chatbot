@@ -1628,3 +1628,37 @@ Commit: this commit
 #### Next step
 
 - Confirmed Candidate -> Deterministic Pre-Submit Readiness Integration.
+
+---
+
+### Sprint 6C - Confirmed Candidate Pre-Submit Readiness Integration
+
+Date: 2026-08-08
+Verification: `FULL_REGRESSION_PASS`
+Commit: pending local commit
+
+#### Implemented
+
+- Connected the exact persisted Candidate confirmation to the existing `ApprovalPreSubmitLifecycleService` through one explicit Review Card action.
+- Reused strict Candidate-bound confirmation, approval integrity, final validation, current lifecycle capability evidence, and the existing idempotent pre-submit journal.
+- Reloaded readiness by exact Candidate reference from the protected journal; a session-only result cannot appear on a different Candidate.
+- Kept Confirm and Validate Pre-Submit separate actions. Ready remains `PRE_SUBMIT_READY_NON_EXECUTABLE` and does not call controlled submission.
+
+#### Verification
+
+- Focused pre-submit, confirmation, Draft/Candidate lifecycle, Review Card, Dashboard/runtime, disabled-adapter, and bridge-skeleton tests: 131 passed with 2 dependency warnings.
+- Final full regression: 3,378 passed and 156 subtests passed in 138.09 seconds with 3 unchanged dependency/UTC warnings.
+- Compileall, Docker Compose config, app restart, Streamlit health `200 ok`, `git diff --check`, and static safety scans passed.
+
+#### Current state
+
+- `Draft N -> Candidate C(N) -> Confirm -> explicit Validate Pre-Submit -> PRE_SUBMIT_READY_NON_EXECUTABLE or BLOCKED` is deterministic, exact-artifact-bound, idempotent, and non-executable.
+- Execution, controlled submission, bridge behavior, reconciliation mutation, permissions, and kill switches remain unchanged.
+
+#### Not verified / not implemented
+
+- Browser/runtime confirmation and readiness action, controlled submission, broker execution, and reconciliation mutation were not run.
+
+#### Next step
+
+- Lifecycle Closure + Legacy Semantic Fallback Cleanup + Release Validation.

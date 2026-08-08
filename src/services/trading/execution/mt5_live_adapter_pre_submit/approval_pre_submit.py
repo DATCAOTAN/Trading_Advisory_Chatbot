@@ -54,6 +54,18 @@ from src.services.trading.proposal.intent_store import (
 
 
 PRE_SUBMIT_STATE = "PRE_SUBMIT_READY_NON_EXECUTABLE"
+SUPPORTED_CONTROLLED_ORDER_TYPES = (
+    "BUY",
+    "SELL",
+    "BUY_LIMIT",
+    "SELL_LIMIT",
+    "BUY_STOP",
+    "SELL_STOP",
+    "BUY_STOP_LIMIT",
+    "SELL_STOP_LIMIT",
+)
+
+
 @dataclass(frozen=True)
 class TerminalCapabilityEvidence:
     capability_reference: str
@@ -112,6 +124,25 @@ class TerminalCapabilityEvidence:
         return hmac.compare_digest(self.capability_hash, expected) and hmac.compare_digest(
             self.capability_reference, "terminal_capability_" + expected[:24]
         )
+
+
+def terminal_capability_from_lifecycle(
+    candidate: Any,
+    lifecycle: MT5RuntimeSupervisorStatus,
+    account_context_fingerprint: str,
+) -> TerminalCapabilityEvidence:
+    """Bind current read-only terminal capability to one protected Candidate."""
+    return TerminalCapabilityEvidence.create(
+        observed_at=str(lifecycle.last_successful_cycle or ""),
+        symbol=candidate.symbol_reference,
+        broker_symbol=candidate.broker_symbol_reference,
+        account_fingerprint_hash=_sha256(account_context_fingerprint),
+        trade_allowed=(
+            lifecycle.terminal_trade_allowed is True
+            and lifecycle.account_trade_allowed is True
+        ),
+        supported_order_types=SUPPORTED_CONTROLLED_ORDER_TYPES,
+    )
 
 
 @dataclass(frozen=True)

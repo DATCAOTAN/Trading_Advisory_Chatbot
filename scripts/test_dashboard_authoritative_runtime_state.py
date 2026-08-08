@@ -143,6 +143,37 @@ def test_authority_projection_contains_permissions_and_redaction(monkeypatch):
     assert "account_context_fingerprint" not in status
 
 
+def test_authority_pre_submit_evidence_uses_current_demo_account_and_lifecycle():
+    lifecycle_status = SimpleNamespace(
+        last_successful_cycle="2026-08-02T10:00:00+00:00",
+        terminal_trade_allowed=True,
+        account_trade_allowed=True,
+    )
+    account = {
+        "account_environment": "DEMO",
+        "account_context_fingerprint": "a" * 64,
+        "account_id_hash": "b" * 64,
+    }
+    service = TradingAuthorityOperatorService(
+        authority_service=SimpleNamespace(),
+        account_adapter=SimpleNamespace(capture_account_context=lambda: account),
+        lifecycle_supervisor=SimpleNamespace(run_once=lambda: lifecycle_status),
+        pre_submit_store=SimpleNamespace(),
+    )
+    candidate = SimpleNamespace(
+        symbol_reference="BTCUSD", broker_symbol_reference="BTCUSDm"
+    )
+
+    evidence = service.pre_submit_evidence(candidate)
+
+    assert evidence["account_is_demo"] is True
+    assert evidence["expected_account_fingerprint"] == "a" * 64
+    assert evidence["terminal_capability"].integrity_valid()
+    assert evidence["terminal_capability"].symbol == "BTCUSD"
+    assert evidence["terminal_capability"].broker_symbol == "BTCUSDm"
+    assert "status" not in account
+
+
 def test_dashboard_renders_authority_and_selected_symbol_without_mutation_calls():
     source = Path("src/ui/tab_dashboard.py").read_text(encoding="utf-8")
 

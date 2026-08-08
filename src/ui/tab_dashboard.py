@@ -88,6 +88,9 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.authority_runtim
     MandateGrantCommand,
     TradingAuthorityOperatorService,
 )
+from src.services.trading.execution.mt5_live_adapter_pre_submit.approval_pre_submit import (
+    ApprovalPreSubmitLifecycleService,
+)
 from src.services.trading.execution.mt5_live_adapter_pre_submit.protected_artifact_capture import (
     ProtectedAccountContextCapture,
 )
@@ -853,8 +856,23 @@ def _operator_candidate_review_controller() -> OperatorCandidateReviewController
         )
         return capture, capture.account_context_fingerprint
 
+    confirmation_service = HumanProposalConfirmationService()
+    authority_service = _trading_authority_service()
+
+    def pre_submit_evidence_provider(candidate_reference):
+        candidate = candidate_journal.load_candidate(candidate_reference)
+        return authority_service.pre_submit_evidence(candidate)
+
     return OperatorCandidateReviewController(
-        HumanProposalConfirmationService(), candidate_journal, account_context_provider
+        confirmation_service,
+        candidate_journal,
+        account_context_provider,
+        pre_submit_service=ApprovalPreSubmitLifecycleService(
+            candidate_journal=candidate_journal,
+            confirmation_store=confirmation_service.journal.store,
+            pre_submit_store=authority_service.pre_submit_store,
+        ),
+        pre_submit_evidence_provider=pre_submit_evidence_provider,
     )
 
 

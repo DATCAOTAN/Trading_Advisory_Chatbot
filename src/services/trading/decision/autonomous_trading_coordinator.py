@@ -26,7 +26,7 @@ from src.services.trading.decision.operator_candidate_generation import (
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.approval_pre_submit import (
     ApprovalPreSubmitLifecycleService,
-    TerminalCapabilityEvidence,
+    terminal_capability_from_lifecycle,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled import (
     MT5ControlledExecutionRequest,
@@ -456,22 +456,8 @@ def production_mandate_context(
         or lifecycle.mandate_limit_evidence_available is not True
     ):
         raise TradingAuthorityError("LIFECYCLE_NOT_HEALTHY")
-    observed_at = str(lifecycle.last_successful_cycle or "")
-    capability = TerminalCapabilityEvidence.create(
-        observed_at=observed_at,
-        symbol=candidate.symbol_reference,
-        broker_symbol=candidate.broker_symbol_reference,
-        account_fingerprint_hash=hashlib.sha256(
-            account_context_fingerprint.encode("utf-8")
-        ).hexdigest(),
-        trade_allowed=(
-            lifecycle.terminal_trade_allowed is True
-            and lifecycle.account_trade_allowed is True
-        ),
-        supported_order_types=(
-            "BUY", "SELL", "BUY_LIMIT", "SELL_LIMIT", "BUY_STOP", "SELL_STOP",
-            "BUY_STOP_LIMIT", "SELL_STOP_LIMIT",
-        ),
+    capability = terminal_capability_from_lifecycle(
+        candidate, lifecycle, account_context_fingerprint
     )
     return {
         "mandate_id": mandate.mandate_id,
