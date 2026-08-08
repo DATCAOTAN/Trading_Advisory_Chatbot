@@ -87,7 +87,7 @@ class StructuredSemanticInterpreter:
             "subtype": "string",
             "domain": "string",
             "symbols": ["raw or normalized user symbol references"],
-            "indicators": [{"indicator_id": "string", "parameters": {"period": 14}, "timeframe": "M1"}],
+            "indicators": [{"indicator_id": "string", "parameters": {}, "timeframe": "M1"}],
             "requested_data": ["string"],
             "conditions": [{"subject": "RSI", "operator": "GREATER_THAN", "value": 10}],
             "context_references": ["previous_symbol"],
@@ -102,7 +102,8 @@ class StructuredSemanticInterpreter:
             "Return one JSON object only. Interpret meaning but never validate broker, market, account, "
             "pricing, permissions, or execution. Do not include any execution-authority field. "
             "Keep missing child fields in unresolved_fields while preserving explicit sibling facts. "
-            "Do not invent indicator parameters. Required exact schema: "
+            "Only include indicator parameters explicitly present in the message or referenced context; "
+            "do not use conventional defaults. Do not invent indicator parameters. Required exact schema: "
             + json.dumps(schema, ensure_ascii=False, sort_keys=True)
             + "\nUser message:\n"
             + str(message)

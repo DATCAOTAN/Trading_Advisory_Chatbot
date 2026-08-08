@@ -1734,3 +1734,38 @@ Commit: this commit
 #### Next step
 
 - Semantic architecture closure is release-candidate complete. Execution enablement remains a separate explicitly authorized scope.
+
+---
+
+### Sprint 6F - Structured Semantic Runtime Routing Repair
+
+Date: 2026-08-08
+Verification: `FULL_REGRESSION_PASS`
+Commit: pending review
+
+#### Implemented
+
+- Removed the conventional indicator-period example from the structured semantic prompt; incomplete child fields remain explicitly unresolved.
+- Routed structured `POSITION_MANAGEMENT` and `TRADE_LIFECYCLE` through the existing `trade_opportunity_analysis` QueryPlan and capability requirements.
+- Routed the immediate valid structured-trading response through the existing context-acquisition executor, avoiding `legacy_heuristic` default indicator acquisition.
+- Derived missing registry-required indicator fields into the typed strategy's unresolved set without fabricating a value; relation checks run only when their required operands exist.
+
+#### Verification
+
+- Focused semantic/interpreter/QueryPlan/trading-cutover tests: 70 passed.
+- Full regression: 3,399 passed and 156 subtests passed in 155.36 seconds with 3 unchanged dependency/UTC warnings.
+- Changed-path compileall, `git diff --check`, and static safety scans passed.
+- Browser/runtime acceptance: one valid structured provider call produced a non-executable XAUUSD/XAUUSDm M1 Draft with the missing indicator period precisely unresolved; no RSI(14) default was created. The subsequent AnswerStream provider/model label was UI logging for a static bounded response, not a second provider request.
+
+#### Current state
+
+- Structured semantic facts retain explicit siblings and unresolved child fields; no semantic-path default period is assigned.
+- Execution remains disabled and non-executable; no execution or broker behavior changed.
+
+#### Not verified / not implemented
+
+- Candidate, confirmation, pre-submit, submission, broker execution, and MT5 write acceptance remain out of scope.
+
+#### Next step
+
+- Review the documentation/code diff and create a focused local checkpoint if approved.

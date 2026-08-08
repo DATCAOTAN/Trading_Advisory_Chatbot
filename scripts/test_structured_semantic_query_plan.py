@@ -79,6 +79,31 @@ def test_missing_indicator_child_preserves_indicator_condition_and_unresolved_fi
     assert all("INDICATOR_MISSING" not in value and "ENTRY_RULE_MISSING" not in value for value in plan.ambiguity)
 
 
+def test_position_management_structured_semantics_use_trade_capabilities_not_unknown_fallback():
+    source = semantic(
+        primary_intent="POSITION_MANAGEMENT",
+        action="OPEN_POSITION",
+        indicators=[{"indicator_id": "RSI", "parameters": {}, "timeframe": "M1"}],
+        conditions=[{"subject": "RSI", "operator": "GREATER_THAN", "value": 10}],
+        unresolved_fields=["indicators[0].parameters.period"],
+    )
+
+    plan = QueryPlanAssembler().assemble("raw wording must not override structured semantics", structured_semantics=source)
+    requirements = ContextRequirementPlanner().plan(plan)
+
+    assert plan.primary_intent == "trade_opportunity_analysis"
+    assert plan.current_market_request is True
+    assert plan.constraints["semantic_action"] == "OPEN_POSITION"
+    assert plan.semantic_context["input"]["primary_intent"] == "POSITION_MANAGEMENT"
+    assert "unresolved:indicators[0].parameters.period" in plan.ambiguity
+    assert {need.capability for need in requirements.required_needs} == {
+        "market_snapshot",
+        "ohlcv",
+        "economic_event",
+    }
+    assert all(need.target != "general" for need in requirements.needs)
+
+
 def test_valid_structured_semantics_skip_weaker_raw_router_classifier_and_decomposer():
     class UnexpectedRawSemanticParser:
         def route(self, *_args):

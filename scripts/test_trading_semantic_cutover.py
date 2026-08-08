@@ -97,6 +97,43 @@ def test_missing_indicator_child_retains_typed_parent_and_rule_without_raw_repar
     assert "SEMANTIC_UNRESOLVED:indicators[0].parameters.period" in request.blockers
     assert "STRATEGY_INDICATORS_MISSING" not in request.blockers
     assert "ENTRY_RULE_MISSING" not in request.blockers
+    assert type(request).from_public_dict(request.to_public_dict()) == request
+
+
+@pytest.mark.parametrize(
+    ("indicator_id", "unresolved_fields"),
+    (
+        ("RSI", ("indicators[0].parameters.period",)),
+        (
+            "MACD",
+            (
+                "indicators[0].parameters.fast_period",
+                "indicators[0].parameters.slow_period",
+                "indicators[0].parameters.signal_period",
+            ),
+        ),
+    ),
+)
+def test_projection_marks_registry_required_indicator_children_unresolved_when_provider_omits_them(
+    indicator_id,
+    unresolved_fields,
+):
+    _plan, request = request_from(
+        semantic(
+            primary_intent="POSITION_MANAGEMENT",
+            indicators=[{"indicator_id": indicator_id, "parameters": {}, "timeframe": "M1"}],
+            conditions=[{"subject": indicator_id, "operator": "GREATER_THAN", "value": 10}],
+        )
+    )
+
+    assert request.trade_action == "OPEN_POSITION"
+    assert request.trade_direction == "BUY"
+    assert request.strategy.indicators[0].parameter_map() == {}
+    assert request.strategy.entry_rules[0].constants == (10.0,)
+    assert request.strategy.semantic_unresolved_fields == unresolved_fields
+    assert set(f"SEMANTIC_UNRESOLVED:{field}" for field in unresolved_fields) <= set(request.blockers)
+    assert "INDICATOR_PARAMETER_INVALID" not in request.blockers
+    assert type(request).from_public_dict(request.to_public_dict()) == request
 
 
 def test_resolved_context_inheritance_reaches_trading_projection_without_a_second_parser():
@@ -224,10 +261,26 @@ def test_legacy_fallback_remains_available_without_an_authoritative_plan():
 
 
 def test_orchestrator_uses_one_structured_interpretation_and_returns_the_same_projection():
-    source = semantic()
+    source = semantic(
+        primary_intent="POSITION_MANAGEMENT",
+        indicators=[{"indicator_id": "RSI", "parameters": {}, "timeframe": "M1"}],
+        conditions=[{"subject": "RSI", "operator": "GREATER_THAN", "value": 10}],
+        unresolved_fields=["indicators[0].parameters.period"],
+    )
+
+    class RecordingExecutor:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(results=[], task_context_views=[])
+
+    executor = RecordingExecutor()
     orchestrator = RAGOrchestrator.__new__(RAGOrchestrator)
     orchestrator.decision_context_builder = DecisionContextBuilder()
     orchestrator.router_module = RouterModule()
+    orchestrator.context_acquisition_executor = executor
     orchestrator.structured_semantic_interpreter = SimpleNamespace(
         interpret=lambda _message: SimpleNamespace(
             is_valid=True,
@@ -246,4 +299,7 @@ def test_orchestrator_uses_one_structured_interpretation_and_returns_the_same_pr
     assert intent == "FINANCIAL_RAG"
     assert artifacts["semantic_provider_calls"] == artifacts["provider_calls"] == 1
     assert artifacts["trading_request"]["execution_authority"] is False
+    assert artifacts["trading_request"]["executable"] is False
+    assert artifacts["query_plan"]["primary_intent"] == "trade_opportunity_analysis"
     assert artifacts["query_plan"]["semantic_context"]["input"] == source.as_dict()
+    assert executor.calls and executor.calls[0]["query_plan"].primary_intent == "trade_opportunity_analysis"

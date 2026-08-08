@@ -229,11 +229,29 @@ class RAGOrchestrator:
                     conversation_id=session_id,
                 )
                 if trading_request is not None:
+                    executor = self._context_acquisition_executor(
+                        use_knowledge_v3=Config.USE_KNOWLEDGE_V3 if use_knowledge_v3 is None else use_knowledge_v3,
+                        fallback_to_legacy=(
+                            Config.KNOWLEDGE_V3_FALLBACK_TO_LEGACY
+                            if knowledge_v3_fallback_to_legacy is None
+                            else knowledge_v3_fallback_to_legacy
+                        ),
+                        enable_reranker=enable_reranker,
+                    )
+                    acquisition_batch = executor.execute(
+                        query_plan=canonical_query_plan,
+                        requirements=context_requirements,
+                        execution_plan=context_execution_plan,
+                        registry=self.decision_context_builder.capability_registry,
+                        request_id=f"semantic_{int(time.time() * 1000)}",
+                    )
                     decision_context = self.decision_context_builder.build(
                         original_query=user_query,
                         query_plan=canonical_query_plan,
                         context_requirements=context_requirements,
                         context_execution_plan=context_execution_plan,
+                        acquisition_batch_result=acquisition_batch,
+                        task_context_views=acquisition_batch.task_context_views,
                     )
                     message = (
                         "Structured trading semantics normalized.\n\n"

@@ -278,6 +278,10 @@ def project_conversational_trading_request(
     if semantic.get("hypothetical") is True:
         blockers.append("HYPOTHETICAL_TRADE_ACTION")
     if strategy is not None:
+        blockers.extend(
+            f"SEMANTIC_UNRESOLVED:{field}"
+            for field in strategy.semantic_unresolved_fields
+        )
         blockers.extend(validate_strategy(strategy))
 
     blockers = list(dict.fromkeys(blockers))

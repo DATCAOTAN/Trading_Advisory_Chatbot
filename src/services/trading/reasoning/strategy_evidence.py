@@ -191,7 +191,7 @@ class ConversationalStrategyRequest:
                 str(item) for item in payload.get("semantic_unresolved_fields", ())
             ),
         )
-        issues = validate_strategy(value)
+        issues = tuple(issue for issue in validate_strategy(value) if issue != "SEMANTIC_FIELDS_UNRESOLVED")
         if issues or value.identity != strategy_identity(value):
             raise ValueError(",".join(issues or ("STRATEGY_IDENTITY_INVALID",)))
         return value
@@ -415,7 +415,18 @@ def project_resolved_semantic_strategy(
         indicators.append(spec)
         aliases_by_subject.setdefault(indicator_id, []).append(spec.output_alias)
 
-    unresolved = tuple(str(item) for item in unresolved_payload if str(item).strip())
+    unresolved = [str(item) for item in unresolved_payload if str(item).strip()]
+    for index, spec in enumerate(indicators):
+        definition = INDICATOR_REGISTRY.get(spec.indicator_id)
+        if definition is None:
+            continue
+        values = spec.parameter_map()
+        unresolved.extend(
+            f"indicators[{index}].parameters.{name}"
+            for name in definition.parameters
+            if name not in values
+        )
+    unresolved = tuple(dict.fromkeys(unresolved))
     rules: list[StrategyRule] = []
     for index, item in enumerate(conditions_payload):
         if not isinstance(item, Mapping):
@@ -577,7 +588,11 @@ def validate_strategy(strategy: ConversationalStrategyRequest) -> tuple[str, ...
             minimum, maximum, integer = parameter_ranges[name]
             if not minimum <= float(value) <= maximum or integer and int(value) != value:
                 issues.append("INDICATOR_PARAMETER_OUT_OF_RANGE")
-        if spec.indicator_id == "MACD" and values.get("fast_period", 0) >= values.get("slow_period", 0):
+        if (
+            spec.indicator_id == "MACD"
+            and {"fast_period", "slow_period"} <= set(values)
+            and values["fast_period"] >= values["slow_period"]
+        ):
             issues.append("INDICATOR_PARAMETER_RELATION_INVALID")
     for rule in (*strategy.entry_rules, *strategy.exit_rules):
         if rule.operator not in RULE_OPERATORS:

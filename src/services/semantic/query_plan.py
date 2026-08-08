@@ -144,6 +144,8 @@ class QueryPlanAssembler:
         "ANALYSIS": "market_state_analysis",
         "KNOWLEDGE": "book_concept_explanation",
         "STRATEGY": "conversational_strategy_request",
+        "TRADE_LIFECYCLE": "trade_opportunity_analysis",
+        "POSITION_MANAGEMENT": "trade_opportunity_analysis",
     }
     STRUCTURED_ACTION_TO_USER_ACTION = {
         "ANALYZE": "market_analysis",
@@ -355,7 +357,7 @@ class QueryPlanAssembler:
         )
         requested_indicators, indicator_ambiguity = self._structured_indicator_specs(state)
         semantic_intents = {semantic.primary_intent, *semantic.secondary_intents}
-        current_market_request = bool(semantic_intents & {"MARKET_DATA", "ANALYSIS"})
+        current_market_request = primary in {"market_state_analysis", "trade_opportunity_analysis"}
         conceptual_request = "KNOWLEDGE" in {semantic.primary_intent, *semantic.secondary_intents}
         requested_analysis = []
         if current_market_request:

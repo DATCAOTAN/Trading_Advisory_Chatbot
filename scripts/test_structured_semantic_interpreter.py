@@ -97,6 +97,45 @@ def test_missing_indicator_child_preserves_explicit_siblings():
     assert result.semantic.conditions[0].value == 10
 
 
+@pytest.mark.parametrize("indicator_id", ("RSI", "EMA"))
+def test_missing_supported_indicator_parameter_preserves_explicit_siblings(indicator_id):
+    payload = semantic_payload(
+        indicators=[{"indicator_id": indicator_id, "parameters": {}, "timeframe": "M1"}],
+        conditions=[{"subject": indicator_id, "operator": "GREATER_THAN", "value": 10}],
+        unresolved_fields=["indicators[0].parameters.period"],
+    )
+    result, _provider = interpreted(f"buy when {indicator_id} M1 exceeds 10", payload)
+
+    assert result.is_valid
+    assert result.semantic.indicators[0].indicator_id == indicator_id
+    assert result.semantic.indicators[0].parameters == ()
+    assert result.semantic.indicators[0].timeframe == "M1"
+    assert result.semantic.conditions[0].value == 10
+    assert result.semantic.unresolved_fields == ("indicators[0].parameters.period",)
+
+
+def test_explicit_indicator_period_remains_explicit():
+    result, _provider = interpreted(
+        "buy when RSI14 M1 exceeds 10",
+        semantic_payload(
+            indicators=[{"indicator_id": "RSI", "parameters": {"period": 14}, "timeframe": "M1"}],
+            unresolved_fields=[],
+        ),
+    )
+
+    assert result.is_valid
+    assert result.semantic.indicators[0].parameters == (("period", 14.0),)
+    assert result.semantic.unresolved_fields == ()
+
+
+def test_prompt_does_not_suggest_conventional_indicator_parameters():
+    prompt = StructuredSemanticInterpreter._prompt("buy when RSI M1 exceeds 10")
+
+    assert '"parameters": {}' in prompt
+    assert '"period": 14' not in prompt
+    assert "do not use conventional defaults" in prompt
+
+
 def test_missing_direction_is_valid_incomplete_semantics_not_structural_failure():
     result, _provider = interpreted(
         "open a position for XAUUSDm",
