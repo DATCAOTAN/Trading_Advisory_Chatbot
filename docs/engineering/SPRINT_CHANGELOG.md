@@ -1408,3 +1408,31 @@ Commit: this commit
 
 - Editable trade proposals are validated and revision-safe but remain non-executable.
 - Integrate the isolated commit only after the unrelated dirty main tree is preserved or resolved.
+
+---
+
+### Architecture - Structured Semantic Interpretation Boundary
+
+Date: 2026-08-08
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added one strict, non-authoritative typed semantic result contract and one interpreter over the existing structured reasoning provider.
+- Rejected malformed, extra, authority-bearing, or non-numeric structured output while retaining valid incomplete facts through `unresolved_fields`.
+- Kept existing conversational context, QueryPlan, capability planners, retrieval rewrite, UI, lifecycle, bridge, and execution paths unchanged.
+- Added compact fake-provider behavior-family coverage without live LLM calls.
+
+#### Verification
+
+- New structured semantic boundary tests: 21 passed.
+- Neighboring semantic/query-plan/proposal/runtime tests: 111 passed and 17 subtests passed.
+- Full regression: 3,314 passed and 156 subtests passed in 128.25 seconds; 3 unchanged dependency/UTC warnings.
+- Docker Compose config passed. App restart and Streamlit health were not run because `dockerDesktopLinuxEngine` was unavailable locally.
+- No LLM, MT5, market-data, candidate, confirmation, export, pre-submit, submission, `order_send`, or broker-mutation operation ran.
+
+#### Current state / next step
+
+- The boundary validates semantic facts only and cannot express execution authority.
+- Deterministic context-resolution and QueryPlan-authority cutover remain the next sprint; execution behavior is unchanged.
