@@ -1697,3 +1697,40 @@ Commit: this commit
 #### Next step
 
 - Legacy Semantic Fallback Cleanup + Architecture Acceptance + Release Validation.
+
+---
+
+### Sprint 6E - Final Locked Semantic Architecture Closure
+
+Date: 2026-08-08
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Verified the one-call structured semantic path through Pydantic v2, frozen semantic facts, deterministic resolution, QueryPlan, context planning, and existing capabilities.
+- Classified remaining raw semantic helpers as bounded unavailable/invalid-provider fallbacks or compatibility-only paths; no normal Streamlit path reparses a valid structured plan.
+- Confirmed retrieval rewrite is retrieval-only, mode is a policy overlay, and the Draft/Candidate/Review/Pre-Submit lifecycle remains explicit and non-executable.
+
+#### Verification
+
+- Focused semantic, routing, context, Draft, Review, and Pre-Submit tests: 166 passed with 2 unchanged dependency warnings.
+- Full regression: 3,392 passed and 156 subtests passed in 139.59 seconds with 3 unchanged dependency/UTC warnings.
+- Docker Compose config, runtime Pydantic `2.13.4`, semantic import path, Streamlit health `200 ok`, compileall, documentation integrity, diff checks, and static safety scans passed. Post-Sprint-6D container recreation provenance is `NOT VERIFIED`; no rebuild ran.
+
+#### Current state
+
+- QueryPlan is the sole internal semantic/planning authority; valid structured semantics cannot be overwritten by raw fallback parsers.
+- The app remains non-executing. Exactly one production `.order_send(` call-site remains in the host bridge and `src/` has zero MetaTrader5 imports.
+
+#### Not verified / not implemented
+
+- Controlled submission enablement, broker execution, real-account execution, MT5 write acceptance, and reconciliation mutation remain out of scope.
+
+#### Known limitations
+
+- Remaining raw parsers are deliberately bounded fallbacks for unavailable/invalid structured semantics or compatibility callers; they are not normal structured-path authority.
+
+#### Next step
+
+- Confirm/recreate the app container from the current named image, then run only the bounded provenance and health check. Execution enablement remains a separate explicitly authorized scope.
