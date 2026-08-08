@@ -180,6 +180,8 @@ class ContextRequirementPlanner:
         elif primary == "macro_market_impact":
             symbol = self._symbol_target(query_plan)
             event = self._event_target(query_plan)
+            indicators = [item.as_dict() for item in query_plan.requested_indicators]
+            parameters = self._market_parameters(query_plan) if indicators else {}
             needs.extend(
                 [
                     self._need("official_report", event, True, "macro market impact evidence"),
@@ -199,18 +201,30 @@ class ContextRequirementPlanner:
                         "current market snapshot for impacted symbol",
                         freshness="fresh",
                         max_age=self.DEFAULT_MARKET_MAX_AGE_SECONDS,
+                        parameters={"timeframe": parameters["timeframe"]} if parameters else {},
                     ),
                     self._need(
                         "ohlcv",
                         symbol,
-                        False,
-                        "optional market reaction window",
+                        bool(indicators),
+                        "requested technical market reaction window" if indicators else "optional market reaction window",
                         freshness="fresh",
                         max_age=self.DEFAULT_OHLCV_MAX_AGE_SECONDS,
+                        parameters={**parameters, "indicators": indicators} if indicators else {},
                     ),
                     self._need("market_knowledge", "gold" if symbol == "XAUUSD" else symbol, False, "optional market background"),
                 ]
             )
+            if indicators:
+                needs.append(
+                    self._need(
+                        "technical_snapshot",
+                        symbol,
+                        True,
+                        "requested deterministic technical state",
+                        parameters={**parameters, "indicators": indicators},
+                    )
+                )
 
         elif primary == "market_state_analysis":
             symbol = self._symbol_target(query_plan)

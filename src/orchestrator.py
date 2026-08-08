@@ -62,6 +62,7 @@ from src.services.evidence import (
 )
 from src.services.live_data_service import get_live_service
 from src.services.semantic.query_plan import QueryPlanAssembler
+from src.services.semantic.structured_interpreter import StructuredSemanticInterpreter
 from src.services.semantic.conversational_context import (
     ConversationalIntentContext,
     strategy_response_message,
@@ -78,12 +79,15 @@ from src.pipelines.modules.evaluator import EvaluatorModule
 
 class RAGOrchestrator:
     """
+
     Facade Pattern: Một đầu mối duy nhất cho toàn bộ hệ thống RAG nâng cấp.
 
     Cơ chế Early Exit:
     - GREETING / TRASH → trả lời tĩnh ngay lập tức, KHÔNG nạp model nặng
     - CHỈ FINANCIAL_RAG mới kích hoạt: Query Rewrite → Qdrant → Reranker → Qwen Stream
     """
+
+    RETRIEVAL_CAPABILITIES = frozenset({"official_report", "static_knowledge", "market_knowledge"})
 
     def __init__(self):
         print("🚀 [Orchestrator] Khởi động các dịch vụ cốt lõi...")
@@ -123,6 +127,7 @@ class RAGOrchestrator:
         # ── Modular Components ──
         self.rewriter_module = QueryRewriterModule()
         self.router_module = RouterModule()
+        self.structured_semantic_interpreter = StructuredSemanticInterpreter()
         self.reranker_module = RerankerModule()
         self.evaluator_module = EvaluatorModule()
 
@@ -138,6 +143,20 @@ class RAGOrchestrator:
 
     def sync_knowledge_base(self, force: bool = False) -> dict:
         return self.vector_service.sync_documents(force=force)
+
+    def _interpret_structured_semantics(self, user_query: str):
+        interpreter = getattr(self, "structured_semantic_interpreter", None)
+        if interpreter is None:
+            interpreter = StructuredSemanticInterpreter()
+            self.structured_semantic_interpreter = interpreter
+        return interpreter.interpret(user_query)
+
+    @classmethod
+    def _requires_retrieval_rewrite(cls, context_requirements) -> bool:
+        return any(
+            need.capability in cls.RETRIEVAL_CAPABILITIES
+            for need in getattr(context_requirements, "needs", [])
+        )
 
     def query_financial_advisor(
         self,
@@ -179,10 +198,33 @@ class RAGOrchestrator:
                 "provider_calls": 0,
             }
 
-        # =====================================================================
-        # TẦNG 1: ROUTING TĨNH (Early Exit Gatekeeper)
-        # =====================================================================
-        route_action, static_response = self.router_module.process(user_query, chat_history)
+        semantic_interpretation = self._interpret_structured_semantics(user_query)
+        semantic_provider_calls = semantic_interpretation.provider_calls
+        structured_semantics_active = semantic_interpretation.is_valid
+        retrieval_rewrite_calls = 0
+        canonical_query_plan = None
+        context_requirements = None
+        context_execution_plan = None
+
+        if structured_semantics_active:
+            route_action, static_response = self.router_module.process_structured(
+                semantic_interpretation.semantic.primary_intent,
+                user_query,
+            )
+            if route_action != RouteAction.EARLY_EXIT:
+                canonical_query_plan = self.decision_context_builder.query_plan_assembler.assemble(
+                    original_query=user_query,
+                    structured_semantics=semantic_interpretation.semantic,
+                )
+                context_requirements = self.decision_context_builder.requirement_planner.plan(canonical_query_plan)
+                context_execution_plan = self.decision_context_builder.execution_planner.plan(context_requirements)
+                if self._requires_retrieval_rewrite(context_requirements):
+                    current_query = self.rewriter_module.process(user_query, chat_history)
+                    retrieval_rewrite_calls = 1
+                else:
+                    current_query = user_query
+        else:
+            route_action, static_response = self.router_module.process(user_query, chat_history)
 
         if route_action == RouteAction.EARLY_EXIT:
             print("⚡ [Agent] EARLY_EXIT kích hoạt. Trả lời ngay lập tức.")
@@ -190,7 +232,10 @@ class RAGOrchestrator:
                 stream = self._static_stream(static_response)
             else:
                 stream = static_response
-            return stream, [], "EARLY_EXIT", {}
+            return stream, [], "EARLY_EXIT", {
+                "semantic_provider_calls": semantic_provider_calls,
+                "retrieval_rewrite_calls": retrieval_rewrite_calls,
+            }
 
         # =====================================================================
         # TẦNG 2: AGENTIC RAG CONTROLLER (ReAct Loop)
@@ -203,8 +248,9 @@ class RAGOrchestrator:
         final_sources = []
         feedback_note = ""
 
-        # Tiền xử lý bằng Rewriter để có Query cơ sở tốt nhất
-        current_query = self.rewriter_module.process(user_query, chat_history)
+        if canonical_query_plan is None:
+            current_query = self.rewriter_module.process(user_query, chat_history)
+            retrieval_rewrite_calls = 1
 
         # Lấy thời gian hiện tại một lần cho toàn bộ phiên
         vn_tz = timezone(timedelta(hours=7))
@@ -215,18 +261,19 @@ class RAGOrchestrator:
 
         while current_loop < max_loops:
             current_loop += 1
-            query_plan_kwargs = {
-                "original_query": user_query,
-                "rewritten_query": current_query,
-            }
-            if conversational_context is not None:
-                query_plan_kwargs["conversational_context"] = conversational_context
-            canonical_query_plan = self.decision_context_builder.query_plan_assembler.assemble(
-                **query_plan_kwargs
-            )
+            if not structured_semantics_active:
+                query_plan_kwargs = {
+                    "original_query": user_query,
+                    "rewritten_query": current_query,
+                }
+                if conversational_context is not None:
+                    query_plan_kwargs["conversational_context"] = conversational_context
+                canonical_query_plan = self.decision_context_builder.query_plan_assembler.assemble(
+                    **query_plan_kwargs
+                )
+                context_requirements = self.decision_context_builder.requirement_planner.plan(canonical_query_plan)
+                context_execution_plan = self.decision_context_builder.execution_planner.plan(context_requirements)
             canonical_query_intent = QueryPlanAssembler.intent_from_plan(canonical_query_plan)
-            context_requirements = self.decision_context_builder.requirement_planner.plan(canonical_query_plan)
-            context_execution_plan = self.decision_context_builder.execution_planner.plan(context_requirements)
             print(f"\n🔄 [Agent Loop {current_loop}/{max_loops}] Truy vấn hiện tại: {current_query}")
 
             if Config.SEMANTIC_CONTEXT_EXECUTOR_ENABLED and Config.SEMANTIC_CONTEXT_EXECUTOR_AUTHORITATIVE:
@@ -302,6 +349,9 @@ class RAGOrchestrator:
                     "response_gate": response_gate.as_dict() if hasattr(response_gate, "as_dict") else vars(response_gate),
                     "is_bounded_response": False,
                     "agent_runtime": self._build_agent_runtime_artifacts(orchestrator_output, decision_context),
+                    "semantic_provider_calls": semantic_provider_calls,
+                    "retrieval_rewrite_calls": retrieval_rewrite_calls,
+                    "context_capabilities_requested": [need.capability for need in context_requirements.needs],
                 }
                 structured_prompt = self._append_agent_handoff_to_prompt(
                     structured_prompt,

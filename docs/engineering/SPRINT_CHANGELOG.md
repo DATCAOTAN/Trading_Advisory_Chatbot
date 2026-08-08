@@ -1463,3 +1463,31 @@ Commit: this commit
 
 - Valid structured semantics now project deterministically into the existing QueryPlan without weaker raw-language reinterpretation; raw assembly remains the compatibility fallback.
 - Universal orchestrator/capability routing, retrieval rewrite separation, trading-language, UI, lifecycle, and execution migration remain out of scope.
+
+---
+
+### Architecture - Universal Structured Semantic Routing
+
+Date: 2026-08-08
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Routed normal meaningful RAG requests through one valid structured semantic result and one authoritative QueryPlan before existing context planning/execution.
+- Kept legacy routing only as the bounded invalid/unavailable-semantic fallback and preserved existing social/system/out-of-scope exits.
+- Moved retrieval rewriting downstream so it runs only for knowledge capabilities and cannot overwrite QueryPlan semantics.
+- Projected existing macro events and technical indicators into the existing capability requirements without a new capability or execution path.
+- Prevented DecisionContextBuilder from raw reparsing an authoritative supplied QueryPlan.
+
+#### Verification
+
+- Focused semantic/query-plan/context/capability/runtime-neighbor tests: 104 passed with 2 unchanged dependency warnings.
+- Full regression: 3,335 passed and 156 subtests passed in 154.39 seconds with 3 unchanged dependency/UTC warnings.
+- Compileall, Docker Compose config, Docker restart, Streamlit health `200 ok`, diff, documentation integrity, and static safety checks passed.
+- External LLM, MT5, market data, candidate, confirmation, pre-submit, submission, `order_send`, and broker mutation operations: 0.
+
+#### Current state / next step
+
+- Structured semantic routing and existing capability planning are universal for valid semantic artifacts; execution remains disabled and unchanged.
+- Trading raw-language cutover is next; thin UI migration and Draft/Candidate lifecycle integration remain later.

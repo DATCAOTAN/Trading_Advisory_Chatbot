@@ -461,31 +461,39 @@ class DecisionContextBuilder:
         request_id = uuid.uuid4().hex[:12]
         _safe_print(f"[DecisionContext] status=start query={original_query!r}")
 
-        decomposition = self.query_decomposer.decompose(original_query)
-        query_intent = query_intent or self.intent_router.route(original_query)
-        if decomposition.is_multi_intent:
-            answer_mode = AnswerMode(
-                mode="MULTI_INTENT",
-                market_impact_allowed=False,
-                requires_official_report=any(item.intent.source_preference in {"official_report_first", "mixed_report_and_book"} for item in decomposition.subqueries),
-                requires_book_source=any(item.intent.source_preference == "book_first" for item in decomposition.subqueries),
-                template_id="multi_intent",
-                confidence=0.9,
-                reason=decomposition.reason,
+        if query_plan is None:
+            decomposition = self.query_decomposer.decompose(original_query)
+            query_intent = query_intent or self.intent_router.route(original_query)
+            if decomposition.is_multi_intent:
+                answer_mode = AnswerMode(
+                    mode="MULTI_INTENT",
+                    market_impact_allowed=False,
+                    requires_official_report=any(item.intent.source_preference in {"official_report_first", "mixed_report_and_book"} for item in decomposition.subqueries),
+                    requires_book_source=any(item.intent.source_preference == "book_first" for item in decomposition.subqueries),
+                    template_id="multi_intent",
+                    confidence=0.9,
+                    reason=decomposition.reason,
+                )
+            else:
+                answer_mode = self.answer_mode_classifier.classify(original_query, query_intent)
+            query_plan = self.query_plan_assembler.assemble(
+                original_query=original_query,
+                rewritten_query=rewritten_query,
+                query_intent=query_intent,
+                answer_mode=answer_mode,
             )
         else:
-            answer_mode = self.answer_mode_classifier.classify(original_query, query_intent)
-        query_plan = query_plan or self.query_plan_assembler.assemble(
-            original_query=original_query,
-            rewritten_query=rewritten_query,
-            query_intent=query_intent,
-            answer_mode=answer_mode,
-        )
+            query_intent = query_intent or QueryPlanAssembler.intent_from_plan(query_plan)
+            answer_mode = self._answer_mode_from_query_plan(query_plan)
         context_requirements = context_requirements or self.requirement_planner.plan(query_plan)
         context_execution_plan = context_execution_plan or self.execution_planner.plan(context_requirements)
         normalized_query = AnswerModeClassifier.normalize(original_query)
         symbols = list(query_plan.entities.symbols)
-        timeframe = query_plan.entities.timeframes[0] if query_plan.entities.timeframes else self._timeframe(original_query)
+        timeframe = (
+            query_plan.entities.timeframes[0]
+            if query_plan.entities.timeframes
+            else ("" if query_plan.semantic_context else self._timeframe(original_query))
+        )
         needs = self._determine_needs_from_requirements(context_requirements, query_plan)
         _safe_print(
             "[DecisionContext] need "
@@ -651,6 +659,14 @@ class DecisionContextBuilder:
         )
         _safe_print(f"[DecisionContext] status={status} latency_ms={(time.time() - started) * 1000:.2f}")
         return context
+
+    @staticmethod
+    def _answer_mode_from_query_plan(query_plan: QueryPlan) -> AnswerMode:
+        payload = (query_plan.source_signals or {}).get("answer_mode")
+        if not isinstance(payload, dict):
+            return AnswerMode(reason="canonical query plan")
+        fields = AnswerMode.__dataclass_fields__
+        return AnswerMode(**{key: value for key, value in payload.items() if key in fields})
 
     @staticmethod
     def _docs_from_acquisition_results(results: List[Any]) -> List[Dict[str, Any]]:

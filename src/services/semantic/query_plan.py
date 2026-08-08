@@ -342,7 +342,9 @@ class QueryPlanAssembler:
         state: ResolvedSemanticState,
     ) -> QueryPlan:
         semantic = state.semantic
-        primary = self.STRUCTURED_PRIMARY_TO_PLAN.get(semantic.primary_intent, "unknown")
+        event = self._structured_event(semantic.subtype)
+        concept = self._structured_concept(semantic, event)
+        primary = self._structured_primary(semantic.primary_intent, semantic.secondary_intents, event)
         secondary = self._dedupe(
             [
                 self.STRUCTURED_PRIMARY_TO_PLAN[value]
@@ -352,7 +354,8 @@ class QueryPlanAssembler:
             ]
         )
         requested_indicators, indicator_ambiguity = self._structured_indicator_specs(state)
-        current_market_request = semantic.primary_intent in {"MARKET_DATA", "ANALYSIS"}
+        semantic_intents = {semantic.primary_intent, *semantic.secondary_intents}
+        current_market_request = bool(semantic_intents & {"MARKET_DATA", "ANALYSIS"})
         conceptual_request = "KNOWLEDGE" in {semantic.primary_intent, *semantic.secondary_intents}
         requested_analysis = []
         if current_market_request:
@@ -389,6 +392,9 @@ class QueryPlanAssembler:
                 broker_symbols=list(state.broker_symbols),
                 raw_symbols=list(semantic.symbols),
                 unresolved_symbols=list(state.unresolved_symbols),
+                macro_events=[event] if event else [],
+                organizations=[self.EVENT_ROUTE[event][2]] if event else [],
+                concepts=[concept] if concept else [],
                 timeframes=list(state.timeframes),
             ),
             temporal_scope=temporal_scope,
@@ -427,6 +433,29 @@ class QueryPlanAssembler:
             "source=structured_semantics"
         )
         return plan
+
+    @classmethod
+    def _structured_primary(
+        cls,
+        primary_intent: str,
+        secondary_intents: tuple[str, ...],
+        event: str,
+    ) -> str:
+        semantic_intents = {primary_intent, *secondary_intents}
+        if event:
+            return "macro_market_impact" if semantic_intents & {"MARKET_DATA", "ANALYSIS"} else "macro_report_summary"
+        return cls.STRUCTURED_PRIMARY_TO_PLAN.get(primary_intent, "unknown")
+
+    @classmethod
+    def _structured_event(cls, subtype: str) -> str:
+        candidate = str(subtype or "").strip().upper()
+        return candidate if candidate in cls.EVENT_ROUTE else ""
+
+    @staticmethod
+    def _structured_concept(semantic: StructuredSemanticResult, event: str) -> str:
+        if event or "KNOWLEDGE" not in {semantic.primary_intent, *semantic.secondary_intents}:
+            return ""
+        return AnswerModeClassifier.normalize(semantic.subtype or semantic.domain)
 
     @staticmethod
     def _structured_indicator_specs(state: ResolvedSemanticState) -> tuple[List[IndicatorSpec], List[str]]:
