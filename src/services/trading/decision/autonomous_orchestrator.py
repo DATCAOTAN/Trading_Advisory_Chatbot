@@ -34,10 +34,15 @@ OFFLINE_FIXTURE_REFERENCE_PREFIX = "offline_fixture:"
 AUTONOMOUS_LLM_PROPOSAL_SOURCE = "AUTONOMOUS_LLM"
 OFFLINE_FIXTURE_PROPOSAL_SOURCE = "OFFLINE_FIXTURE"
 MANUAL_OPERATOR_PROPOSAL_SOURCE = "MANUAL_OPERATOR"
+EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE = "EDITABLE_TRADE_DRAFT"
+OPERATOR_PROPOSAL_SOURCES = {
+    MANUAL_OPERATOR_PROPOSAL_SOURCE,
+    EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE,
+}
 PROPOSAL_SOURCES = {
     AUTONOMOUS_LLM_PROPOSAL_SOURCE,
     OFFLINE_FIXTURE_PROPOSAL_SOURCE,
-    MANUAL_OPERATOR_PROPOSAL_SOURCE,
+    *OPERATOR_PROPOSAL_SOURCES,
 }
 
 
@@ -757,11 +762,11 @@ class AutonomousDecisionOrchestrator:
                 issues.append("BROKER_SYMBOL_REFERENCE_MISMATCH")
         if candidate.proposal_source not in PROPOSAL_SOURCES:
             issues.append("PROPOSAL_SOURCE_INVALID")
-        if (
-            candidate.proposal_source == MANUAL_OPERATOR_PROPOSAL_SOURCE
-            and not candidate.proposal_source_reference
-        ):
-            issues.append("MANUAL_PROPOSAL_SOURCE_REFERENCE_MISSING")
+        if not candidate.proposal_source_reference:
+            if candidate.proposal_source == MANUAL_OPERATOR_PROPOSAL_SOURCE:
+                issues.append("MANUAL_PROPOSAL_SOURCE_REFERENCE_MISSING")
+            elif candidate.proposal_source == EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE:
+                issues.append("DRAFT_PROPOSAL_SOURCE_REFERENCE_MISSING")
         if candidate.proposal_source_reference and not _safe_reference(
             candidate.proposal_source_reference
         ):
@@ -1255,7 +1260,7 @@ def _resolve_order_proposal(
         blockers.append("RISK_POLICY_REFERENCE_MISSING")
     if (
         not resolved["structured_reasoning"]
-        and _proposal_source(inputs) != MANUAL_OPERATOR_PROPOSAL_SOURCE
+        and _proposal_source(inputs) not in OPERATOR_PROPOSAL_SOURCES
     ):
         blockers.append("STRUCTURED_REASONING_MISSING")
     volume = _decimal_or_none(resolved["proposed_volume"])
@@ -1318,7 +1323,7 @@ def _resolve_order_proposal(
         contract_size = _positive_decimal_or_none(market_material["contract_size"])
         if (
             snapshot.symbol == "BTCUSD"
-            or _proposal_source(inputs) == MANUAL_OPERATOR_PROPOSAL_SOURCE
+            or _proposal_source(inputs) in OPERATOR_PROPOSAL_SOURCES
         ) and any(
             value is None
             for value in (
@@ -1694,11 +1699,11 @@ def _input_blockers(
     proposal_source = _proposal_source(inputs)
     if proposal_source not in PROPOSAL_SOURCES:
         blockers.append("PROPOSAL_SOURCE_INVALID")
-    if (
-        proposal_source == MANUAL_OPERATOR_PROPOSAL_SOURCE
-        and not inputs.proposal_source_reference
-    ):
-        blockers.append("MANUAL_PROPOSAL_SOURCE_REFERENCE_MISSING")
+    if not inputs.proposal_source_reference:
+        if proposal_source == MANUAL_OPERATOR_PROPOSAL_SOURCE:
+            blockers.append("MANUAL_PROPOSAL_SOURCE_REFERENCE_MISSING")
+        elif proposal_source == EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE:
+            blockers.append("DRAFT_PROPOSAL_SOURCE_REFERENCE_MISSING")
     references = (
         context.context_pack_id,
         method.result_id,

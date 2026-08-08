@@ -46,10 +46,11 @@ class _Context:
 
 
 class _FakeStreamlit:
-    def __init__(self):
+    def __init__(self, button_keys=()):
         self.session_state = _SessionState(current_session_id="conversation-ui")
         self.messages = []
         self.metrics = []
+        self.button_keys = set(button_keys)
 
     def markdown(self, *_args, **_kwargs):
         pass
@@ -77,6 +78,9 @@ class _FakeStreamlit:
 
     def expander(self, *_args, **_kwargs):
         return _Context()
+
+    def button(self, *_args, **kwargs):
+        return kwargs.get("key") in self.button_keys
 
 
 def _draft(*, revision=2, blockers=(), warnings=()):
@@ -198,7 +202,7 @@ def test_open_request_routes_directly_to_draft_without_rendering_request_blocker
     streamlit = _FakeStreamlit()
     rendered = []
     monkeypatch.setattr(tab_chatbot, "st", streamlit)
-    monkeypatch.setattr(tab_chatbot, "_render_editable_trade_draft", lambda value: rendered.append(value))
+    monkeypatch.setattr(tab_chatbot, "_render_editable_trade_draft", lambda value, **_kwargs: rendered.append(value))
 
     tab_chatbot._render_conversational_trading_authorization(None, request)
 
@@ -246,3 +250,65 @@ def test_semantic_missing_child_is_presented_separately_from_draft_blockers(monk
         "Semantic input unresolved: indicators[0].parameters.period",
     ) in streamlit.messages
     assert not any("SEMANTIC_UNRESOLVED" in value for _kind, value in streamlit.messages if _kind == "warning")
+
+
+def test_draft_render_never_constructs_candidate_without_explicit_button(monkeypatch):
+    request = _request()
+    streamlit = _install_draft_renderer(monkeypatch, request, _draft())
+
+    class UnexpectedCandidateService:
+        def __init__(self, *_args, **_kwargs):
+            pytest.fail("candidate service must require an explicit button action")
+
+    monkeypatch.setattr(tab_chatbot, "EditableTradeDraftCandidateService", UnexpectedCandidateService)
+
+    tab_chatbot._render_editable_trade_draft(request, orchestrator=SimpleNamespace(live_service=object()))
+
+    assert not any("Candidate created" in value for _kind, value in streamlit.messages)
+
+
+def test_explicit_draft_button_binds_current_id_and_revision_to_candidate_service(monkeypatch):
+    request = _request()
+    draft = _draft(revision=4)
+    key = f"editable_draft_{draft.draft_id}_{draft.revision}_create_candidate"
+    streamlit = _install_draft_renderer(monkeypatch, request, draft)
+    streamlit.button_keys.add(key)
+    calls = []
+
+    class Authority:
+        def status(self, *, refresh_runtime):
+            assert refresh_runtime is False
+            return {
+                "mode": "human_confirmed_live",
+                "account_environment": "DEMO",
+                "mode_integrity_valid": True,
+            }
+
+        def close(self):
+            pass
+
+    class CandidateService:
+        def __init__(self, *_args):
+            pass
+
+        def create(self, draft_id, revision, **kwargs):
+            calls.append((draft_id, revision, kwargs))
+            return SimpleNamespace(
+                status="DRAFT_NOT_ELIGIBLE",
+                blocker="MARKET_DATA_STALE",
+                run_result=None,
+            )
+
+    monkeypatch.setattr(tab_chatbot, "TradingAuthorityOperatorService", Authority)
+    monkeypatch.setattr(tab_chatbot, "AuthoritativeAutonomousInputAssembler", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(tab_chatbot, "AutonomousDecisionOrchestrator", lambda: object())
+    monkeypatch.setattr(tab_chatbot, "EditableTradeDraftCandidateService", CandidateService)
+
+    tab_chatbot._render_editable_trade_draft(
+        request, orchestrator=SimpleNamespace(live_service=object())
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0:2] == (draft.draft_id, draft.revision)
+    assert calls[0][2]["strategy"] is request.strategy
+    assert ("warning", "Candidate creation blocked: MARKET_DATA_STALE") in streamlit.messages

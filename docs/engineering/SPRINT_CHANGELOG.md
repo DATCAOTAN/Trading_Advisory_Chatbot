@@ -1560,3 +1560,37 @@ Commit: this commit
 #### Next step
 
 - Explicit Draft-to-Candidate DEMO Lifecycle Integration.
+
+---
+
+### Sprint 6A - Explicit Draft-to-Candidate DEMO Lifecycle Integration
+
+Date: 2026-08-08
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added one explicit, revision-bound Draft-to-Candidate action using the existing Draft store, candidate assembler/orchestrator, candidate journal, and Review Card.
+- Bound the candidate to an opaque protected-Draft provenance reference; Draft values are not re-parsed from chat text or exposed publicly.
+- Reused candidate-journal idempotency for a repeated action and reject stale Draft revisions before assembly.
+- Cleared only the current UI result after a Draft edit; the historic candidate remains in the existing journal and confirmation is still absent.
+
+#### Verification
+
+- Focused and neighboring Draft/candidate/review/approval/pre-submit/thin-UI tests: 162 passed with 2 dependency warnings.
+- Full regression: 3,369 passed and 156 subtests passed in 139.86 seconds with 3 unchanged dependency/UTC warnings.
+- Compileall, documentation integrity (11 passed), `git diff --check`, Docker Compose configuration, app restart/healthy state, and Streamlit health `200 ok` passed. Static safety checks and final Ponytail review passed.
+
+#### Current state
+
+- Candidate creation is explicit, DEMO-bound, duplicate-safe, and non-executable.
+- Confirmation, approval, final validation, pre-submit, controlled submission, reconciliation mutation, and broker execution remain unchanged and blocked.
+
+#### Not verified / not implemented
+
+- Browser/runtime creation from a live Draft, human candidate confirmation, pre-submit authority, and broker submission were not run.
+
+#### Next step
+
+- Explicit Candidate Review + Confirmation Lifecycle Integration.

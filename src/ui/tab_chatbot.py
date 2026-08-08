@@ -38,6 +38,15 @@ from src.services.trading.market.live_feature_service import LiveFeatureService
 from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBundleBuilder
 from src.services.trading.market.provider_registry import ProviderRegistry
 from src.services.trading.reasoning.strategy_evidence import plan_strategy_data
+from src.services.trading.decision.autonomous_orchestrator import (
+    AutonomousDecisionOrchestrator,
+    EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE,
+)
+from src.services.trading.decision.operator_candidate_generation import (
+    AuthoritativeAutonomousInputAssembler,
+    EditableTradeDraftCandidateService,
+    draft_candidate_source_reference,
+)
 from src.services.trading.proposal.editable_trade_draft import (
     EditableTradeDraft,
     EditableTradeDraftService,
@@ -50,6 +59,12 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.authority_runtim
     TradingAuthorityOperatorService,
 )
 from src.ui.runtime_flags import get_knowledge_v3_flags
+from src.ui.autonomous_candidate_review import (
+    clear_autonomous_decision_run_result,
+    get_autonomous_decision_run_result,
+    render_autonomous_candidate_review_card,
+    store_autonomous_decision_run_result,
+)
 from src.ui.tab_dashboard import _render_autonomous_decision_review_card
 
 
@@ -507,7 +522,7 @@ def _render_conversational_trading_authorization(
         request.trade_action in {"OPEN_POSITION", "GENERIC_TRADE"}
         and st.session_state.get("current_session_id")
     ):
-        _render_editable_trade_draft(request)
+        _render_editable_trade_draft(request, orchestrator=orchestrator)
         return
 
     heading = (
@@ -574,7 +589,9 @@ def _render_conversational_trading_authorization(
     )
 
 
-def _render_editable_trade_draft(request: ConversationalTradingRequest) -> None:
+def _render_editable_trade_draft(
+    request: ConversationalTradingRequest, *, orchestrator=None
+) -> None:
     """Render one persisted non-executable draft; domain code owns all calculations."""
     conversation_id = str(st.session_state.current_session_id)
     store = EditableTradeDraftStore()
@@ -653,6 +670,7 @@ def _render_editable_trade_draft(request: ConversationalTradingRequest) -> None:
 
     with st.expander("Edit risk parameters", expanded=False):
         _render_trade_draft_patch_form(service, draft, request)
+    _render_draft_candidate_action(orchestrator, store, draft, request)
     st.info(
         "Applying changes creates a new immutable draft revision. It does not create "
         "a candidate, confirm a trade, grant submission authority, or send an order."
@@ -715,10 +733,81 @@ def _render_trade_draft_patch_form(
         if evidence_error:
             st.warning(f"Evidence warning: {evidence_error}")
         updated = service.apply_patch(draft.draft_id, patch, evidence=evidence)
+        clear_autonomous_decision_run_result(st.session_state)
         st.success(f"Draft revision {updated.revision} created.")
         st.rerun()
     except (TradeDraftError, InvalidOperation) as exc:
         st.error(f"Parameter update blocked: {exc}")
+
+
+def _render_draft_candidate_action(
+    orchestrator,
+    store: EditableTradeDraftStore,
+    draft: EditableTradeDraft,
+    request: ConversationalTradingRequest,
+) -> None:
+    """Create a Candidate only after an explicit action for this exact Draft revision."""
+    key_prefix = f"editable_draft_{draft.draft_id}_{draft.revision}"
+    outcome_key = key_prefix + "_candidate_outcome"
+    if st.button(
+        "Create Candidate",
+        key=key_prefix + "_create_candidate",
+        use_container_width=True,
+    ):
+        if orchestrator is None or getattr(orchestrator, "live_service", None) is None:
+            st.error("Candidate creation unavailable: runtime service missing.")
+        else:
+            authority_service = TradingAuthorityOperatorService()
+            try:
+                status = authority_service.status(refresh_runtime=False)
+            except Exception as exc:
+                st.warning(f"Candidate creation unavailable: {type(exc).__name__}")
+                return
+            finally:
+                authority_service.close()
+            service = EditableTradeDraftCandidateService(
+                store,
+                AuthoritativeAutonomousInputAssembler(
+                    orchestrator.live_service,
+                    mode=str(status.get("mode") or "NOT_SET"),
+                ),
+                AutonomousDecisionOrchestrator(),
+            )
+            outcome = service.create(
+                draft.draft_id,
+                draft.revision,
+                strategy=request.strategy,
+                authoritative_mode=str(status.get("mode") or "NOT_SET"),
+                account_environment=str(status.get("account_environment") or "UNKNOWN"),
+                mode_integrity_valid=status.get("mode_integrity_valid") is True,
+            )
+            st.session_state[outcome_key] = outcome
+            if outcome.run_result is not None:
+                store_autonomous_decision_run_result(st.session_state, outcome.run_result)
+
+    outcome = st.session_state.get(outcome_key)
+    if outcome is not None:
+        if outcome.status == "CANDIDATE_CREATED":
+            st.success(
+                "Candidate created for this immutable Draft revision. "
+                "It remains non-executable."
+            )
+        elif outcome.status == "CANDIDATE_ALREADY_EXISTS":
+            st.info("Candidate already exists for this immutable Draft revision.")
+        else:
+            st.warning(
+                "Candidate creation blocked: "
+                + (outcome.blocker or outcome.status)
+            )
+
+    run_result = get_autonomous_decision_run_result(st.session_state)
+    candidate = run_result.candidate if run_result is not None else None
+    if (
+        candidate is not None
+        and candidate.proposal_source == EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE
+        and candidate.proposal_source_reference == draft_candidate_source_reference(draft)
+    ):
+        render_autonomous_candidate_review_card(candidate, run_result.validation)
 
 
 def _load_trade_draft_evidence(request: ConversationalTradingRequest):

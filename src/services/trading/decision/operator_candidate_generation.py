@@ -18,8 +18,12 @@ from src.services.trading.decision.autonomous_proposal_provider import (
 from src.services.trading.calendar import CalendarContextBuilder
 from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionInputs,
+    AutonomousDecisionOrchestrator,
+    AutonomousDecisionRunResult,
     AutonomousOrderIntentProposal,
+    EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE,
     MANUAL_OPERATOR_PROPOSAL_SOURCE,
+    OPERATOR_PROPOSAL_SOURCES,
     _ORDER_TYPE_SEMANTICS,
     autonomous_account_context_reference,
     autonomous_market_snapshot_provenance_hash,
@@ -42,6 +46,11 @@ from src.services.trading.reasoning.strategy_evidence import (
     validate_strategy,
 )
 from src.services.trading.scoring import SignalScoringEngine
+from src.services.trading.proposal.editable_trade_draft import (
+    EditableTradeDraft,
+    EditableTradeDraftStore,
+    TradeDraftError,
+)
 
 
 AUTONOMOUS_RUNTIME_MODE = "autonomous_live"
@@ -65,6 +74,8 @@ class ManualOperatorProposalInput:
     stop_loss: str = ""
     take_profit: str = ""
     proposed_volume: str = ""
+    proposal_source: str = MANUAL_OPERATOR_PROPOSAL_SOURCE
+    proposal_source_reference: str = ""
 
 
 class OperatorCandidateInputError(RuntimeError):
@@ -324,6 +335,9 @@ def _manual_inputs(
     semantics = _ORDER_TYPE_SEMANTICS.get(order_type)
     if semantics is None:
         raise OperatorCandidateInputError("UNSUPPORTED_ORDER_TYPE")
+    proposal_source = str(operator_proposal.proposal_source or "").strip().upper()
+    if proposal_source not in OPERATOR_PROPOSAL_SOURCES:
+        raise OperatorCandidateInputError("PROPOSAL_SOURCE_INVALID")
     side, entry_intent, action = semantics
     snapshot = market_snapshot_from_feature_result(feature_result)
     proposal = AutonomousOrderIntentProposal(
@@ -342,7 +356,7 @@ def _manual_inputs(
         structured_reasoning=(),
     )
     material = {
-        "source": MANUAL_OPERATOR_PROPOSAL_SOURCE,
+        "source": proposal_source,
         "proposal": {
             "order_type": order_type,
             **{
@@ -367,13 +381,18 @@ def _manual_inputs(
     digest = hashlib.sha256(
         json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    source_reference = "manual_operator_proposal_" + digest[:24]
+    source_reference = str(operator_proposal.proposal_source_reference or "").strip()
+    if not source_reference:
+        source_reference = "manual_operator_proposal_" + digest[:24]
     return AutonomousDecisionInputs(
         runtime_context=inputs.runtime_context,
         method_selection=inputs.method_selection,
         score_report=inputs.score_report,
         risk_result=inputs.risk_result,
         lifecycle_status=inputs.lifecycle_status,
+        lifecycle_observation=inputs.lifecycle_observation,
+        reconciliation_result=inputs.reconciliation_result,
+        requested_intent=inputs.requested_intent,
         direction=side,
         semantic_parameter_references=(
             source_reference,
@@ -385,8 +404,189 @@ def _manual_inputs(
         order_market_snapshot=snapshot,
         timeframe_profile=inputs.timeframe_profile,
         account_context_reference=inputs.account_context_reference,
-        proposal_source=MANUAL_OPERATOR_PROPOSAL_SOURCE,
+        proposal_source=proposal_source,
         proposal_source_reference=source_reference,
+        strategy_id=inputs.strategy_id,
+        strategy_version=inputs.strategy_version,
+        normalized_strategy_hash=inputs.normalized_strategy_hash,
+        reasoning_evidence_summary=inputs.reasoning_evidence_summary,
+    )
+
+
+@dataclass(frozen=True)
+class EditableTradeDraftCandidateResult:
+    status: str
+    blocker: str = ""
+    run_result: AutonomousDecisionRunResult | None = None
+
+
+class EditableTradeDraftCandidateService:
+    """Project one exact authoritative Draft revision into the existing candidate path."""
+
+    def __init__(
+        self,
+        draft_store: EditableTradeDraftStore,
+        input_assembler: AuthoritativeAutonomousInputAssembler,
+        decision_orchestrator: AutonomousDecisionOrchestrator,
+    ) -> None:
+        self.draft_store = draft_store
+        self.input_assembler = input_assembler
+        self.decision_orchestrator = decision_orchestrator
+
+    def create(
+        self,
+        draft_id: str,
+        expected_revision: int,
+        *,
+        strategy: ConversationalStrategyRequest | None,
+        authoritative_mode: str,
+        account_environment: str,
+        mode_integrity_valid: bool,
+        now: datetime | None = None,
+    ) -> EditableTradeDraftCandidateResult:
+        try:
+            draft = self.draft_store.load(str(draft_id or ""))
+        except TradeDraftError as exc:
+            return EditableTradeDraftCandidateResult("DRAFT_NOT_ELIGIBLE", str(exc))
+        if draft is None:
+            return EditableTradeDraftCandidateResult("DRAFT_NOT_FOUND")
+        if draft.revision != expected_revision:
+            return EditableTradeDraftCandidateResult("DRAFT_REVISION_STALE")
+
+        blockers = _draft_candidate_blockers(
+            draft,
+            strategy=strategy,
+            authoritative_mode=authoritative_mode,
+            account_environment=account_environment,
+            mode_integrity_valid=mode_integrity_valid,
+            now=now,
+        )
+        if blockers:
+            return EditableTradeDraftCandidateResult("DRAFT_NOT_ELIGIBLE", blockers[0])
+
+        symbol = dict(draft.symbol.value or {})
+        entry = dict(draft.entry.value or {})
+        stop = dict(draft.stop.value or {})
+        target = dict(draft.target.value or {})
+        sizing = dict(draft.sizing.value or {})
+        proposal = ManualOperatorProposalInput(
+            order_type=str(draft.direction.value or ""),
+            stop_loss=_canonical_manual_decimal(stop.get("price")),
+            take_profit=_canonical_manual_decimal(target.get("price")),
+            proposed_volume=_canonical_manual_decimal(sizing.get("proposed_volume")),
+            proposal_source=EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE,
+            proposal_source_reference=draft_candidate_source_reference(draft),
+        )
+        try:
+            inputs = self.input_assembler.build(
+                symbol=str(symbol.get("canonical_symbol") or ""),
+                timeframes=tuple(symbol.get("timeframes") or ()),
+                now=now,
+                operator_proposal=proposal,
+                strategy=strategy,
+            )
+        except OperatorCandidateInputError as exc:
+            return EditableTradeDraftCandidateResult(
+                "DRAFT_NOT_ELIGIBLE", exc.blockers[0] if exc.blockers else "DOMAIN_VALIDATION_BLOCKED"
+            )
+
+        run_result = self.decision_orchestrator.run_once(
+            inputs, now=now, require_actionable=True
+        )
+        if not run_result.validation.valid or not run_result.persistence_safe:
+            return EditableTradeDraftCandidateResult(
+                "DRAFT_NOT_ELIGIBLE",
+                run_result.journal_warning
+                or (run_result.validation.issues[0] if run_result.validation.issues else "DOMAIN_VALIDATION_BLOCKED"),
+                run_result,
+            )
+        if (
+            run_result.candidate.intent != "OPEN_POSITION"
+            or run_result.candidate.deterministic_eligibility_result != "ELIGIBLE_CANDIDATE"
+        ):
+            return EditableTradeDraftCandidateResult(
+                "DRAFT_NOT_ELIGIBLE",
+                run_result.candidate.blocked_reason_codes[0]
+                if run_result.candidate.blocked_reason_codes
+                else "DRAFT_CANDIDATE_NOT_ACTIONABLE",
+                run_result,
+            )
+        return EditableTradeDraftCandidateResult(
+            "CANDIDATE_CREATED" if run_result.journal_appended else "CANDIDATE_ALREADY_EXISTS",
+            run_result=run_result,
+        )
+
+
+def draft_candidate_source_reference(draft: EditableTradeDraft) -> str:
+    """Return a safe opaque binding for one immutable Draft revision."""
+    material = {
+        "draft_id": draft.draft_id,
+        "revision": draft.revision,
+        "protected_draft": draft.to_protected_dict(),
+    }
+    digest = hashlib.sha256(
+        json.dumps(material, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return "editable_trade_draft_" + digest[:24]
+
+
+def _draft_candidate_blockers(
+    draft: EditableTradeDraft,
+    *,
+    strategy: ConversationalStrategyRequest | None,
+    authoritative_mode: str,
+    account_environment: str,
+    mode_integrity_valid: bool,
+    now: datetime | None,
+) -> tuple[str, ...]:
+    blockers = list(draft.blockers)
+    required_fields = (
+        "symbol", "direction", "action", "entry", "stop", "target", "risk",
+        "sizing", "mode", "confirmation_policy", "account_scope",
+    )
+    if draft.executable or draft.execution_authority:
+        blockers.append("DRAFT_EXECUTION_AUTHORITY_INVALID")
+    if any(getattr(draft, name).status != "VALID" for name in required_fields):
+        blockers.append("DRAFT_FIELD_VALIDATION_BLOCKED")
+    if draft.action.value != "OPEN_POSITION" or draft.direction.value not in {"BUY", "SELL"}:
+        blockers.append("DRAFT_ACTION_NOT_OPEN_POSITION")
+    if draft.account_scope.value != "DEMO" or str(account_environment).upper() != "DEMO":
+        blockers.append("DEMO_ACCOUNT_SCOPE_REQUIRED")
+    if not draft.account_context_bound:
+        blockers.append("DRAFT_ACCOUNT_CONTEXT_UNBOUND")
+    if not draft.market_evidence_reference or not _draft_evidence_is_fresh(draft, now):
+        blockers.append("MARKET_DATA_STALE")
+    if not mode_integrity_valid:
+        blockers.append("MODE_INTEGRITY_INVALID")
+    if draft.mode.value != authoritative_mode:
+        blockers.append("DRAFT_MODE_AUTHORITY_MISMATCH")
+    identity = getattr(strategy, "identity", None)
+    if (
+        identity is None
+        or getattr(strategy, "canonical_symbol", None) != (draft.symbol.value or {}).get("canonical_symbol")
+        or getattr(strategy, "requested_mode", None) != draft.mode.value
+        or (
+            getattr(identity, "strategy_id", ""),
+            getattr(identity, "strategy_version", ""),
+            getattr(identity, "normalized_strategy_hash", ""),
+        ) != (draft.strategy_id, draft.strategy_version, draft.strategy_hash)
+    ):
+        blockers.append("DRAFT_STRATEGY_BINDING_INVALID")
+    return tuple(dict.fromkeys(str(item) for item in blockers if item))
+
+
+def _draft_evidence_is_fresh(
+    draft: EditableTradeDraft, now: datetime | None
+) -> bool:
+    try:
+        observed = datetime.fromisoformat(draft.market_evidence_timestamp.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return False
+    if observed.tzinfo is None:
+        return False
+    current = _utc(now)
+    return (current - observed.astimezone(timezone.utc)).total_seconds() <= (
+        Config.TRADING_AUTONOMOUS_DECISION_INPUT_MAX_AGE_SECONDS
     )
 
 
