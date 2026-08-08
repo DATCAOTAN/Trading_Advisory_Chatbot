@@ -1716,7 +1716,7 @@ Commit: this commit
 
 - Focused semantic, routing, context, Draft, Review, and Pre-Submit tests: 166 passed with 2 unchanged dependency warnings.
 - Full regression: 3,392 passed and 156 subtests passed in 139.59 seconds with 3 unchanged dependency/UTC warnings.
-- Docker Compose config, runtime Pydantic `2.13.4`, semantic import path, Streamlit health `200 ok`, compileall, documentation integrity, diff checks, and static safety scans passed. Post-Sprint-6D container recreation provenance is `NOT VERIFIED`; no rebuild ran.
+- Docker Compose config, runtime Pydantic `2.13.4`, semantic import path, Streamlit health `200 ok`, compileall, documentation integrity, diff checks, and static safety scans passed. The container was recreated from the current named app image after Sprint 6D; provenance is verified without another rebuild.
 
 #### Current state
 
@@ -1733,4 +1733,4 @@ Commit: this commit
 
 #### Next step
 
-- Confirm/recreate the app container from the current named image, then run only the bounded provenance and health check. Execution enablement remains a separate explicitly authorized scope.
+- Semantic architecture closure is release-candidate complete. Execution enablement remains a separate explicitly authorized scope.
