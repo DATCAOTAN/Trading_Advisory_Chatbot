@@ -1,0 +1,187 @@
+"""Deterministic context resolution for validated structured semantics."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Iterable
+
+from src.services.semantic.structured_semantics import (
+    SemanticCondition,
+    SemanticIndicator,
+    StructuredSemanticResult,
+)
+from src.services.trading.market.timeframes import (
+    SUPPORTED_TIMEFRAMES,
+    normalize_timeframe,
+    resolve_symbol,
+)
+
+
+FIELD_SOURCES = frozenset(
+    {"USER_EXPLICIT", "CONVERSATION_INHERITED", "POLICY_DEFAULT", "UNRESOLVED"}
+)
+_PREVIOUS_SYMBOL = "previous_symbol"
+_PREVIOUS_INDICATOR = "previous_indicator"
+_PREVIOUS_TIMEFRAME = "previous_timeframe"
+
+
+@dataclass(frozen=True)
+class ResolvedSemanticState:
+    """Validated semantic facts after deterministic, reference-only inheritance."""
+
+    semantic: StructuredSemanticResult
+    canonical_symbols: tuple[str, ...]
+    broker_symbols: tuple[str, ...]
+    unresolved_symbols: tuple[str, ...]
+    indicators: tuple[SemanticIndicator, ...]
+    conditions: tuple[SemanticCondition, ...]
+    field_sources: tuple[tuple[str, str], ...]
+    unresolved_fields: tuple[str, ...]
+
+    @property
+    def timeframes(self) -> tuple[str, ...]:
+        return _dedupe(indicator.timeframe for indicator in self.indicators if indicator.timeframe)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "input": self.semantic.as_dict(),
+            "canonical_symbols": list(self.canonical_symbols),
+            "broker_symbols": list(self.broker_symbols),
+            "unresolved_symbols": list(self.unresolved_symbols),
+            "indicators": [indicator.as_dict() for indicator in self.indicators],
+            "conditions": [condition.as_dict() for condition in self.conditions],
+            "timeframes": list(self.timeframes),
+            "field_sources": dict(self.field_sources),
+            "unresolved_fields": list(self.unresolved_fields),
+        }
+
+
+def resolve_structured_semantics(
+    semantic: StructuredSemanticResult,
+    previous: ResolvedSemanticState | None = None,
+) -> ResolvedSemanticState:
+    """Resolve configured aliases and explicit conversational references only."""
+
+    references = set(semantic.context_references)
+    field_sources: list[tuple[str, str]] = []
+    unresolved = list(semantic.unresolved_fields)
+
+    canonical_symbols, broker_symbols, unresolved_symbols = _resolve_symbols(
+        semantic.symbols,
+        previous if not semantic.symbols and _PREVIOUS_SYMBOL in references and previous and previous.canonical_symbols else None,
+        field_sources,
+    )
+    unresolved.extend(f"symbols[{index}]" for index in range(len(unresolved_symbols)))
+    if _PREVIOUS_SYMBOL in references and not semantic.symbols and not (previous and previous.canonical_symbols):
+        unresolved.append(f"context_references.{_PREVIOUS_SYMBOL}")
+
+    indicators = _resolve_indicators(semantic, previous, references, field_sources, unresolved)
+    conditions = tuple(semantic.conditions)
+    field_sources.extend((f"conditions[{index}]", "USER_EXPLICIT") for index in range(len(conditions)))
+
+    for index, indicator in enumerate(indicators):
+        if indicator.timeframe:
+            continue
+        unresolved.append(f"indicators[{index}].timeframe")
+        field_sources.append((f"indicators[{index}].timeframe", "UNRESOLVED"))
+
+    for field_name in semantic.unresolved_fields:
+        field_sources.append((field_name, "UNRESOLVED"))
+
+    return ResolvedSemanticState(
+        semantic=semantic,
+        canonical_symbols=canonical_symbols,
+        broker_symbols=broker_symbols,
+        unresolved_symbols=unresolved_symbols,
+        indicators=indicators,
+        conditions=conditions,
+        field_sources=tuple(field_sources),
+        unresolved_fields=_dedupe(unresolved),
+    )
+
+
+def _resolve_symbols(
+    symbols: tuple[str, ...],
+    inherited: ResolvedSemanticState | None,
+    field_sources: list[tuple[str, str]],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    if not symbols and inherited is not None:
+        field_sources.extend((f"symbols[{index}]", "CONVERSATION_INHERITED") for index in range(len(inherited.canonical_symbols)))
+        return inherited.canonical_symbols, inherited.broker_symbols, inherited.unresolved_symbols
+
+    canonical: list[str] = []
+    broker: list[str] = []
+    unresolved: list[str] = []
+    for index, raw_symbol in enumerate(symbols):
+        resolution = resolve_symbol(raw_symbol)
+        field_sources.append((f"symbols[{index}]", "USER_EXPLICIT"))
+        if resolution.status == "RESOLVED":
+            canonical.append(resolution.canonical_symbol)
+            broker.append(resolution.broker_symbol)
+        else:
+            unresolved.append(resolution.raw_symbol)
+    return _dedupe(canonical), _dedupe(broker), _dedupe(unresolved)
+
+
+def _resolve_indicators(
+    semantic: StructuredSemanticResult,
+    previous: ResolvedSemanticState | None,
+    references: set[str],
+    field_sources: list[tuple[str, str]],
+    unresolved: list[str],
+) -> tuple[SemanticIndicator, ...]:
+    current = semantic.indicators
+    inherit_indicator = _PREVIOUS_INDICATOR in references
+    inherit_timeframe = _PREVIOUS_TIMEFRAME in references
+    if not current:
+        if inherit_indicator and previous is not None:
+            field_sources.extend((f"indicators[{index}]", "CONVERSATION_INHERITED") for index in range(len(previous.indicators)))
+            return previous.indicators
+        if inherit_indicator and previous is None:
+            unresolved.append(f"context_references.{_PREVIOUS_INDICATOR}")
+        return ()
+
+    previous_by_id = {indicator.indicator_id.upper(): indicator for indicator in (previous.indicators if previous else ())}
+    resolved: list[SemanticIndicator] = []
+    for index, indicator in enumerate(current):
+        indicator_id = indicator.indicator_id.upper()
+        prior = previous_by_id.get(indicator_id)
+        parameters = dict(indicator.parameters)
+        if (inherit_indicator or inherit_timeframe) and prior is None:
+            unresolved.append(
+                f"context_references.{_PREVIOUS_INDICATOR if inherit_indicator else _PREVIOUS_TIMEFRAME}"
+            )
+        if inherit_indicator and prior is not None:
+            parameters = {**dict(prior.parameters), **parameters}
+        timeframe = _resolved_timeframe(indicator.timeframe, prior, inherit_indicator or inherit_timeframe)
+        if indicator.timeframe and timeframe == "":
+            unresolved.append(f"indicators[{index}].timeframe")
+        resolved.append(SemanticIndicator(indicator_id=indicator_id, parameters=tuple(sorted(parameters.items())), timeframe=timeframe))
+        field_sources.append((f"indicators[{index}].indicator_id", "USER_EXPLICIT"))
+        field_sources.append((f"indicators[{index}].timeframe", "USER_EXPLICIT" if indicator.timeframe else "CONVERSATION_INHERITED" if timeframe else "UNRESOLVED"))
+        for name in parameters:
+            source = "USER_EXPLICIT" if name in dict(indicator.parameters) else "CONVERSATION_INHERITED"
+            field_sources.append((f"indicators[{index}].parameters.{name}", source))
+    return tuple(resolved)
+
+
+def _resolved_timeframe(raw: str, previous: SemanticIndicator | None, may_inherit: bool) -> str:
+    if raw:
+        normalized = normalize_timeframe(raw)
+        return normalized if normalized in SUPPORTED_TIMEFRAMES else ""
+    if may_inherit and previous is not None:
+        return previous.timeframe
+    return ""
+
+
+def _dedupe(values: Iterable[str]) -> tuple[str, ...]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        key = value.upper()
+        if key not in seen:
+            seen.add(key)
+            output.append(value)
+    return tuple(output)

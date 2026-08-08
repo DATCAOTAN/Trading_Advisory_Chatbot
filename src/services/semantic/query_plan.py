@@ -6,10 +6,13 @@ from typing import Any, Dict, List, Optional
 from src.services.knowledge.answer_mode import AnswerMode, AnswerModeClassifier
 from src.services.knowledge.query_decomposer import QueryDecomposer
 from src.services.knowledge.query_intent import QueryIntent, QueryIntentRouter
-from src.services.trading.market.timeframes import resolve_symbol, resolve_symbols_from_text
+from src.services.semantic.resolved_semantics import ResolvedSemanticState, resolve_structured_semantics
+from src.services.semantic.structured_semantics import StructuredSemanticResult
+from src.services.trading.market.timeframes import SUPPORTED_TIMEFRAMES, resolve_symbol, resolve_symbols_from_text
 from src.services.trading.reasoning.strategy_evidence import (
     INDICATOR_REGISTRY,
     IndicatorSpec,
+    _indicator,
     parse_indicator_specs,
 )
 from src.services.semantic.conversational_context import ConversationalIntentContext
@@ -70,6 +73,7 @@ class QueryPlan:
     child_plans: List["QueryPlan"] = field(default_factory=list)
     source_signals: Dict[str, Any] = field(default_factory=dict)
     conversational_context: Dict[str, Any] = field(default_factory=dict)
+    semantic_context: Dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -94,6 +98,7 @@ class QueryPlan:
             "child_plans": [child.as_dict() for child in self.child_plans],
             "source_signals": dict(self.source_signals),
             "conversational_context": dict(self.conversational_context),
+            "semantic_context": dict(self.semantic_context),
         }
 
 
@@ -134,6 +139,20 @@ class QueryPlanAssembler:
         "COMMODITY_MARKETS": ("market", "commodities", "World Bank", "macro_report"),
         "GOLD_MARKET": ("market", "gold", "World Gold Council", "market_gold"),
     }
+    STRUCTURED_PRIMARY_TO_PLAN = {
+        "MARKET_DATA": "market_state_analysis",
+        "ANALYSIS": "market_state_analysis",
+        "KNOWLEDGE": "book_concept_explanation",
+        "STRATEGY": "conversational_strategy_request",
+    }
+    STRUCTURED_ACTION_TO_USER_ACTION = {
+        "ANALYZE": "market_analysis",
+        "EXPLAIN": "explanation",
+        "OPEN_POSITION": "consider_entry",
+        "CLOSE_POSITION": "position_management",
+        "MANAGE_POSITION": "position_management",
+        "NONE": "information",
+    }
 
     def __init__(
         self,
@@ -154,8 +173,17 @@ class QueryPlanAssembler:
         task_id: str = "",
         decompose: bool = True,
         conversational_context: Optional[ConversationalIntentContext] = None,
+        structured_semantics: Optional[StructuredSemanticResult] = None,
+        previous_structured_context: Optional[ResolvedSemanticState] = None,
     ) -> QueryPlan:
         query = original_query or ""
+        if structured_semantics is not None:
+            return self._assemble_structured(
+                query,
+                rewritten_query,
+                task_id,
+                resolve_structured_semantics(structured_semantics, previous_structured_context),
+            )
         normalized = AnswerModeClassifier.normalize(query)
         query_intent = query_intent or self.intent_router.route(query)
         answer_mode = answer_mode or self.answer_mode_classifier.classify(query, query_intent)
@@ -305,6 +333,135 @@ class QueryPlanAssembler:
                 f"confidence={child.confidence:.2f}"
             )
         return plan
+
+    def _assemble_structured(
+        self,
+        query: str,
+        rewritten_query: str,
+        task_id: str,
+        state: ResolvedSemanticState,
+    ) -> QueryPlan:
+        semantic = state.semantic
+        primary = self.STRUCTURED_PRIMARY_TO_PLAN.get(semantic.primary_intent, "unknown")
+        secondary = self._dedupe(
+            [
+                self.STRUCTURED_PRIMARY_TO_PLAN[value]
+                for value in semantic.secondary_intents
+                if value in self.STRUCTURED_PRIMARY_TO_PLAN
+                and self.STRUCTURED_PRIMARY_TO_PLAN[value] != primary
+            ]
+        )
+        requested_indicators, indicator_ambiguity = self._structured_indicator_specs(state)
+        current_market_request = semantic.primary_intent in {"MARKET_DATA", "ANALYSIS"}
+        conceptual_request = "KNOWLEDGE" in {semantic.primary_intent, *semantic.secondary_intents}
+        requested_analysis = []
+        if current_market_request:
+            requested_analysis.append("market_state_analysis")
+        if requested_indicators:
+            requested_analysis.append("technical_indicator_values")
+        if conceptual_request:
+            requested_analysis.append("concept_explanation")
+        if primary == "conversational_strategy_request":
+            requested_analysis.extend(["strategy_normalization", "strategy_completeness"])
+        temporal_scope = "current" if current_market_request else "timeless" if conceptual_request else "unknown"
+        base_intent = QueryIntent(
+            source_preference="book_first" if primary == "book_concept_explanation" else "any",
+            routing_reason="validated structured semantic projection",
+        )
+        base_answer_mode = AnswerMode(
+            mode="BOOK_CONCEPT_EXPLANATION" if primary == "book_concept_explanation" else "UNKNOWN",
+            requires_book_source=primary == "book_concept_explanation",
+            reason="validated structured semantic projection",
+        )
+        ambiguity = self._dedupe(
+            [f"unresolved:{value}" for value in state.unresolved_fields]
+            + [f"unresolved_symbol:{value}" for value in state.unresolved_symbols]
+            + indicator_ambiguity
+        )
+        plan = QueryPlan(
+            original_query=query,
+            normalized_query=AnswerModeClassifier.normalize(query),
+            task_id=task_id or "task_1",
+            primary_intent=primary,
+            secondary_intents=secondary,
+            entities=QueryEntities(
+                symbols=list(state.canonical_symbols),
+                broker_symbols=list(state.broker_symbols),
+                raw_symbols=list(semantic.symbols),
+                unresolved_symbols=list(state.unresolved_symbols),
+                timeframes=list(state.timeframes),
+            ),
+            temporal_scope=temporal_scope,
+            requested_analysis=self._dedupe(requested_analysis),
+            requested_indicators=requested_indicators,
+            current_market_request=current_market_request,
+            conceptual_request=conceptual_request,
+            user_action_intent=self.STRUCTURED_ACTION_TO_USER_ACTION[semantic.action],
+            requires_execution=False,
+            conversation_dependency="follow_up" if semantic.context_references else "none",
+            ambiguity=ambiguity,
+            constraints={
+                "execution_allowed": False,
+                "requested_mode": semantic.requested_mode,
+                "semantic_action": semantic.action,
+                "semantic_direction": semantic.direction,
+                "semantic_negated": semantic.negated,
+                "semantic_hypothetical": semantic.hypothetical,
+                "unresolved_fields": list(state.unresolved_fields),
+            },
+            confidence=0.0,
+            source_signals={
+                "query_intent": base_intent.as_dict(),
+                "answer_mode": base_answer_mode.as_dict(),
+                "rewritten_query": rewritten_query or "",
+                "decomposition": {"is_multi_intent": False, "subqueries": [], "reason": "structured_semantics"},
+            },
+            semantic_context=state.as_dict(),
+        )
+        print(
+            "[QueryPlan] "
+            f"primary_intent={plan.primary_intent} "
+            f"secondary_intents={plan.secondary_intents} "
+            f"temporal_scope={plan.temporal_scope} "
+            f"entities={plan.entities.as_dict()} "
+            "source=structured_semantics"
+        )
+        return plan
+
+    @staticmethod
+    def _structured_indicator_specs(state: ResolvedSemanticState) -> tuple[List[IndicatorSpec], List[str]]:
+        specs: List[IndicatorSpec] = []
+        ambiguity: List[str] = []
+        for index, indicator in enumerate(state.indicators):
+            definition = INDICATOR_REGISTRY.get(indicator.indicator_id)
+            parameters = dict(indicator.parameters)
+            if definition is None:
+                ambiguity.append(f"unsupported_indicator:{indicator.indicator_id}")
+                continue
+            if not indicator.timeframe or indicator.timeframe not in SUPPORTED_TIMEFRAMES:
+                ambiguity.append(f"unresolved:indicators[{index}].timeframe")
+                continue
+            if set(parameters) != set(definition.parameters):
+                ambiguity.append(f"unresolved:indicators[{index}].parameters")
+                continue
+            if not QueryPlanAssembler._indicator_parameters_valid(indicator.indicator_id, parameters):
+                ambiguity.append(f"invalid:indicators[{index}].parameters")
+                continue
+            specs.append(_indicator(indicator.indicator_id, indicator.timeframe, parameters))
+        return specs, ambiguity
+
+    @staticmethod
+    def _indicator_parameters_valid(indicator_id: str, parameters: Dict[str, float]) -> bool:
+        definition = INDICATOR_REGISTRY[indicator_id]
+        ranges = {name: (minimum, maximum, integer) for name, minimum, maximum, integer in definition.parameter_ranges}
+        for name, value in parameters.items():
+            minimum, maximum, integer = ranges[name]
+            if not minimum <= value <= maximum or integer and int(value) != value:
+                return False
+        return not (
+            indicator_id == "MACD"
+            and parameters["fast_period"] >= parameters["slow_period"]
+        )
 
     @classmethod
     def intent_from_plan(cls, plan: Optional[QueryPlan]) -> QueryIntent:

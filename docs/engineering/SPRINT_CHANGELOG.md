@@ -1436,3 +1436,30 @@ Commit: this commit
 
 - The boundary validates semantic facts only and cannot express execution authority.
 - Deterministic context-resolution and QueryPlan-authority cutover remain the next sprint; execution behavior is unchanged.
+
+---
+
+### Architecture - Deterministic Semantic Resolution and QueryPlan Authority
+
+Date: 2026-08-08
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added deterministic resolution of configured symbols and explicit structured conversation references with field provenance and fail-closed unresolved state.
+- Added a structured-semantics path to the existing `QueryPlanAssembler` that skips legacy raw semantic parsing when a validated artifact is supplied.
+- Reused the existing indicator registry and context-requirement planner; incomplete indicators remain semantic ambiguity rather than receiving defaults.
+- Preserved legacy QueryPlan assembly unchanged when structured semantics are absent.
+
+#### Verification
+
+- Semantic-resolution, QueryPlan, interpreter, conversational, context, execution-planner, and capability neighbors: 83 passed with 2 dependency warnings.
+- Full regression: 3,325 passed and 156 subtests passed in 144.98 seconds with 3 unchanged dependency/UTC warnings.
+- Compileall `src`/`scripts`, documentation integrity (11 passed), diff, Docker Compose configuration, and static safety checks passed. Docker app restart succeeded; the container became healthy and Streamlit health returned HTTP 200.
+- No external LLM, MT5, market data, candidate, confirmation, export, pre-submit, submission, `order_send`, or broker-mutation operation ran.
+
+#### Current state / next step
+
+- Valid structured semantics now project deterministically into the existing QueryPlan without weaker raw-language reinterpretation; raw assembly remains the compatibility fallback.
+- Universal orchestrator/capability routing, retrieval rewrite separation, trading-language, UI, lifecycle, and execution migration remain out of scope.
