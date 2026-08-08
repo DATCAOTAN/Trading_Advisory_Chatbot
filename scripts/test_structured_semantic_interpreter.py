@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 
 from src.services.semantic.structured_interpreter import StructuredSemanticInterpreter
-from src.services.semantic.structured_semantics import SEMANTIC_SCHEMA_VERSION
+from src.services.semantic.structured_semantics import (
+    SEMANTIC_SCHEMA_VERSION,
+    StructuredSemanticResult,
+    StructuredSemanticValidationError,
+)
 
 
 class ScriptedProvider:
@@ -226,6 +230,59 @@ def test_output_round_trip_is_strict_and_numeric_fields_cannot_be_strings():
     assert result.semantic.as_dict() == payload
 
 
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    (
+        ({"unexpected": True}, "SEMANTIC_OUTPUT_FIELDS_INVALID"),
+        ({"execution_authority": True}, "SEMANTIC_OUTPUT_AUTHORITY_FIELD_FORBIDDEN"),
+        ({"action": "EXECUTE"}, "SEMANTIC_ACTION_INVALID"),
+        ({"schema_version": "structured-semantic/v0"}, "SEMANTIC_SCHEMA_VERSION_INVALID"),
+        ({"conditions": {"subject": "RSI"}}, "SEMANTIC_CONDITIONS_INVALID"),
+        ({"conditions": [{"subject": "RSI", "operator": "GREATER_THAN", "value": "10"}]}, "CONDITION_VALUE_INVALID"),
+        ({"conditions": [{"subject": "RSI", "operator": "GREATER_THAN", "value": True}]}, "CONDITION_VALUE_INVALID"),
+        ({"indicators": [{"indicator_id": "RSI", "parameters": {"period": "14"}, "timeframe": "M1"}]}, "INDICATOR_PARAMETERS_INVALID"),
+    ),
+)
+def test_pydantic_boundary_rejects_invalid_untrusted_payloads(changes, expected):
+    payload = semantic_payload(**changes)
+
+    with pytest.raises(StructuredSemanticValidationError, match=expected):
+        StructuredSemanticResult.from_payload(payload)
+
+
+@pytest.mark.parametrize("value", (10, 10.5))
+def test_pydantic_boundary_accepts_json_integer_and_float_numbers(value):
+    semantic = StructuredSemanticResult.from_payload(
+        semantic_payload(conditions=[{"subject": "RSI", "operator": "GREATER_THAN", "value": value}])
+    )
+
+    assert semantic.conditions[0].value == float(value)
+
+
+@pytest.mark.parametrize("raw_value", ("NaN", "Infinity", "-Infinity"))
+def test_pydantic_boundary_rejects_non_finite_json_numbers(raw_value):
+    raw = json.dumps(semantic_payload()).replace('"value": 10', f'"value": {raw_value}')
+
+    with pytest.raises(StructuredSemanticValidationError, match="SEMANTIC_OUTPUT_INVALID_JSON"):
+        StructuredSemanticResult.from_json(raw)
+
+
+def test_pydantic_boundary_preserves_partial_semantic_siblings_and_round_trip():
+    payload = semantic_payload(
+        indicators=[{"indicator_id": "RSI", "parameters": {}, "timeframe": "M1"}],
+        conditions=[{"subject": "RSI", "operator": "GREATER_THAN", "value": 10}],
+        unresolved_fields=["indicators[0].parameters.period"],
+    )
+
+    semantic = StructuredSemanticResult.from_payload(payload)
+
+    assert semantic.indicators[0].parameters == ()
+    assert semantic.indicators[0].timeframe == "M1"
+    assert semantic.conditions[0].value == 10.0
+    assert semantic.unresolved_fields == ("indicators[0].parameters.period",)
+    assert StructuredSemanticResult.from_payload(semantic.as_dict()) == semantic
+
+
 def test_disabled_default_provider_fails_closed_before_provider_construction(monkeypatch):
     from src.services.semantic import structured_interpreter
 
@@ -257,9 +314,17 @@ def test_provider_failure_does_not_retry_or_fall_back():
 def test_boundary_is_not_a_queryplan_capability_or_regex_authority():
     root = Path(__file__).resolve().parents[1]
     source = (root / "src/services/semantic/structured_interpreter.py").read_text(encoding="utf-8")
-    contract = (root / "src/services/semantic/structured_semantics.py").read_text(encoding="utf-8")
+    contract_path = root / "src/services/semantic/structured_semantics.py"
+    contract = contract_path.read_text(encoding="utf-8")
+    pydantic_paths = sorted(
+        path.relative_to(root).as_posix()
+        for path in (root / "src").rglob("*.py")
+        if "pydantic" in path.read_text(encoding="utf-8").lower()
+    )
 
     assert "QueryPlan" not in source + contract
     assert "CapabilityRegistry" not in source + contract
     assert "import re" not in source + contract
     assert "MetaTrader5" not in source + contract
+    assert "from pydantic import" in contract
+    assert pydantic_paths == ["src/services/semantic/structured_semantics.py"]

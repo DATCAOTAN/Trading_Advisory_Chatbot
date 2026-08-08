@@ -1662,3 +1662,38 @@ Commit: 17d1065
 #### Next step
 
 - Lifecycle Closure + Legacy Semantic Fallback Cleanup + Release Validation.
+
+---
+
+### Sprint 6D - Pydantic V2 Structured Semantic Boundary Alignment
+
+Date: 2026-08-08
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Replaced manual untrusted structured-semantic validation with strict Pydantic v2 DTOs and an explicit conversion into the existing frozen semantic dataclasses.
+- Kept the one-call JSON-mode provider flow, existing semantic error contract, strict numeric behavior, partial unresolved facts, and downstream QueryPlan/context/trading contracts unchanged.
+- Added an explicit v2-only Pydantic dependency and compact boundary coverage for invalid shape/enum/authority/numeric inputs plus integer, float, partial, round-trip, and confinement behavior.
+
+#### Verification
+
+- Focused semantic, QueryPlan, context, universal-routing, and trading-cutover suites: 91 passed, 17 subtests passed.
+- Full regression: 3,392 passed and 156 subtests passed in 138.23 seconds with three unchanged dependency/UTC warnings.
+- Compileall, Docker Compose configuration, `git diff --check`, and static safety scans passed.
+- Docker app restart and Streamlit health: passed (`200 ok`). Clean dependency-image rebuild: NOT VERIFIED; two bounded rebuild attempts timed out without affecting the healthy existing app.
+
+#### Current state
+
+- Pydantic v2 is confined to the untrusted semantic boundary; frozen internal semantic, QueryPlan, context, trading, lifecycle, bridge, and execution contracts remain unchanged.
+- No external LLM, provider retry, MT5 write, controlled submission, runtime `order_send`, or broker mutation ran.
+
+#### Not verified / not implemented
+
+- Clean-image dependency rebuild remains unverified after the local Docker build timeouts.
+- Legacy semantic fallback cleanup and final closure remain separate work.
+
+#### Next step
+
+- Legacy Semantic Fallback Cleanup + Architecture Acceptance + Release Validation.
