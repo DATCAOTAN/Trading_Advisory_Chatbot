@@ -2047,3 +2047,30 @@ Commit: this commit
 - Natural provider/RAG classification variations remain fail-closed and are coverage input for S10 `60_CASE_PRODUCT_ACCEPTANCE`.
 
 ---
+
+### Sprint 10 - 60-Case Product Acceptance
+
+Date: 2026-08-10
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added one data-driven 60-case product acceptance suite and concise acceptance evidence report.
+- Covered all twelve product families plus five semantic variants and one typed multi-turn sequence.
+- Fixed three shared structured-provider prompt-contract gaps without regexes, schema relaxation, new fallback paths, or new authority.
+
+#### Verification
+
+- Canonical matrix: 60/60 contract-correct; final focused semantic/product group: 150 passed.
+- Full regression: 3,621 passed and 156 subtests passed with 3 unchanged warnings.
+- Provider/browser sample used 6 calls and zero retries; knowledge and mixed advisory/current results were contract-correct.
+- Candidate, confirmation, pre-submit, controlled-submit, management write, runtime `order_send`, broker mutation, and MT5 write counts remained zero.
+
+#### Current state / next step
+
+- The final direct-strategy prompt repair was not live-provider revalidated after the six-call quota was reached.
+- Verdict: `60_CASE_PRODUCT_ACCEPTANCE_INCOMPLETE`.
+- Next: one bounded final-provider/browser direct partial-strategy revalidation; no new implementation or broad regression unless it reveals a defect.
+
+---

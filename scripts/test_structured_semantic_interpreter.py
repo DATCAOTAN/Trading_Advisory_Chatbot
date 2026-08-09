@@ -221,6 +221,39 @@ def test_prompt_does_not_suggest_conventional_indicator_parameters():
     assert "do not use conventional defaults" in prompt
 
 
+def test_prompt_separates_indicator_knowledge_from_position_management():
+    prompt = StructuredSemanticInterpreter._prompt("arbitrary concept wording")
+
+    assert "definitions, explanations, or comparisons" in prompt
+    assert "KNOWLEDGE with action EXPLAIN" in prompt
+    assert "indicator name alone does not make the request position management" in prompt
+
+
+def test_prompt_requires_scalar_optional_semantic_labels():
+    prompt = StructuredSemanticInterpreter._prompt("arbitrary strategy wording")
+
+    assert "Subtype and domain must each be one short string" in prompt
+    assert "never an object or list" in prompt
+    assert "use an empty string when no canonical value applies" in prompt
+
+
+def test_prompt_preserves_missing_indicator_children_as_unresolved():
+    prompt = StructuredSemanticInterpreter._prompt("arbitrary incomplete indicator wording")
+
+    assert "omit the parameter key" in prompt
+    assert "empty parameters object or empty timeframe string" in prompt
+    assert "add its field path to unresolved_fields" in prompt
+    assert "never use null, placeholder text" in prompt
+
+
+def test_prompt_separates_direct_trade_instructions_from_advisory_questions():
+    prompt = StructuredSemanticInterpreter._prompt("arbitrary direct or advisory wording")
+
+    assert "direct instruction to open, buy, sell" in prompt
+    assert "action OPEN_POSITION" in prompt
+    assert "question asking whether the user should buy or sell remains ANALYSIS" in prompt
+
+
 def test_missing_direction_is_valid_incomplete_semantics_not_structural_failure():
     result, _provider = interpreted(
         "open a position for XAUUSDm",

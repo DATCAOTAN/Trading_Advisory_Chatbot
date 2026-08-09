@@ -2836,3 +2836,13 @@ The existing review controls and protected confirmation journal now form the exp
 - Final Ponytail review removed an overbroad replacement of unrelated protected context references; the final binder puts the verified selected-position reference first while preserving every other reference. Focused coverage and the final regression passed afterward. Final review result: `PONYTAIL_REVIEW_PASS`.
 - Browser acceptance produced zero controlled-submit calls, controlled-management writes, runtime `order_send` calls, broker mutations, or MT5 writes. Static checks retain exactly one production `.order_send(` call-site in the host bridge and zero `MetaTrader5` imports under `src/`.
 - Verification level: `FULL_REGRESSION_PASS`. Next approved sprint: S10 `60_CASE_PRODUCT_ACCEPTANCE`.
+
+# 87. 60-CASE PRODUCT ACCEPTANCE
+
+- Added one parameterized 60-case acceptance manifest covering social/system, knowledge/RAG, current market, analysis, strategy completion, Draft/Candidate, position reads, history/provenance, human management, autonomous mandate behavior, and failure/recovery.
+- Deterministic acceptance is contract-correct for all 60 canonical cases. Five extra high-risk semantic variants and the typed multi-turn sequence also pass. Positive broker-state paths use existing deterministic fixtures; no broker state was created.
+- Runtime browser sampling exposed three related structured-provider prompt gaps: indicator concept questions were not explicitly separated from position reads, optional scalar/missing-indicator child output shapes were underspecified, and direct trade instructions were not explicitly separated from advisory questions. All were fixed at the one existing provider prompt boundary without regexes, fallbacks, relaxed schema validation, or new authority.
+- Focused final semantic/product tests passed with `150 passed`. Final full regression passed with `3,621 passed`, `156 subtests passed`, and three unchanged dependency/UTC warnings.
+- Provider calls were capped at six with zero retries. Knowledge and mixed advisory/current paths were contract-correct. The last direct-strategy prompt repair was not called again after the quota was reached, so final live-provider revalidation remains the sole Sprint 10 release blocker.
+- No Candidate, confirmation, pre-submit, controlled-submit, management write, runtime `order_send`, broker mutation, or MT5 write occurred. Execution remains non-authoritative and fail-closed.
+- Verification level: `FULL_REGRESSION_PASS`. Product verdict: `60_CASE_PRODUCT_ACCEPTANCE_INCOMPLETE`; S11 is not release-ready until one bounded final-provider/browser direct-strategy revalidation passes.
