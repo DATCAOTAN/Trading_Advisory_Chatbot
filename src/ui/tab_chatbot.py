@@ -88,6 +88,13 @@ from src.ui.tab_dashboard import (
 
 LOGGER = logging.getLogger(__name__)
 
+PRESENTATION_TEXT = "TEXT"
+PRESENTATION_TRADING_REQUEST = "TRADING_REQUEST"
+PRESENTATION_POSITION_READ = "POSITION_READ"
+PRESENTATION_MANAGEMENT = "MANAGEMENT_PROPOSAL"
+PRESENTATION_BLOCKER = "BLOCKER"
+PRESENTATION_LEGACY = "LEGACY_COMPATIBILITY"
+
 
 class _AnswerStreamLogger:
     """Track final answer streaming without changing Streamlit rendering."""
@@ -247,8 +254,7 @@ def render(orchestrator, feature_flags: dict):
             st.markdown(msg["content"])
 
             if msg["role"] == "assistant":
-                _render_position_read_card(msg.get("position_read_model"))
-                _render_management_proposal_card(msg.get("management_proposal"))
+                _render_runtime_presentation(msg)
                 _render_sources(msg.get("sources", []), intent=msg.get("intent"))
                 metrics = _extract_metrics(msg["content"])
                 if metrics:
@@ -365,8 +371,7 @@ def render(orchestrator, feature_flags: dict):
                     st.warning("Cau tra loi da hoan tat nhung co the hoi ngan hoac thieu mot phan cau truc.")
                 _render_sources(sources, intent=intent, query=user_query)
                 if runtime_artifacts:
-                    _render_position_read_card(runtime_artifacts.get("position_read_model"))
-                    _render_management_proposal_card(runtime_artifacts.get("management_proposal"))
+                    _render_runtime_presentation(runtime_artifacts)
 
                 metrics = _extract_metrics(full_answer)
                 if metrics:
@@ -402,12 +407,7 @@ def render(orchestrator, feature_flags: dict):
         if conversational_context is not None:
             assistant_msg["conversational_context"] = conversational_context.as_dict()
         if runtime_artifacts is not None:
-            position_read_model = runtime_artifacts.get("position_read_model")
-            if isinstance(position_read_model, dict):
-                assistant_msg["position_read_model"] = position_read_model
-            management_proposal = runtime_artifacts.get("management_proposal")
-            if isinstance(management_proposal, dict):
-                assistant_msg["management_proposal"] = management_proposal
+            _store_runtime_presentation(assistant_msg, runtime_artifacts)
             query_plan_payload = runtime_artifacts.get("query_plan")
             semantic_context = (
                 query_plan_payload.get("semantic_context")
@@ -482,6 +482,61 @@ def render(orchestrator, feature_flags: dict):
                 trading_request,
                 _latest_resolved_semantic_state(st.session_state.messages),
             )
+
+
+def _runtime_presentation(runtime_artifacts) -> tuple[str, dict | None]:
+    """Select one primary typed presentation without interpreting raw language."""
+
+    if not isinstance(runtime_artifacts, dict):
+        return PRESENTATION_LEGACY, None
+    management = runtime_artifacts.get("management_proposal")
+    if (
+        isinstance(management, dict)
+        and management.get("schema_version") == "human-confirmed-management-proposal/v1"
+    ):
+        return PRESENTATION_MANAGEMENT, management
+    position = runtime_artifacts.get("position_read_model")
+    if (
+        isinstance(position, dict)
+        and position.get("schema_version") == "position-read-model/v1"
+    ):
+        return PRESENTATION_POSITION_READ, position
+    trading = runtime_artifacts.get("trading_request")
+    if isinstance(trading, dict) and trading.get("intent_type") == "TRADING_AUTHORIZATION_REQUEST":
+        return PRESENTATION_TRADING_REQUEST, trading
+    blockers = _runtime_blockers(runtime_artifacts)
+    if blockers:
+        return PRESENTATION_BLOCKER, {"blockers": blockers}
+    return PRESENTATION_TEXT, None
+
+
+def _runtime_blockers(runtime_artifacts: dict) -> list[str]:
+    blockers = runtime_artifacts.get("blockers")
+    if isinstance(blockers, (list, tuple)):
+        return [str(value) for value in blockers if str(value).strip()]
+    gate = runtime_artifacts.get("response_gate")
+    if isinstance(gate, dict) and gate.get("normal_synthesis_allowed") is False:
+        return [str(value) for value in gate.get("missing_context") or () if str(value).strip()]
+    return []
+
+
+def _render_runtime_presentation(runtime_artifacts) -> None:
+    kind, payload = _runtime_presentation(runtime_artifacts)
+    if kind == PRESENTATION_MANAGEMENT:
+        _render_management_proposal_card(payload)
+    elif kind == PRESENTATION_POSITION_READ:
+        _render_position_read_card(payload)
+    elif kind == PRESENTATION_BLOCKER:
+        st.warning("Blocked: " + ", ".join(payload["blockers"]))
+
+
+def _store_runtime_presentation(message: dict, runtime_artifacts: dict) -> None:
+    kind, payload = _runtime_presentation(runtime_artifacts)
+    message["presentation_kind"] = kind
+    if kind == PRESENTATION_MANAGEMENT:
+        message["management_proposal"] = payload
+    elif kind == PRESENTATION_POSITION_READ:
+        message["position_read_model"] = payload
 
 
 def _render_position_read_card(payload) -> None:

@@ -192,6 +192,29 @@ def apply_semantic_completion(
     )
 
 
+def bind_authoritative_position_reference(
+    state: ResolvedSemanticState,
+    protected_reference: str,
+) -> ResolvedSemanticState:
+    """Bind one broker-authoritative selection for a later typed continuation."""
+
+    reference = str(protected_reference or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", reference):
+        raise ValueError("POSITION_REFERENCE_INVALID")
+    references = (reference,) + tuple(
+        value
+        for value in state.semantic.context_references
+        if value.lower() != reference
+    )
+    sources = dict(state.field_sources)
+    sources["context_references.selected_position"] = "SYSTEM_CALCULATED"
+    return replace(
+        state,
+        semantic=replace(state.semantic, context_references=_dedupe(references)),
+        field_sources=tuple(sources.items()),
+    )
+
+
 def resolve_structured_semantics(
     semantic: StructuredSemanticResult,
     previous: ResolvedSemanticState | None = None,

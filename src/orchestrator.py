@@ -62,7 +62,10 @@ from src.services.evidence import (
 )
 from src.services.live_data_service import get_live_service
 from src.services.semantic.query_plan import QueryPlanAssembler
-from src.services.semantic.resolved_semantics import ResolvedSemanticState
+from src.services.semantic.resolved_semantics import (
+    ResolvedSemanticState,
+    bind_authoritative_position_reference,
+)
 from src.services.semantic.structured_interpreter import StructuredSemanticInterpreter
 from src.services.semantic.conversational_context import (
     ConversationalIntentContext,
@@ -79,6 +82,24 @@ from src.pipelines.modules.query_rewriter import QueryRewriterModule
 from src.pipelines.modules.router import RouterModule, RouteAction
 from src.pipelines.modules.reranker import RerankerModule
 from src.pipelines.modules.evaluator import EvaluatorModule
+
+
+def _bind_selected_position_context(query_plan, model) -> bool:
+    """Persist only an exact authoritative read-model selection for continuation."""
+
+    if (
+        model is None
+        or model.status != "AVAILABLE"
+        or model.blockers
+        or model.selected_position is None
+    ):
+        return False
+    state = ResolvedSemanticState.from_dict(query_plan.semantic_context)
+    query_plan.semantic_context = bind_authoritative_position_reference(
+        state,
+        model.selected_position.protected_reference,
+    ).as_dict()
+    return True
 
 
 class RAGOrchestrator:
@@ -254,6 +275,7 @@ class RAGOrchestrator:
                     )
 
                     model = result.data if result and isinstance(result.data, PositionReadModel) else None
+                    _bind_selected_position_context(canonical_query_plan, model)
                     if canonical_query_plan.primary_intent == "position_management":
                         from src.services.trading.human_confirmed_management import (
                             HumanConfirmedManagementService,

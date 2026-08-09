@@ -2017,3 +2017,33 @@ Commit: this commit
 - S8 is skip-or-closure-only; next major sprint is S9 `THIN_UI_AND_FULL_CONVERSATIONAL_INTEGRATION`.
 
 ---
+
+### Sprint 9 - Thin UI and Full Conversational Integration
+
+Date: 2026-08-10
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added one deterministic presentation dispatch over existing typed runtime artifacts.
+- Prevented management turns from also rendering a competing position interpretation.
+- Bound one fresh, unambiguous broker-selected position reference into canonical semantic context for typed cross-turn continuation.
+- Kept raw UI parsing compatibility-only when no authoritative runtime artifacts exist.
+- Preserved backend authority for mode, account, lifecycle, reconciliation, candidates, confirmation, and execution.
+
+#### Verification
+
+- New integration matrix: 34 passed; focused and neighboring suites: 308 passed.
+- Full regression: 3,550 passed and 156 subtests passed with 3 unchanged warnings.
+- Compileall, app restart without rebuild, host/container source hashes, container health, Streamlit `200 ok`, diff, documentation, browser, and static safety checks passed.
+- Browser acceptance returned authoritative empty positions and a single typed management blocker; no confirmation or mutation control was exposed.
+- Final Ponytail review narrowed selected-position binding so unrelated protected context references remain intact; rereview passed.
+
+#### Current state / next step
+
+- Sprint 8 lifecycle/recovery closure remains green.
+- Controlled-submit, management writes, runtime `order_send`, broker mutation, and MT5 writes remained zero.
+- Natural provider/RAG classification variations remain fail-closed and are coverage input for S10 `60_CASE_PRODUCT_ACCEPTANCE`.
+
+---
