@@ -1930,3 +1930,33 @@ Commit: this commit
 - Host/container source hashes matched, the container was healthy, and Streamlit returned `200 ok`. Sprints 3 and 4 are skip-or-closure-only; the next major implementation sprint is Sprint 5 Position Read Model, PnL History, and Provenance.
 
 ---
+
+### Sprint 5 - Position Read Model, P&L History, and Provenance
+
+Date: 2026-08-09
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added one canonical read-only model over the authenticated lifecycle snapshot and existing protected journals.
+- Separated open positions, pending orders, and recent closed trades; used broker P/L fields without approximation.
+- Added deterministic target resolution, freshness/account/reconciliation blockers, and safe provenance references.
+- Routed the bounded existing-trade read family through the current semantic/QueryPlan/capability chain.
+- Rendered the typed public projection in one non-executable Streamlit Trading State card.
+
+#### Verification
+
+- Position model: 17 passed; focused semantic/routing: 107 passed.
+- Neighboring lifecycle/reconciliation/capability/UI groups: 142 passed and 151 passed.
+- Full regression: 3,459 passed and 156 subtests passed with 3 unchanged warnings.
+- Compileall, app and bridge restart, container health, Streamlit `200 ok`, browser acceptance, diff, and static safety checks passed.
+
+#### Current state / next step
+
+- Browser acceptance returned an authoritative empty open-position result; no trade was created for testing.
+- Broker mutation, controlled-submit, management writes, and MT5 writes remained zero.
+- Stored management/close reasons remain explicitly unavailable when no authoritative management reference exists.
+- Next: S6 `HUMAN_CONFIRMED_POSITION_MANAGEMENT`.
+
+---

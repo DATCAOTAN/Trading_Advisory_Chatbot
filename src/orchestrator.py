@@ -224,6 +224,49 @@ class RAGOrchestrator:
                 )
                 context_requirements = self.decision_context_builder.requirement_planner.plan(canonical_query_plan)
                 context_execution_plan = self.decision_context_builder.execution_planner.plan(context_requirements)
+                if canonical_query_plan.primary_intent == "position_state_read":
+                    executor = self._context_acquisition_executor(
+                        use_knowledge_v3=Config.USE_KNOWLEDGE_V3 if use_knowledge_v3 is None else use_knowledge_v3,
+                        fallback_to_legacy=(
+                            Config.KNOWLEDGE_V3_FALLBACK_TO_LEGACY
+                            if knowledge_v3_fallback_to_legacy is None
+                            else knowledge_v3_fallback_to_legacy
+                        ),
+                        enable_reranker=enable_reranker,
+                    )
+                    acquisition_batch = executor.execute(
+                        query_plan=canonical_query_plan,
+                        requirements=context_requirements,
+                        execution_plan=context_execution_plan,
+                        registry=self.decision_context_builder.capability_registry,
+                        request_id=f"position_read_{int(time.time() * 1000)}",
+                    )
+                    result = next(
+                        (
+                            item for item in acquisition_batch.results
+                            if item.capability == "position_read"
+                        ),
+                        None,
+                    )
+                    from src.services.trading.position_read_model import (
+                        PositionReadModel,
+                        render_position_read_model,
+                    )
+
+                    model = result.data if result and isinstance(result.data, PositionReadModel) else None
+                    message = (
+                        render_position_read_model(model)
+                        if model is not None
+                        else "Position state unavailable: POSITION_READ_UNAVAILABLE"
+                    )
+                    return self._static_stream(message), [], "FINANCIAL_RAG", {
+                        "is_bounded_response": True,
+                        "query_plan": canonical_query_plan.as_dict(),
+                        "position_read_model": model.to_public_dict() if model else None,
+                        "semantic_provider_calls": semantic_provider_calls,
+                        "provider_calls": semantic_provider_calls,
+                        "retrieval_rewrite_calls": 0,
+                    }
                 trading_request = project_conversational_trading_request(
                     canonical_query_plan,
                     conversation_id=session_id,

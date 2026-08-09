@@ -352,6 +352,8 @@ class QueryPlanAssembler:
         event = self._structured_event(semantic.subtype)
         concept = self._structured_concept(semantic, event)
         primary = self._structured_primary(semantic.primary_intent, semantic.secondary_intents, event)
+        if semantic.primary_intent == "POSITION_MANAGEMENT" and semantic.action in {"NONE", "EXPLAIN"}:
+            primary = "position_state_read"
         secondary = self._dedupe(
             [
                 self.STRUCTURED_PRIMARY_TO_PLAN[value]
@@ -373,7 +375,9 @@ class QueryPlanAssembler:
             requested_analysis.append("concept_explanation")
         if primary == "conversational_strategy_request":
             requested_analysis.extend(["strategy_normalization", "strategy_completeness"])
-        temporal_scope = "current" if current_market_request else "timeless" if conceptual_request else "unknown"
+        if primary == "position_state_read":
+            requested_analysis.append("position_state_read")
+        temporal_scope = "current" if current_market_request or primary == "position_state_read" else "timeless" if conceptual_request else "unknown"
         base_intent = QueryIntent(
             source_preference="book_first" if primary == "book_concept_explanation" else "any",
             routing_reason="validated structured semantic projection",
@@ -422,6 +426,8 @@ class QueryPlanAssembler:
                 "semantic_negated": semantic.negated,
                 "semantic_hypothetical": semantic.hypothetical,
                 "unresolved_fields": list(state.unresolved_fields),
+                "requested_data": list(semantic.requested_data),
+                "context_references": list(semantic.context_references),
             },
             confidence=0.0,
             source_signals={

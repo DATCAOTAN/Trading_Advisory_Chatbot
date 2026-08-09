@@ -242,6 +242,7 @@ def render(orchestrator, feature_flags: dict):
             st.markdown(msg["content"])
 
             if msg["role"] == "assistant":
+                _render_position_read_card(msg.get("position_read_model"))
                 _render_sources(msg.get("sources", []), intent=msg.get("intent"))
                 metrics = _extract_metrics(msg["content"])
                 if metrics:
@@ -356,6 +357,8 @@ def render(orchestrator, feature_flags: dict):
                 elif completion_level == "warn":
                     st.warning("Cau tra loi da hoan tat nhung co the hoi ngan hoac thieu mot phan cau truc.")
                 _render_sources(sources, intent=intent, query=user_query)
+                if runtime_artifacts:
+                    _render_position_read_card(runtime_artifacts.get("position_read_model"))
 
                 metrics = _extract_metrics(full_answer)
                 if metrics:
@@ -391,6 +394,9 @@ def render(orchestrator, feature_flags: dict):
         if conversational_context is not None:
             assistant_msg["conversational_context"] = conversational_context.as_dict()
         if runtime_artifacts is not None:
+            position_read_model = runtime_artifacts.get("position_read_model")
+            if isinstance(position_read_model, dict):
+                assistant_msg["position_read_model"] = position_read_model
             query_plan_payload = runtime_artifacts.get("query_plan")
             semantic_context = (
                 query_plan_payload.get("semantic_context")
@@ -465,6 +471,42 @@ def render(orchestrator, feature_flags: dict):
                 trading_request,
                 _latest_resolved_semantic_state(st.session_state.messages),
             )
+
+
+def _render_position_read_card(payload) -> None:
+    if not isinstance(payload, dict) or payload.get("schema_version") != "position-read-model/v1":
+        return
+    st.subheader("Trading State")
+    blockers = list(payload.get("blockers") or [])
+    if blockers:
+        st.warning("Position state unavailable: " + ", ".join(blockers))
+        return
+    columns = st.columns(3)
+    columns[0].metric("Open positions", len(payload.get("open_positions") or []))
+    columns[1].metric("Pending orders", len(payload.get("pending_orders") or []))
+    columns[2].metric("Recent closes", len(payload.get("history") or []))
+    for heading, key in (
+        ("Open Positions", "open_positions"),
+        ("Pending Orders", "pending_orders"),
+        ("Recent History", "history"),
+    ):
+        rows = list(payload.get(key) or [])
+        if not rows:
+            continue
+        st.markdown(f"**{heading}**")
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            pnl = row.get("unrealized_pnl")
+            if pnl is None:
+                pnl = row.get("realized_pnl")
+            st.write(
+                f"{row.get('canonical_symbol', '')} {row.get('direction', '')} | "
+                f"state={row.get('state', '')} | volume={row.get('volume')} | "
+                f"entry={row.get('entry_price')} | current={row.get('current_price')} | "
+                f"P/L={pnl} | SL={row.get('stop_loss')} | TP={row.get('take_profit')}"
+            )
+    st.caption("Authoritative read-only broker/lifecycle projection. NON_EXECUTABLE.")
 
 
 def _latest_conversational_trading_request(messages) -> ConversationalTradingRequest | None:

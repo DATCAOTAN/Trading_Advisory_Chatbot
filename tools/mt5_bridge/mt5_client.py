@@ -359,6 +359,7 @@ class MT5Client:
         trades_today, loss_today = _daily_deal_summary(recent_deals or [], end)
         snapshot = {
             "status": "OK",
+            "snapshot_timestamp": datetime.now(timezone.utc).isoformat(),
             "terminal_connected": True,
             "terminal_trade_allowed": context.get("terminal_trade_allowed") is True,
             "account_trade_allowed": context.get("account_trade_allowed") is True,
@@ -573,11 +574,45 @@ def _normalize_lifecycle_row(item: Any, kind: str, correlation_tags: tuple[str, 
         "matched_correlation_tags": [tag for tag in correlation_tags if tag in comment],
         "metadata_redacted": True,
     }
+    if kind == "order":
+        normalized.update(
+            order_type=_order_type_name(data.get("type")),
+            entry_price=_safe_float(data.get("price_open")),
+            trigger_price=_safe_float(data.get("price_stoplimit")),
+            stop_loss=_safe_float(data.get("sl")),
+            take_profit=_safe_float(data.get("tp")),
+        )
+    elif kind == "deal":
+        normalized.update(
+            price=_safe_float(data.get("price")),
+            profit=_safe_float(data.get("profit")),
+            commission=_safe_float(data.get("commission")),
+            swap=_safe_float(data.get("swap")),
+            fee=_safe_float(data.get("fee")),
+        )
     if kind == "position":
+        normalized.update(
+            open_price=_safe_float(data.get("price_open")),
+            current_price=_safe_float(data.get("price_current")),
+            unrealized_pnl=_safe_float(data.get("profit")),
+            stop_loss=_safe_float(data.get("sl")),
+            take_profit=_safe_float(data.get("tp")),
+        )
         normalized["protection_reference_hash"] = protection_reference_hash(
             str(data.get("symbol", "")), data.get("sl") or 0, data.get("tp") or 0
         )
     return normalized
+
+
+def _order_type_name(value: Any) -> str:
+    names = (
+        "BUY", "SELL", "BUY_LIMIT", "SELL_LIMIT", "BUY_STOP", "SELL_STOP",
+        "BUY_STOP_LIMIT", "SELL_STOP_LIMIT",
+    )
+    for name in names:
+        if value == getattr(mt5, f"ORDER_TYPE_{name}", object()):
+            return name
+    return "UNKNOWN"
 
 
 def _daily_deal_summary(deals: List[Any], end: datetime) -> tuple[int, str]:

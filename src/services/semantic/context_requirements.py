@@ -316,6 +316,23 @@ class ContextRequirementPlanner:
                 ]
             )
 
+        elif primary == "position_state_read":
+            symbol = self._symbol_target(query_plan)
+            needs.append(
+                self._need(
+                    "position_read",
+                    symbol or "account",
+                    True,
+                    "authoritative current position, pending-order, P/L, history, and provenance state",
+                    freshness="fresh",
+                    max_age=self.DEFAULT_MARKET_MAX_AGE_SECONDS,
+                    parameters={
+                        "requested_data": list(query_plan.constraints.get("requested_data", [])),
+                        "context_references": list(query_plan.constraints.get("context_references", [])),
+                    },
+                )
+            )
+
         else:
             needs.append(self._need("static_knowledge", "general", False, "unknown intent fallback"))
 

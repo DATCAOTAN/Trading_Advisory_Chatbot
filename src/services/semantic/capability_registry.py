@@ -146,6 +146,17 @@ class CapabilityRegistry:
                 dependencies=["ohlcv"],
             ),
             CapabilityDefinition(
+                capability_name="position_read",
+                service_name="PositionReadModelService",
+                operation_name="read_from_query_plan",
+                input_schema={"query_plan": "QueryPlan"},
+                output_type="PositionReadModel",
+                cacheable=False,
+                default_freshness_seconds=90,
+                latency_class="low",
+                cost_class="low",
+            ),
+            CapabilityDefinition(
                 capability_name="account_state",
                 service_name="Unavailable",
                 operation_name="",
@@ -175,4 +186,3 @@ class CapabilityRegistry:
             ),
         ]
         return {definition.capability_name: definition for definition in capabilities}
-

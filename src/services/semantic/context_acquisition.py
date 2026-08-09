@@ -252,6 +252,7 @@ class ContextAcquisitionExecutor:
         use_v3: Optional[bool] = None,
         fallback_to_legacy: Optional[bool] = None,
         enable_reranker: Optional[bool] = None,
+        position_read_service: Any = None,
     ):
         self.retrieval_adapter = retrieval_adapter
         self.reranker_module = reranker_module
@@ -264,6 +265,7 @@ class ContextAcquisitionExecutor:
         self.knowledge_use_v3 = Config.SEMANTIC_CONTEXT_KNOWLEDGE_USE_V3
         self.knowledge_fallback_to_legacy = Config.SEMANTIC_CONTEXT_KNOWLEDGE_FALLBACK_TO_LEGACY
         self.enable_reranker = enable_reranker
+        self.position_read_service = position_read_service
         self.intent_router = QueryIntentRouter()
 
     def execute(
@@ -448,6 +450,8 @@ class ContextAcquisitionExecutor:
                 return self._execute_economic_event(need, task, requested_by, started)
             if need.capability == "technical_snapshot":
                 return self._execute_technical_snapshot(need, task, requested_by, started, runtime_store)
+            if need.capability == "position_read":
+                return self._execute_position_read(need, task, query_plan, requested_by, started)
             if need.capability in {"account_state", "instrument_spec", "stop_distance", "risk_limit"}:
                 return self._result_from_task(
                     task,
@@ -479,6 +483,39 @@ class ContextAcquisitionExecutor:
                 task_ids=requested_by,
                 latency_ms=self._latency(started),
             )
+
+    def _execute_position_read(
+        self,
+        need: ContextNeed,
+        task: ContextTask,
+        query_plan: QueryPlan,
+        requested_by: List[str],
+        started: float,
+    ) -> ContextAcquisitionResult:
+        if self.position_read_service is None:
+            from src.services.trading.position_read_model import PositionReadModelService
+
+            self.position_read_service = PositionReadModelService()
+        model = self.position_read_service.read_from_query_plan(query_plan)
+        status = "success" if model.status == "AVAILABLE" else "unavailable"
+        return self._result_from_task(
+            task,
+            need,
+            status,
+            data=model,
+            source="authenticated_mt5_lifecycle_snapshot",
+            operation="PositionReadModelService.read_from_query_plan",
+            provenance={
+                "snapshot_reference": model.snapshot_reference,
+                "metadata_redacted": True,
+            },
+            source_timestamp=model.snapshot_timestamp,
+            freshness_status="fresh" if status == "success" else "unavailable",
+            reason=("authoritative position state" if status == "success" else ",".join(model.blockers)),
+            error_code=("" if status == "success" else (model.blockers[0] if model.blockers else "POSITION_READ_UNAVAILABLE")),
+            task_ids=requested_by,
+            latency_ms=self._latency(started),
+        )
 
     def _execute_knowledge(
         self,
@@ -894,6 +931,10 @@ class ContextAcquisitionExecutor:
                 live_bits.append(f"EconomicEvent {getattr(data, 'event_name', result.target)} time={getattr(data, 'release_time', '')}")
             elif result.capability == "technical_snapshot":
                 live_bits.append(f"TechnicalSnapshot {result.target}: {result.data}")
+            elif result.capability == "position_read":
+                from src.services.trading.position_read_model import render_position_read_model
+
+                live_bits.append(render_position_read_model(result.data))
         if live_bits:
             parts.append("【DỮ LIỆU THỜI GIAN THỰC / BỐI CẢNH ĐỘNG】\n" + "\n".join(live_bits))
         return "\n\n".join(parts)
