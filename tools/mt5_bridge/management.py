@@ -23,6 +23,7 @@ from tools.mt5_bridge.mt5_client import protection_reference_hash
 
 
 MANAGEMENT_REQUEST_VERSION = "controlled-mt5-management/v1"
+MANDATE_MANAGEMENT_REQUEST_VERSION = "controlled-mt5-management/v2"
 MANAGEMENT_INTENTS = {
     "CANCEL_PENDING_ORDER",
     "MODIFY_POSITION_PROTECTION",
@@ -57,6 +58,7 @@ class ControlledManagementConfig:
     history_window_seconds: int = 86_400
     journal_path: str = "data/trading/execution_journal/mt5_controlled_execution.jsonl"
     lifecycle_journal_path: str = "data/trading/execution_journal/mt5_position_lifecycle.jsonl"
+    authority_journal_path: str = "data/trading/execution_journal/trading_authority.jsonl"
 
     @classmethod
     def from_env(cls) -> "ControlledManagementConfig":
@@ -83,6 +85,10 @@ class ControlledManagementConfig:
             lifecycle_journal_path=os.getenv(
                 "MT5_BRIDGE_POSITION_LIFECYCLE_JOURNAL_PATH",
                 "data/trading/execution_journal/mt5_position_lifecycle.jsonl",
+            ).strip(),
+            authority_journal_path=os.getenv(
+                "MT5_BRIDGE_TRADING_AUTHORITY_JOURNAL_PATH",
+                "data/trading/execution_journal/trading_authority.jsonl",
             ).strip(),
         )
 
@@ -112,12 +118,34 @@ class ProtectedBridgeManagementRequest:
     human_confirmation_reference: str = ""
     human_confirmation_phrase: str = field(default="", repr=False)
     human_confirmation_timestamp: str = ""
+    authorization_source: str = "HUMAN_CONFIRMATION"
+    mandate_authorization_reference: str = ""
+    mandate_authorization_hash: str = ""
+    semantic_management_intent: str = ""
+    strategy_reference: str = ""
+    evaluation_reference: str = ""
+    policy_reference: str = ""
     integrity_hash: str = ""
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "ProtectedBridgeManagementRequest":
-        required = set(cls.__dataclass_fields__)
-        if not isinstance(payload, Mapping) or set(payload) != required:
+        all_fields = set(cls.__dataclass_fields__)
+        mandate_fields = {
+            "authorization_source",
+            "mandate_authorization_reference",
+            "mandate_authorization_hash",
+            "semantic_management_intent",
+            "strategy_reference",
+            "evaluation_reference",
+            "policy_reference",
+        }
+        if not isinstance(payload, Mapping):
+            raise ValueError("MANAGEMENT_SCHEMA_INVALID")
+        payload_fields = frozenset(payload)
+        if payload_fields not in {
+            frozenset(all_fields),
+            frozenset(all_fields - mandate_fields),
+        }:
             raise ValueError("MANAGEMENT_SCHEMA_INVALID")
         return cls(
             request_version=_text(payload["request_version"], "REQUEST_VERSION"),
@@ -140,14 +168,33 @@ class ProtectedBridgeManagementRequest:
             idempotency_key=_text(payload["idempotency_key"], "IDEMPOTENCY_KEY"),
             created_at=_text(payload["created_at"], "CREATED_AT"),
             expires_at=_text(payload["expires_at"], "EXPIRES_AT"),
-            human_confirmation_reference=_hash(payload["human_confirmation_reference"]),
-            human_confirmation_phrase=_text(payload["human_confirmation_phrase"], "CONFIRMATION_PHRASE"),
-            human_confirmation_timestamp=_text(payload["human_confirmation_timestamp"], "CONFIRMATION_TIMESTAMP"),
+            human_confirmation_reference=_optional_hash(payload["human_confirmation_reference"]),
+            human_confirmation_phrase=_optional_text(payload["human_confirmation_phrase"]),
+            human_confirmation_timestamp=_optional_text(payload["human_confirmation_timestamp"]),
+            authorization_source=_optional_text(payload.get("authorization_source")) or "HUMAN_CONFIRMATION",
+            mandate_authorization_reference=_optional_text(payload.get("mandate_authorization_reference")),
+            mandate_authorization_hash=_optional_hash(payload.get("mandate_authorization_hash")),
+            semantic_management_intent=_optional_text(payload.get("semantic_management_intent")),
+            strategy_reference=_optional_text(payload.get("strategy_reference")),
+            evaluation_reference=_optional_text(payload.get("evaluation_reference")),
+            policy_reference=_optional_text(payload.get("policy_reference")),
             integrity_hash=_hash(payload["integrity_hash"]),
         )
 
     def protected_dict(self) -> dict[str, Any]:
-        return {name: getattr(self, name) for name in self.__dataclass_fields__}
+        values = {name: getattr(self, name) for name in self.__dataclass_fields__}
+        if self.request_version == MANAGEMENT_REQUEST_VERSION:
+            for name in (
+                "authorization_source",
+                "mandate_authorization_reference",
+                "mandate_authorization_hash",
+                "semantic_management_intent",
+                "strategy_reference",
+                "evaluation_reference",
+                "policy_reference",
+            ):
+                values.pop(name)
+        return values
 
 
 class ControlledMT5ManagementService:
@@ -264,46 +311,134 @@ class ControlledMT5ManagementService:
             raise ValueError("AUTHENTICATION_FAILED")
 
     def _validate_integrity(self, request: ProtectedBridgeManagementRequest) -> None:
-        if request.request_version != MANAGEMENT_REQUEST_VERSION:
+        if request.request_version not in {
+            MANAGEMENT_REQUEST_VERSION,
+            MANDATE_MANAGEMENT_REQUEST_VERSION,
+        }:
             raise ValueError("MANAGEMENT_REQUEST_VERSION_INVALID")
         values = request.protected_dict()
         if not hmac.compare_digest(request.mutation_hash, _mutation_hash(values)):
             raise ValueError("MANAGEMENT_MUTATION_HASH_MISMATCH")
-        phrase = CONFIRMATION_PHRASES[request.management_intent]
-        if not hmac.compare_digest(request.human_confirmation_phrase, phrase):
-            raise ValueError("MANAGEMENT_CONFIRMATION_INVALID")
-        expected_confirmation = _sha256(
-            "|".join(
-                (
-                    phrase,
-                    request.management_intent,
-                    request.protected_broker_reference,
-                    request.expected_account_context_fingerprint,
-                    request.lifecycle_observation_reference,
-                    request.mutation_hash,
-                    request.human_confirmation_timestamp,
-                )
-            )
-        )
-        if not hmac.compare_digest(request.human_confirmation_reference, expected_confirmation):
-            raise ValueError("MANAGEMENT_CONFIRMATION_INVALID")
         if not hmac.compare_digest(request.integrity_hash, _request_integrity_hash(values)):
             raise ValueError("MANAGEMENT_INTEGRITY_MISMATCH")
         now = datetime.now(timezone.utc)
         observed = _parse_timestamp(request.lifecycle_observed_at)
         created = _parse_timestamp(request.created_at)
-        confirmed = _parse_timestamp(request.human_confirmation_timestamp)
         expires = _parse_timestamp(request.expires_at)
+        if request.authorization_source == "HUMAN_CONFIRMATION":
+            if request.request_version != MANAGEMENT_REQUEST_VERSION:
+                raise ValueError("MANAGEMENT_REQUEST_VERSION_INVALID")
+            phrase = CONFIRMATION_PHRASES[request.management_intent]
+            if not hmac.compare_digest(request.human_confirmation_phrase, phrase):
+                raise ValueError("MANAGEMENT_CONFIRMATION_INVALID")
+            expected_confirmation = _sha256(
+                "|".join(
+                    (
+                        phrase,
+                        request.management_intent,
+                        request.protected_broker_reference,
+                        request.expected_account_context_fingerprint,
+                        request.lifecycle_observation_reference,
+                        request.mutation_hash,
+                        request.human_confirmation_timestamp,
+                    )
+                )
+            )
+            if not hmac.compare_digest(request.human_confirmation_reference, expected_confirmation):
+                raise ValueError("MANAGEMENT_CONFIRMATION_INVALID")
+            confirmed = _parse_timestamp(request.human_confirmation_timestamp)
+            if (
+                confirmed > now + timedelta(seconds=30)
+                or confirmed < created - timedelta(seconds=1)
+                or (now - confirmed).total_seconds() > self.config.max_request_age_seconds
+            ):
+                raise ValueError("LIFECYCLE_OBSERVATION_STALE")
+        elif request.authorization_source == "STANDING_MANDATE":
+            if request.request_version != MANDATE_MANAGEMENT_REQUEST_VERSION:
+                raise ValueError("MANAGEMENT_REQUEST_VERSION_INVALID")
+            self._validate_mandate_authority(request, now)
+        else:
+            raise ValueError("MANAGEMENT_AUTHORIZATION_SOURCE_INVALID")
         if (
             (now - observed).total_seconds() > self.config.max_request_age_seconds
             or now > expires
             or created > now + timedelta(seconds=30)
-            or confirmed > now + timedelta(seconds=30)
-            or confirmed < created - timedelta(seconds=1)
-            or (now - confirmed).total_seconds() > self.config.max_request_age_seconds
         ):
             raise ValueError("LIFECYCLE_OBSERVATION_STALE")
         _validate_intent_values(request)
+
+    def _validate_mandate_authority(
+        self, request: ProtectedBridgeManagementRequest, now: datetime
+    ) -> None:
+        try:
+            from src.services.trading.execution.mt5_live_adapter_pre_submit.trading_authority import (
+                TradingAuthorityError,
+                TradingAuthorityStore,
+            )
+
+            store = TradingAuthorityStore(self.config.authority_journal_path)
+            authorization = store.load_management_authorization(
+                request.mandate_authorization_reference
+            )
+            mandate = store.latest_mandate(authorization.mandate_id)
+            mode = store.latest_mode()
+            source_authorization = store.load_authorization(
+                authorization.source_candidate_authorization_reference
+            )
+        except TradingAuthorityError as exc:
+            raise ValueError(str(exc)) from exc
+        expected_account_hash = _sha256(request.expected_account_context_fingerprint)
+        allowed = {
+            "CANCEL_PENDING_ORDER": {"CANCEL_PENDING_ORDER", "CANCEL_PENDING"},
+            "MODIFY_POSITION_PROTECTION": {
+                "MODIFY_POSITION_PROTECTION",
+                "MODIFY_PROTECTION",
+            },
+            "PARTIAL_CLOSE": {"PARTIAL_CLOSE"},
+            "CLOSE_POSITION": {"CLOSE_POSITION"},
+        }.get(request.semantic_management_intent, set())
+        if (
+            not authorization.integrity_valid()
+            or mandate is None
+            or not mandate.integrity_valid()
+            or mode is None
+            or not mode.integrity_valid()
+            or mode.operating_mode != "autonomous_live"
+            or mandate.operating_mode != "autonomous_live"
+            or mandate.revoked
+            or mandate.kill_switch_engaged
+            or not mandate.account_is_demo
+            or mandate.mandate_version != authorization.mandate_version
+            or source_authorization.mandate_id != mandate.mandate_id
+            or source_authorization.mandate_version != mandate.mandate_version
+            or not allowed.intersection(mandate.permitted_management_actions)
+            or _time(authorization.expires_at) <= now
+            or not (
+                _time(mandate.active_from)
+                <= now
+                < min(_time(mandate.active_until), _time(mandate.expires_at))
+            )
+        ):
+            raise ValueError("MANDATE_NOT_CURRENT")
+        bindings = (
+            (authorization.authorization_id, request.mandate_authorization_reference),
+            (authorization.artifact_hash, request.mandate_authorization_hash),
+            (authorization.management_intent, request.semantic_management_intent),
+            (authorization.backend_management_intent, request.management_intent),
+            (authorization.management_mutation_hash, request.mutation_hash),
+            (authorization.protected_execution_reference, request.protected_execution_reference),
+            (authorization.lifecycle_observation_reference, request.lifecycle_observation_reference),
+            (authorization.lifecycle_observation_hash, request.lifecycle_observation_hash),
+            (authorization.strategy_reference, request.strategy_reference),
+            (authorization.evaluation_reference, request.evaluation_reference),
+            (authorization.policy_reference, request.policy_reference),
+            (authorization.account_fingerprint_hash, expected_account_hash),
+            (mandate.account_fingerprint_hash, expected_account_hash),
+            (mode.account_fingerprint_hash, expected_account_hash),
+            (authorization.broker_symbol, request.symbol),
+        )
+        if any(not hmac.compare_digest(str(left), str(right)) for left, right in bindings):
+            raise ValueError("MANDATE_MANAGEMENT_BINDING_MISMATCH")
 
     def _validate_sources(
         self,
@@ -644,7 +779,10 @@ def _mutation_hash(values: Mapping[str, Any]) -> str:
         "requested_take_profit", "requested_deviation", "lifecycle_state", "lifecycle_observed_at",
         "idempotency_key", "created_at", "expires_at",
     )
-    return _sha256(_canonical_json({key: values.get(key) for key in keys}))
+    material = {key: values.get(key) for key in keys}
+    if material["request_version"] == MANDATE_MANAGEMENT_REQUEST_VERSION:
+        material["request_version"] = MANAGEMENT_REQUEST_VERSION
+    return _sha256(_canonical_json(material))
 
 
 def _request_integrity_hash(values: Mapping[str, Any]) -> str:
@@ -696,6 +834,10 @@ def _safe_reason(exc: Exception) -> str:
         "MANAGEMENT_DISABLED", "AUTHENTICATION_FAILED", "MANAGEMENT_SCHEMA_INVALID",
         "MANAGEMENT_REQUEST_VERSION_INVALID", "MANAGEMENT_MUTATION_HASH_MISMATCH",
         "MANAGEMENT_CONFIRMATION_INVALID", "MANAGEMENT_INTEGRITY_MISMATCH",
+        "MANAGEMENT_AUTHORIZATION_SOURCE_INVALID", "MANDATE_NOT_CURRENT",
+        "MANDATE_MANAGEMENT_BINDING_MISMATCH",
+        "MANDATE_MANAGEMENT_AUTHORIZATION_NOT_FOUND",
+        "MANDATE_MANAGEMENT_AUTHORIZATION_INTEGRITY_INVALID",
         "LIFECYCLE_OBSERVATION_STALE", "LIFECYCLE_OBSERVATION_INELIGIBLE",
         "LIFECYCLE_OBSERVATION_MISMATCH", "LIFECYCLE_OBSERVATION_NOT_FOUND",
         "LIFECYCLE_JOURNAL_MISSING", "LIFECYCLE_JOURNAL_UNAVAILABLE",
@@ -726,6 +868,18 @@ def _intent(value: Any) -> str:
 
 def _optional_decimal(value: Any) -> str | None:
     return None if value is None else _decimal_text(value)
+
+
+def _optional_text(value: Any) -> str:
+    if value in {None, ""}:
+        return ""
+    return _text(value, "OPTIONAL_TEXT")
+
+
+def _optional_hash(value: Any) -> str:
+    if value in {None, ""}:
+        return ""
+    return _hash(value)
 
 
 def _decimal_text(value: Any, *, positive: bool = False) -> str:
@@ -775,6 +929,10 @@ def _parse_timestamp(value: str) -> datetime:
     except ValueError as exc:
         raise ValueError("LIFECYCLE_OBSERVATION_STALE") from exc
     return parsed.astimezone(timezone.utc)
+
+
+def _time(value: str) -> datetime:
+    return _parse_timestamp(value)
 
 
 def _canonical_json(value: Any) -> str:

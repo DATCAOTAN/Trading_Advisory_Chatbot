@@ -191,6 +191,69 @@ class MandateCandidateAuthorization:
         }
 
 
+@dataclass(frozen=True)
+class MandateManagementAuthorization:
+    authorization_id: str
+    authorization_source: str
+    created_at: str
+    expires_at: str
+    management_intent: str
+    backend_management_intent: str
+    management_mutation_hash: str
+    target_reference: str = field(repr=False)
+    protected_execution_reference: str = ""
+    lifecycle_observation_reference: str = ""
+    lifecycle_observation_hash: str = ""
+    strategy_reference: str = ""
+    source_candidate_reference: str = ""
+    source_candidate_authorization_reference: str = ""
+    evaluation_reference: str = ""
+    policy_reference: str = ""
+    account_fingerprint_hash: str = field(default="", repr=False)
+    symbol: str = ""
+    broker_symbol: str = ""
+    current_volume: str = field(default="", repr=False)
+    resulting_volume: str | None = field(default=None, repr=False)
+    concurrent_positions: int = 0
+    trades_today: int = 0
+    loss_today: str = "0"
+    mandate_id: str = ""
+    mandate_version: int = 0
+    authorization_nonce: str = ""
+    deterministic_idempotency_key: str = field(default="", repr=False)
+    artifact_hash: str = ""
+
+    def protected_payload(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["artifact_hash"] = ""
+        return payload
+
+    def integrity_valid(self) -> bool:
+        return (
+            self.authorization_source == "STANDING_MANDATE"
+            and _valid_hash(self.artifact_hash)
+            and hmac.compare_digest(self.artifact_hash, _hash(self.protected_payload()))
+        )
+
+    def to_public_dict(self) -> dict[str, Any]:
+        return {
+            "authorization_id": self.authorization_id,
+            "authorization_source": self.authorization_source,
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+            "management_intent": self.management_intent,
+            "strategy_reference": self.strategy_reference,
+            "symbol": self.symbol,
+            "broker_symbol": self.broker_symbol,
+            "mandate_id": self.mandate_id,
+            "mandate_version": self.mandate_version,
+            "target_redacted": True,
+            "management_values_redacted": True,
+            "execution_authority": False,
+            "executable": False,
+        }
+
+
 class TradingAuthorityStore:
     _process_lock = threading.Lock()
 
@@ -301,6 +364,19 @@ class TradingAuthorityStore:
         if not rows:
             raise TradingAuthorityError("MANDATE_AUTHORIZATION_NOT_FOUND")
         return _authorization_from_payload(rows[-1]["payload"])
+
+    def load_management_authorization(
+        self, authorization_id: str
+    ) -> MandateManagementAuthorization:
+        rows = [
+            row
+            for row in self.read_strict()
+            if row["event_type"] == "MANAGEMENT_AUTHORIZED"
+            and row["payload"].get("authorization_id") == authorization_id
+        ]
+        if not rows:
+            raise TradingAuthorityError("MANDATE_MANAGEMENT_AUTHORIZATION_NOT_FOUND")
+        return _management_authorization_from_payload(rows[-1]["payload"])
 
     def _exclusive_lock(self):
         store = self
@@ -420,7 +496,16 @@ class TradingAuthorityService:
         )
         management_actions = _allowed_values(
             permitted_management_actions,
-            {"OBSERVE", "NO_ACTION", "CANCEL_PENDING", "MODIFY_PROTECTION", "CLOSE_POSITION"},
+            {
+                "OBSERVE",
+                "NO_ACTION",
+                "CANCEL_PENDING_ORDER",
+                "CANCEL_PENDING",
+                "MODIFY_POSITION_PROTECTION",
+                "MODIFY_PROTECTION",
+                "PARTIAL_CLOSE",
+                "CLOSE_POSITION",
+            },
             allow_empty=True,
         )
         _positive_decimal(maximum_volume, "MANDATE_MAXIMUM_VOLUME_INVALID")
@@ -696,6 +781,199 @@ class TradingAuthorityService:
             blockers.append("MANDATE_AUTHORIZATION_EXPIRED")
         return tuple(dict.fromkeys(blockers))
 
+    def authorize_management(
+        self,
+        proposal: Any,
+        target: Any,
+        *,
+        semantic_management_intent: str,
+        mandate_id: str,
+        strategy_reference: str,
+        source_candidate_authorization_reference: str,
+        evaluation_reference: str,
+        policy_reference: str,
+        account_fingerprint: str,
+        account_is_demo: bool,
+        concurrent_positions: int,
+        trades_today: int,
+        loss_today: str,
+        current_kill_switch_engaged: bool,
+        lifecycle_healthy: bool,
+        reconciliation_healthy: bool,
+        authorization_nonce: str,
+        now: datetime | None = None,
+    ) -> MandateManagementAuthorization:
+        evaluated_at = _utc(now)
+        mode = self.store.latest_mode()
+        mandate = self.store.latest_mandate(mandate_id)
+        try:
+            source_authorization = self.store.load_authorization(
+                source_candidate_authorization_reference
+            )
+        except TradingAuthorityError:
+            source_authorization = None
+        blockers = _management_blockers(
+            proposal,
+            target,
+            semantic_management_intent=semantic_management_intent,
+            mode=mode,
+            mandate=mandate,
+            source_authorization=source_authorization,
+            strategy_reference=strategy_reference,
+            account_fingerprint=account_fingerprint,
+            account_is_demo=account_is_demo,
+            concurrent_positions=concurrent_positions,
+            trades_today=trades_today,
+            loss_today=loss_today,
+            current_kill_switch_engaged=current_kill_switch_engaged,
+            lifecycle_healthy=lifecycle_healthy,
+            reconciliation_healthy=reconciliation_healthy,
+            now=evaluated_at,
+        )
+        if blockers or not all(
+            _identifier(value)
+            for value in (
+                authorization_nonce,
+                evaluation_reference,
+                policy_reference,
+            )
+        ):
+            raise TradingAuthorityError(
+                blockers[0] if blockers else "MANAGEMENT_AUTHORIZATION_REFERENCE_INVALID"
+            )
+        assert mandate is not None and source_authorization is not None
+        target_provenance = getattr(target, "provenance", None)
+        source_candidate_reference = str(
+            getattr(target_provenance, "candidate_reference", "") or ""
+        )
+        expires_at = min(
+            _time(str(proposal.expires_at)),
+            _time(mandate.active_until),
+            _time(mandate.expires_at),
+        ).isoformat()
+        key_material = {
+            "management_mutation_hash": proposal.mutation_hash,
+            "target_reference": target.protected_reference,
+            "mandate_id": mandate.mandate_id,
+            "mandate_version": mandate.mandate_version,
+            "strategy_reference": strategy_reference,
+            "authorization_nonce": authorization_nonce,
+        }
+        idempotency_key = _hash(key_material)
+        authorization = MandateManagementAuthorization(
+            authorization_id="mandate_management_" + idempotency_key[:24],
+            authorization_source="STANDING_MANDATE",
+            created_at=evaluated_at.isoformat(),
+            expires_at=expires_at,
+            management_intent=str(semantic_management_intent).upper(),
+            backend_management_intent=proposal.management_intent,
+            management_mutation_hash=proposal.mutation_hash,
+            target_reference=target.protected_reference,
+            protected_execution_reference=proposal.protected_execution_reference,
+            lifecycle_observation_reference=proposal.lifecycle_observation_reference,
+            lifecycle_observation_hash=proposal.lifecycle_observation_hash,
+            strategy_reference=strategy_reference,
+            source_candidate_reference=source_candidate_reference,
+            source_candidate_authorization_reference=source_authorization.authorization_id,
+            evaluation_reference=evaluation_reference,
+            policy_reference=policy_reference,
+            account_fingerprint_hash=mandate.account_fingerprint_hash,
+            symbol=str(getattr(target, "canonical_symbol", "")),
+            broker_symbol=str(getattr(target, "broker_symbol", "")),
+            current_volume=str(proposal.current_observed_volume),
+            resulting_volume=proposal.requested_resulting_volume,
+            concurrent_positions=concurrent_positions,
+            trades_today=trades_today,
+            loss_today=str(loss_today),
+            mandate_id=mandate.mandate_id,
+            mandate_version=mandate.mandate_version,
+            authorization_nonce=authorization_nonce,
+            deterministic_idempotency_key=idempotency_key,
+        )
+        authorization = replace(
+            authorization, artifact_hash=_hash(authorization.protected_payload())
+        )
+        row, _created = self.store.append("MANAGEMENT_AUTHORIZED", authorization)
+        return _management_authorization_from_payload(row["payload"])
+
+    def validate_management_authorization(
+        self,
+        authorization_id: str,
+        proposal: Any,
+        target: Any,
+        *,
+        account_fingerprint: str,
+        account_is_demo: bool,
+        concurrent_positions: int,
+        trades_today: int,
+        loss_today: str,
+        current_kill_switch_engaged: bool,
+        lifecycle_healthy: bool,
+        reconciliation_healthy: bool,
+        now: datetime | None = None,
+    ) -> tuple[str, ...]:
+        try:
+            authorization = self.store.load_management_authorization(authorization_id)
+            mandate = self.store.latest_mandate(authorization.mandate_id)
+            mode = self.store.latest_mode()
+            source_authorization = self.store.load_authorization(
+                authorization.source_candidate_authorization_reference
+            )
+        except TradingAuthorityError as exc:
+            return (str(exc),)
+        blockers = list(
+            _management_blockers(
+                proposal,
+                target,
+                semantic_management_intent=authorization.management_intent,
+                mode=mode,
+                mandate=mandate,
+                source_authorization=source_authorization,
+                strategy_reference=authorization.strategy_reference,
+                account_fingerprint=account_fingerprint,
+                account_is_demo=account_is_demo,
+                concurrent_positions=concurrent_positions,
+                trades_today=trades_today,
+                loss_today=loss_today,
+                current_kill_switch_engaged=current_kill_switch_engaged,
+                lifecycle_healthy=lifecycle_healthy,
+                reconciliation_healthy=reconciliation_healthy,
+                now=_utc(now),
+            )
+        )
+        target_provenance = getattr(target, "provenance", None)
+        current = (
+            proposal.mutation_hash,
+            target.protected_reference,
+            proposal.protected_execution_reference,
+            proposal.lifecycle_observation_reference,
+            proposal.lifecycle_observation_hash,
+            str(getattr(target_provenance, "candidate_reference", "") or ""),
+            str(getattr(target, "canonical_symbol", "")),
+            str(getattr(target, "broker_symbol", "")),
+            str(proposal.current_observed_volume),
+            proposal.requested_resulting_volume,
+        )
+        expected = (
+            authorization.management_mutation_hash,
+            authorization.target_reference,
+            authorization.protected_execution_reference,
+            authorization.lifecycle_observation_reference,
+            authorization.lifecycle_observation_hash,
+            authorization.source_candidate_reference,
+            authorization.symbol,
+            authorization.broker_symbol,
+            authorization.current_volume,
+            authorization.resulting_volume,
+        )
+        if not authorization.integrity_valid() or not hmac.compare_digest(
+            _hash(current), _hash(expected)
+        ):
+            blockers.append("MANDATE_MANAGEMENT_BINDING_MISMATCH")
+        if _time(authorization.expires_at) <= _utc(now):
+            blockers.append("MANDATE_MANAGEMENT_AUTHORIZATION_EXPIRED")
+        return tuple(dict.fromkeys(blockers))
+
     @staticmethod
     def _candidate_blockers(
         candidate,
@@ -773,6 +1051,151 @@ class TradingAuthorityService:
         return tuple(dict.fromkeys(blockers))
 
 
+def _management_blockers(
+    proposal: Any,
+    target: Any,
+    *,
+    semantic_management_intent: str,
+    mode: OperatingModeAuthority | None,
+    mandate: StandingTradingMandate | None,
+    source_authorization: MandateCandidateAuthorization | None,
+    strategy_reference: str,
+    account_fingerprint: str,
+    account_is_demo: bool,
+    concurrent_positions: int,
+    trades_today: int,
+    loss_today: str,
+    current_kill_switch_engaged: bool,
+    lifecycle_healthy: bool,
+    reconciliation_healthy: bool,
+    now: datetime,
+) -> tuple[str, ...]:
+    blockers: list[str] = []
+    intent = str(semantic_management_intent or "").upper()
+    backend_intent = str(getattr(proposal, "management_intent", "") or "")
+    expected_backend = {
+        "CANCEL_PENDING_ORDER": "CANCEL_PENDING_ORDER",
+        "MODIFY_POSITION_PROTECTION": "MODIFY_POSITION_PROTECTION",
+        "PARTIAL_CLOSE": "CLOSE_POSITION",
+        "CLOSE_POSITION": "CLOSE_POSITION",
+    }.get(intent)
+    if expected_backend is None or backend_intent != expected_backend:
+        blockers.append("MANDATE_MANAGEMENT_INTENT_INVALID")
+    if mode is None or not mode.integrity_valid() or mode.operating_mode != "autonomous_live":
+        blockers.append("AUTONOMOUS_MODE_NOT_AUTHORITATIVE")
+    if mandate is None or not mandate.integrity_valid():
+        blockers.append("MANDATE_INTEGRITY_INVALID")
+        return tuple(blockers)
+    fingerprint_hash = _fingerprint_hash(account_fingerprint)
+    if (
+        not account_is_demo
+        or not mandate.account_is_demo
+        or not hmac.compare_digest(mandate.account_fingerprint_hash, fingerprint_hash)
+        or mode is None
+        or not hmac.compare_digest(mode.account_fingerprint_hash, fingerprint_hash)
+    ):
+        blockers.append("MANDATE_ACCOUNT_MISMATCH")
+    if mandate.revoked:
+        blockers.append("MANDATE_REVOKED")
+    if mandate.kill_switch_engaged or current_kill_switch_engaged:
+        blockers.append("KILL_SWITCH_ENGAGED")
+    if not (
+        _time(mandate.active_from)
+        <= now
+        < min(_time(mandate.active_until), _time(mandate.expires_at))
+    ):
+        blockers.append("MANDATE_EXPIRED_OR_INACTIVE")
+    allowed = {
+        "CANCEL_PENDING_ORDER": {"CANCEL_PENDING_ORDER", "CANCEL_PENDING"},
+        "MODIFY_POSITION_PROTECTION": {
+            "MODIFY_POSITION_PROTECTION",
+            "MODIFY_PROTECTION",
+        },
+        "PARTIAL_CLOSE": {"PARTIAL_CLOSE"},
+        "CLOSE_POSITION": {"CLOSE_POSITION"},
+    }.get(intent, set())
+    if not allowed.intersection(mandate.permitted_management_actions):
+        blockers.append("MANDATE_MANAGEMENT_INTENT_NOT_ALLOWED")
+    canonical_symbol = str(getattr(target, "canonical_symbol", "") or "")
+    broker_symbol = str(getattr(target, "broker_symbol", "") or "")
+    if (
+        canonical_symbol not in mandate.permitted_symbols
+        or broker_symbol not in mandate.permitted_broker_symbols
+    ):
+        blockers.append("MANDATE_SYMBOL_NOT_ALLOWED")
+    target_provenance = getattr(target, "provenance", None)
+    target_strategy = str(
+        getattr(target_provenance, "strategy_reference", "") or ""
+    )
+    target_candidate = str(
+        getattr(target_provenance, "candidate_reference", "") or ""
+    )
+    target_open_authorization = str(
+        getattr(target_provenance, "authorization_reference", "") or ""
+    )
+    if (
+        not _identifier(strategy_reference)
+        or not hmac.compare_digest(target_strategy, strategy_reference)
+    ):
+        blockers.append("MANDATE_STRATEGY_MISMATCH")
+    if (
+        source_authorization is None
+        or not source_authorization.integrity_valid()
+        or source_authorization.mandate_id != mandate.mandate_id
+        or source_authorization.mandate_version != mandate.mandate_version
+        or not hmac.compare_digest(
+            source_authorization.candidate_reference, target_candidate
+        )
+        or not hmac.compare_digest(
+            source_authorization.authorization_id, target_open_authorization
+        )
+    ):
+        blockers.append("MANDATE_SOURCE_AUTHORIZATION_MISMATCH")
+    state = str(getattr(target, "state", "") or "")
+    allowed_states = {
+        "CANCEL_PENDING_ORDER": {"ORDER_ACTIVE"},
+        "MODIFY_POSITION_PROTECTION": {
+            "POSITION_OPEN",
+            "POSITION_PARTIALLY_REDUCED",
+        },
+        "PARTIAL_CLOSE": {"POSITION_OPEN", "POSITION_PARTIALLY_REDUCED"},
+        "CLOSE_POSITION": {"POSITION_OPEN", "POSITION_PARTIALLY_REDUCED"},
+    }.get(intent, set())
+    if state not in allowed_states or state != str(getattr(proposal, "lifecycle_state", "")):
+        blockers.append("MANAGEMENT_LIFECYCLE_NOT_ELIGIBLE")
+    try:
+        current = Decimal(str(getattr(proposal, "current_observed_volume", "")))
+        resulting_value = getattr(proposal, "requested_resulting_volume", None)
+        resulting = None if resulting_value is None else Decimal(str(resulting_value))
+        if current != Decimal(str(getattr(target, "volume", ""))) or current <= 0:
+            blockers.append("POSITION_VOLUME_CHANGED")
+        if intent == "PARTIAL_CLOSE" and (
+            resulting is None or resulting <= 0 or resulting >= current
+        ):
+            blockers.append("CLOSE_VOLUME_INVALID")
+        elif intent == "CLOSE_POSITION" and resulting != 0:
+            blockers.append("CLOSE_VOLUME_INVALID")
+        elif intent == "MODIFY_POSITION_PROTECTION" and resulting != current:
+            blockers.append("POSITION_VOLUME_INCREASE_NOT_ALLOWED")
+        elif intent == "CANCEL_PENDING_ORDER" and resulting not in {None, Decimal(0)}:
+            blockers.append("MANAGEMENT_VALUES_INVALID")
+        if resulting is not None and resulting > current:
+            blockers.append("POSITION_VOLUME_INCREASE_NOT_ALLOWED")
+        if Decimal(str(loss_today)) >= Decimal(mandate.maximum_loss_per_day):
+            blockers.append("MANDATE_DAILY_LOSS_LIMIT_EXHAUSTED")
+    except (InvalidOperation, TypeError, ValueError):
+        blockers.append("MANDATE_NUMERIC_INPUT_INVALID")
+    if concurrent_positions > mandate.maximum_concurrent_positions:
+        blockers.append("MANDATE_POSITION_LIMIT_EXCEEDED")
+    if trades_today > mandate.maximum_trades_per_day:
+        blockers.append("MANDATE_TRADE_LIMIT_EXCEEDED")
+    if not lifecycle_healthy:
+        blockers.append("LIFECYCLE_NOT_HEALTHY")
+    if not reconciliation_healthy:
+        blockers.append("RECONCILIATION_NOT_HEALTHY")
+    return tuple(dict.fromkeys(blockers))
+
+
 def _mode_from_payload(payload: Mapping[str, Any]) -> OperatingModeAuthority:
     record = OperatingModeAuthority(**dict(payload))
     if not record.integrity_valid():
@@ -806,6 +1229,15 @@ def _authorization_from_payload(payload: Mapping[str, Any]) -> MandateCandidateA
     record = MandateCandidateAuthorization(**values)
     if not record.integrity_valid():
         raise TradingAuthorityError("MANDATE_AUTHORIZATION_INTEGRITY_INVALID")
+    return record
+
+
+def _management_authorization_from_payload(
+    payload: Mapping[str, Any],
+) -> MandateManagementAuthorization:
+    record = MandateManagementAuthorization(**dict(payload))
+    if not record.integrity_valid():
+        raise TradingAuthorityError("MANDATE_MANAGEMENT_AUTHORIZATION_INTEGRITY_INVALID")
     return record
 
 

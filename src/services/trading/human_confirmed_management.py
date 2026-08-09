@@ -258,33 +258,13 @@ class HumanConfirmedManagementService:
         revision: int,
     ) -> HumanConfirmedManagementOutcome:
         try:
-            current = _decimal(target.volume, "CURRENT_VOLUME_INVALID")
-            backend_intent, resulting, stop_loss, take_profit, deviation = _proposal_values(
-                semantic_intent,
-                target,
-                current,
-                values,
-            )
             observation = self._observation(target)
-            idempotency = _idempotency_key(
-                semantic_intent,
-                target.protected_reference,
-                str(observation.get("observation_id") or ""),
-                resulting,
-                stop_loss,
-                take_profit,
-            )
-            backend = MT5ManagementProposal.from_lifecycle_observation(
-                observation,
-                management_intent=backend_intent,
-                expected_account_context_fingerprint=model.account_context_fingerprint,
-                symbol=target.broker_symbol,
-                current_observed_volume=current,
-                idempotency_key=idempotency,
-                requested_resulting_volume=resulting,
-                requested_stop_loss=stop_loss,
-                requested_take_profit=take_profit,
-                requested_deviation=deviation,
+            backend = build_management_proposal(
+                semantic_intent=semantic_intent,
+                model=model,
+                target=target,
+                values=values,
+                observation=observation,
             )
         except (InvalidOperation, TypeError, ValueError) as exc:
             return _blocked(str(exc) or "MANAGEMENT_PROPOSAL_INVALID")
@@ -316,6 +296,56 @@ class HumanConfirmedManagementService:
         if target.provenance.lifecycle_reference and observation.get("observation_id") != target.provenance.lifecycle_reference:
             raise ValueError("LIFECYCLE_OBSERVATION_STALE")
         return observation
+
+
+def build_management_proposal(
+    *,
+    semantic_intent: str,
+    model: PositionReadModel,
+    target: PositionReadItem,
+    values: Mapping[str, Decimal | None],
+    observation: Mapping[str, Any],
+    current_time: datetime | None = None,
+) -> MT5ManagementProposal:
+    """Build the shared deterministic S6 proposal without granting authority."""
+    current = _decimal(target.volume, "CURRENT_VOLUME_INVALID")
+    backend_intent, resulting, stop_loss, take_profit, deviation = _proposal_values(
+        semantic_intent,
+        target,
+        current,
+        values,
+    )
+    idempotency = _idempotency_key(
+        semantic_intent,
+        target.protected_reference,
+        str(observation.get("observation_id") or ""),
+        resulting,
+        stop_loss,
+        take_profit,
+    )
+    return MT5ManagementProposal.from_lifecycle_observation(
+        observation,
+        management_intent=backend_intent,
+        expected_account_context_fingerprint=model.account_context_fingerprint,
+        symbol=target.broker_symbol,
+        current_observed_volume=current,
+        idempotency_key=idempotency,
+        requested_resulting_volume=resulting,
+        requested_stop_loss=stop_loss,
+        requested_take_profit=take_profit,
+        requested_deviation=deviation,
+        current_time=current_time,
+    )
+
+
+def management_target_changed(
+    proposal: MT5ManagementProposal, target: PositionReadItem
+) -> str:
+    if target.state != proposal.lifecycle_state:
+        return "MANAGEMENT_LIFECYCLE_CHANGED"
+    if _optional_decimal(target.volume) != _optional_decimal(proposal.current_observed_volume):
+        return "POSITION_VOLUME_CHANGED"
+    return ""
 
 
 def _management_values(

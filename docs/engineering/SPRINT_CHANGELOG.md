@@ -1989,3 +1989,31 @@ Commit: this commit
 - Next: S7 `AUTONOMOUS_POST_ENTRY_MANAGEMENT`.
 
 ---
+
+### Sprint 7 - Autonomous Post-Entry Management
+
+Date: 2026-08-10
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added protected Standing Mandate authorization for bounded cancel, protection modification, partial close, and full close intents.
+- Reused the PositionReadModel, Sprint 6 proposal/calculation path, controlled-management adapter, bridge validation, and existing journals.
+- Added same-cycle target lookup and immediate pre-adapter revalidation of mandate, account, lifecycle, target, volume, limits, and provenance.
+- Kept mode and LLM output non-authoritative; missing deterministic management evaluation, stale state, revocation, mismatch, and reconciliation requirements fail closed.
+- Preserved no-retry `RESULT_UNKNOWN`, redacted public output, and one production `order_send` boundary.
+
+#### Verification
+
+- Focused and neighboring autonomous/management/lifecycle/UI tests: 243 passed.
+- Full regression: 3,516 passed and 156 subtests passed with 3 unchanged warnings.
+- Compileall, app health, Streamlit `200 ok`, browser acceptance, diff, documentation, and static safety checks passed.
+
+#### Current state / next step
+
+- Browser runtime had no current position or pending order, so no autonomous mutation was attempted; permissions remained disabled and kill switches engaged.
+- Controlled-submit, controlled-management writes, runtime `order_send`, broker mutation, and MT5 writes remained zero.
+- S8 is skip-or-closure-only; next major sprint is S9 `THIN_UI_AND_FULL_CONVERSATIONAL_INTEGRATION`.
+
+---

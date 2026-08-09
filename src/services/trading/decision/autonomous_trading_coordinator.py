@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
@@ -31,10 +31,18 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.approval_pre_sub
 from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled import (
     MT5ControlledExecutionRequest,
 )
+from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled_management import (
+    MT5ControlledManagementRequest,
+)
 from src.services.trading.execution.mt5_live_adapter_pre_submit.trading_authority import (
     TradingAuthorityError,
     TradingAuthorityService,
 )
+from src.services.trading.human_confirmed_management import (
+    build_management_proposal,
+    management_target_changed,
+)
+from src.services.trading.position_read_model import PositionReadModelService
 
 
 @dataclass(frozen=True)
@@ -61,6 +69,33 @@ class CoordinatorAccountContext:
         )
 
 
+@dataclass(frozen=True)
+class AutonomousManagementEvaluation:
+    decision: str
+    semantic_intent: str = ""
+    target_reference: str = field(default="", repr=False)
+    strategy_reference: str = ""
+    evaluation_reference: str = ""
+    policy_reference: str = ""
+    values: Mapping[str, Decimal | None] = field(default_factory=dict, repr=False)
+    blockers: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.decision not in {"NO_ACTION", "PROPOSE", "BLOCKED"}:
+            raise ValueError("AUTONOMOUS_MANAGEMENT_EVALUATION_INVALID")
+        if self.decision == "PROPOSE" and not all(
+            str(value or "").strip()
+            for value in (
+                self.semantic_intent,
+                self.target_reference,
+                self.strategy_reference,
+                self.evaluation_reference,
+                self.policy_reference,
+            )
+        ):
+            raise ValueError("AUTONOMOUS_MANAGEMENT_EVALUATION_INVALID")
+
+
 class AutonomousTradingCoordinator:
     """Own one bounded completed-bar path; injected services retain authority."""
 
@@ -75,6 +110,10 @@ class AutonomousTradingCoordinator:
         approval_service: ApprovalPreSubmitLifecycleService | None = None,
         mandate_context_provider: Any | None = None,
         execution_adapter: Any | None = None,
+        position_read_service: PositionReadModelService | None = None,
+        management_evaluator: Any | None = None,
+        management_context_provider: Any | None = None,
+        management_adapter: Any | None = None,
         policy_gate: Any | None = None,
         monitor_journal: AutonomousCandidateMonitorJournal | None = None,
         clock: Any | None = None,
@@ -86,6 +125,10 @@ class AutonomousTradingCoordinator:
         self.approval_service = approval_service
         self.mandate_context_provider = mandate_context_provider
         self.execution_adapter = execution_adapter
+        self.position_read_service = position_read_service
+        self.management_evaluator = management_evaluator
+        self.management_context_provider = management_context_provider
+        self.management_adapter = management_adapter or execution_adapter
         self.policy_gate = policy_gate or AutonomousExecutionPolicyGate()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         # ponytail: one coordinator lock; use per-account locks only if measured throughput needs it.
@@ -170,6 +213,16 @@ class AutonomousTradingCoordinator:
                 "BLOCKED", symbol, broker_symbol, timeframes, closed_bar_time,
                 account_scope, blocker="COORDINATOR_RUNTIME_STATE_UNSAFE",
             )
+        management_result = self._handle_post_entry_management(
+            inputs=inputs,
+            symbol=symbol,
+            broker_symbol=broker_symbol,
+            timeframes=timeframes,
+            closed_bar_time=closed_bar_time,
+            account_scope=account_scope,
+        )
+        if management_result is not None:
+            return management_result
         run_result = self.decision_orchestrator.run_once(inputs)
         if not isinstance(run_result, AutonomousDecisionRunResult):
             return self._result(
@@ -366,6 +419,232 @@ class AutonomousTradingCoordinator:
             receipt.reason if status in {"BLOCKED", "RESULT_UNKNOWN"} else "",
             authorization_source="STANDING_MANDATE",
             pre_submit_ready=True,
+        )
+
+    def _handle_post_entry_management(
+        self,
+        *,
+        inputs: Any,
+        symbol: str,
+        broker_symbol: str,
+        timeframes: tuple[str, ...],
+        closed_bar_time: str,
+        account_scope: str,
+    ) -> AutonomousCandidateMonitorResult | None:
+        if self.position_read_service is None:
+            return None
+        positions = self.position_read_service.read(
+            query_type="CURRENT", canonical_symbol=symbol, singular=False
+        )
+        orders = self.position_read_service.read(
+            query_type="PENDING", canonical_symbol=symbol, singular=False
+        )
+        targets = tuple(positions.open_positions) + tuple(orders.pending_orders)
+        if not targets:
+            return None
+        if self.management_evaluator is None:
+            return self._result(
+                "BLOCKED", symbol, broker_symbol, timeframes, closed_bar_time,
+                account_scope, blocker="AUTONOMOUS_MANAGEMENT_EVALUATOR_MISSING",
+            )
+        try:
+            evaluation = self.management_evaluator(inputs, positions, orders)
+        except Exception:
+            return self._result(
+                "BLOCKED", symbol, broker_symbol, timeframes, closed_bar_time,
+                account_scope, blocker="AUTONOMOUS_MANAGEMENT_EVALUATION_FAILED",
+            )
+        if not isinstance(evaluation, AutonomousManagementEvaluation):
+            return self._result(
+                "BLOCKED", symbol, broker_symbol, timeframes, closed_bar_time,
+                account_scope, blocker="AUTONOMOUS_MANAGEMENT_EVALUATION_INVALID",
+            )
+        if evaluation.decision == "NO_ACTION":
+            return self._management_result(
+                None,
+                evaluation,
+                symbol,
+                broker_symbol,
+                timeframes,
+                closed_bar_time,
+                account_scope,
+                "NO_ACTION",
+                "",
+            )
+        if evaluation.decision == "BLOCKED":
+            return self._result(
+                "BLOCKED", symbol, broker_symbol, timeframes, closed_bar_time,
+                account_scope,
+                intent=evaluation.semantic_intent,
+                blocker=evaluation.blockers[0] if evaluation.blockers else "AUTONOMOUS_MANAGEMENT_BLOCKED",
+            )
+        matches = [
+            target
+            for target in targets
+            if hmac.compare_digest(target.protected_reference, evaluation.target_reference)
+        ]
+        if len(matches) != 1:
+            return self._result(
+                "BLOCKED", symbol, broker_symbol, timeframes, closed_bar_time,
+                account_scope, intent=evaluation.semantic_intent,
+                blocker="AUTONOMOUS_MANAGEMENT_TARGET_NOT_UNIQUE",
+            )
+        target = matches[0]
+        model = orders if target.state == "ORDER_ACTIVE" else positions
+        try:
+            observation = self.position_read_service.lifecycle_journal.latest_by_execution().get(
+                target.provenance.execution_reference
+            )
+            if not observation:
+                raise ValueError("LIFECYCLE_OBSERVATION_UNAVAILABLE")
+            proposal = build_management_proposal(
+                semantic_intent=evaluation.semantic_intent,
+                model=model,
+                target=target,
+                values=evaluation.values,
+                observation=observation,
+                current_time=self.clock(),
+            )
+            if self.management_context_provider is None:
+                raise TradingAuthorityError("MANDATE_MANAGEMENT_CONTEXT_MISSING")
+            context = dict(self.management_context_provider(evaluation, target, inputs))
+            account = self._account_context
+            assert account is not None
+            authorization = self.authority_service.authorize_management(
+                proposal,
+                target,
+                semantic_management_intent=evaluation.semantic_intent,
+                mandate_id=str(context["mandate_id"]),
+                strategy_reference=evaluation.strategy_reference,
+                source_candidate_authorization_reference=target.provenance.authorization_reference,
+                evaluation_reference=evaluation.evaluation_reference,
+                policy_reference=evaluation.policy_reference,
+                account_fingerprint=account.account_context_fingerprint,
+                account_is_demo=account.account_is_demo,
+                concurrent_positions=int(context["concurrent_positions"]),
+                trades_today=int(context["trades_today"]),
+                loss_today=str(context["loss_today"]),
+                current_kill_switch_engaged=context.get("kill_switch_engaged") is True,
+                lifecycle_healthy=True,
+                reconciliation_healthy=True,
+                authorization_nonce=str(context["authorization_nonce"]),
+                now=self.clock(),
+            )
+        except (KeyError, TypeError, ValueError, TradingAuthorityError) as exc:
+            return self._management_result(
+                proposal if "proposal" in locals() else None,
+                evaluation,
+                symbol,
+                broker_symbol,
+                timeframes,
+                closed_bar_time,
+                account_scope,
+                "BLOCKED",
+                str(exc),
+            )
+        refreshed = self.position_read_service.read(
+            query_type="PENDING" if target.state == "ORDER_ACTIVE" else "CURRENT",
+            canonical_symbol=target.canonical_symbol,
+            protected_reference=target.protected_reference,
+            singular=True,
+        )
+        current_target = refreshed.selected_position
+        if refreshed.status != "AVAILABLE" or current_target is None:
+            blockers = refreshed.blockers or ("MANAGEMENT_TARGET_UNAVAILABLE",)
+            return self._management_result(
+                proposal, evaluation, symbol, broker_symbol, timeframes,
+                closed_bar_time, account_scope, "BLOCKED", blockers[0],
+            )
+        stale = management_target_changed(proposal, current_target)
+        latest_observation = self.position_read_service.lifecycle_journal.latest_by_execution().get(
+            current_target.provenance.execution_reference
+        )
+        if (
+            stale
+            or not latest_observation
+            or latest_observation.get("observation_id") != proposal.lifecycle_observation_reference
+            or latest_observation.get("observation_hash") != proposal.lifecycle_observation_hash
+        ):
+            return self._management_result(
+                proposal, evaluation, symbol, broker_symbol, timeframes,
+                closed_bar_time, account_scope, "BLOCKED",
+                stale or "LIFECYCLE_OBSERVATION_STALE",
+            )
+        account = self._account_context
+        assert account is not None
+        blockers = self.authority_service.validate_management_authorization(
+            authorization.authorization_id,
+            proposal,
+            current_target,
+            account_fingerprint=account.account_context_fingerprint,
+            account_is_demo=account.account_is_demo,
+            concurrent_positions=int(context["concurrent_positions"]),
+            trades_today=int(context["trades_today"]),
+            loss_today=str(context["loss_today"]),
+            current_kill_switch_engaged=context.get("kill_switch_engaged") is True,
+            lifecycle_healthy=True,
+            reconciliation_healthy=True,
+            now=self.clock(),
+        )
+        if blockers or self.management_adapter is None:
+            return self._management_result(
+                proposal, evaluation, symbol, broker_symbol, timeframes,
+                closed_bar_time, account_scope,
+                "AUTHORIZED_NON_EXECUTABLE" if not blockers else "BLOCKED",
+                blockers[0] if blockers else "",
+            )
+        try:
+            request = MT5ControlledManagementRequest.from_mandate_authorization(
+                proposal, authorization, current_time=self.clock()
+            )
+            receipt = self.management_adapter.manage_prepared_request(request)
+        except (TypeError, ValueError, RuntimeError):
+            return self._management_result(
+                proposal, evaluation, symbol, broker_symbol, timeframes,
+                closed_bar_time, account_scope, "BLOCKED",
+                "CONTROLLED_MANAGEMENT_INTEGRATION_FAILED",
+            )
+        status = {
+            "ACCEPTED": "RESULT_CONFIRMED",
+            "REJECTED": "RESULT_REJECTED",
+            "UNKNOWN": "RESULT_UNKNOWN",
+        }.get(receipt.status, "BLOCKED")
+        return self._management_result(
+            proposal, evaluation, symbol, broker_symbol, timeframes,
+            closed_bar_time, account_scope, status,
+            receipt.reason if status in {"BLOCKED", "RESULT_UNKNOWN"} else "",
+        )
+
+    @staticmethod
+    def _management_result(
+        proposal: Any | None,
+        evaluation: AutonomousManagementEvaluation,
+        symbol: str,
+        broker_symbol: str,
+        timeframes: tuple[str, ...],
+        closed_bar_time: str,
+        account_scope: str,
+        status: str,
+        blocker: str,
+    ) -> AutonomousCandidateMonitorResult:
+        reference = (
+            "management_" + proposal.mutation_hash[:24] if proposal is not None else ""
+        )
+        return AutonomousCandidateMonitorResult(
+            status,
+            symbol,
+            broker_symbol,
+            timeframes,
+            closed_bar_time,
+            candidate_reference=reference,
+            intent=evaluation.semantic_intent,
+            blocker=blocker,
+            validation_valid=status != "BLOCKED",
+            generation_count=0,
+            proposal_provider_max_invocations=0,
+            account_scope=account_scope,
+            coordinator_status=status,
+            authorization_source="STANDING_MANDATE",
         )
 
     @staticmethod

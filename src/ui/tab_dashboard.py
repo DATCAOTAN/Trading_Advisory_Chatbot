@@ -615,7 +615,14 @@ def _render_trading_runtime_controls(
             management_actions = tuple(
                 st.multiselect(
                     "Management actions",
-                    ("OBSERVE", "NO_ACTION", "CANCEL_PENDING", "MODIFY_PROTECTION", "CLOSE_POSITION"),
+                    (
+                        "OBSERVE",
+                        "NO_ACTION",
+                        "CANCEL_PENDING_ORDER",
+                        "MODIFY_POSITION_PROTECTION",
+                        "PARTIAL_CLOSE",
+                        "CLOSE_POSITION",
+                    ),
                     key=f"{key_prefix}mandate_management_actions",
                 )
             )

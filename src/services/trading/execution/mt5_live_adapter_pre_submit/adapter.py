@@ -162,16 +162,20 @@ class MT5LiveAdapterDisabled:
         self,
         request: MT5ControlledManagementRequest,
         *,
-        typed_confirmation: str,
+        typed_confirmation: str = "",
     ) -> MT5ControlledManagementReceipt:
-        blocker = self._management_blocker(request.management_intent, typed_confirmation)
+        blocker = self._management_blocker(
+            request.management_intent,
+            typed_confirmation,
+            authorization_source=request.authorization_source,
+        )
         if blocker:
             return _blocked_management_receipt(request.management_intent, blocker)
         try:
             request.validate()
         except ValueError as exc:
             return _blocked_management_receipt(request.management_intent, str(exc))
-        if not hmac.compare_digest(
+        if request.authorization_source == "HUMAN_CONFIRMATION" and not hmac.compare_digest(
             request.human_confirmation_phrase, str(typed_confirmation or "").strip()
         ):
             return _blocked_management_receipt(
@@ -276,7 +280,13 @@ class MT5LiveAdapterDisabled:
                 return "HUMAN_CONFIRMATION_INVALID"
         return ""
 
-    def _management_blocker(self, intent: str, typed_confirmation: str) -> str:
+    def _management_blocker(
+        self,
+        intent: str,
+        typed_confirmation: str,
+        *,
+        authorization_source: str = "HUMAN_CONFIRMATION",
+    ) -> str:
         allowed = {
             "CANCEL_PENDING_ORDER": self.config.management_cancel_allowed,
             "MODIFY_POSITION_PROTECTION": self.config.management_protection_modification_allowed,
@@ -300,7 +310,11 @@ class MT5LiveAdapterDisabled:
             expected = management_confirmation_phrase(intent)
         except ValueError:
             return "MANAGEMENT_INTENT_INVALID"
-        if not hmac.compare_digest(str(typed_confirmation or "").strip(), expected):
+        if authorization_source not in {"HUMAN_CONFIRMATION", "STANDING_MANDATE"}:
+            return "MANAGEMENT_AUTHORIZATION_SOURCE_INVALID"
+        if authorization_source == "HUMAN_CONFIRMATION" and not hmac.compare_digest(
+            str(typed_confirmation or "").strip(), expected
+        ):
             return "MANAGEMENT_CONFIRMATION_INVALID"
         return ""
 
