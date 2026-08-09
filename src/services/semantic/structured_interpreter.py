@@ -13,12 +13,14 @@ from src.services.semantic.structured_semantics import (
     ACCOUNT_SCOPES,
     DIRECTION_VALUES,
     PRIMARY_INTENTS,
+    RESULT_FIELDS,
     REQUESTED_MODES,
     SEMANTIC_SCHEMA_VERSION,
     StructuredSemanticResult,
     StructuredSemanticValidationError,
 )
 from src.services.trading.reasoning.llm_adapter import ProjectLLMReasoningProvider
+from src.services.trading.reasoning.strategy_evidence import INDICATOR_REGISTRY
 
 
 @dataclass(frozen=True)
@@ -60,7 +62,14 @@ class StructuredSemanticInterpreter:
             )
             semantic = StructuredSemanticResult.from_json(raw)
         except StructuredSemanticValidationError as exc:
-            return self._invalid(str(exc), provider_name, model, 1, _elapsed_ms(started))
+            return self._invalid(
+                str(exc),
+                provider_name,
+                model,
+                1,
+                _elapsed_ms(started),
+                diagnostic=_safe_validation_diagnostic(raw, str(exc)),
+            )
         except Exception as exc:  # Deliberate provider boundary: fail closed without raw output logging.
             return self._invalid(f"SEMANTIC_PROVIDER_{type(exc).__name__.upper()}", provider_name, model, 1, _elapsed_ms(started))
 
@@ -78,12 +87,23 @@ class StructuredSemanticInterpreter:
 
     @staticmethod
     def _prompt(message: str) -> str:
-        schema = {
-            "schema_version": SEMANTIC_SCHEMA_VERSION,
+        indicator_contract = {
+            indicator_id: list(definition.parameters)
+            for indicator_id, definition in sorted(INDICATOR_REGISTRY.items())
+        }
+        enum_contract = {
             "primary_intent": sorted(PRIMARY_INTENTS),
-            "secondary_intents": ["zero or more primary intent values"],
             "action": sorted(ACTION_VALUES),
             "direction": sorted(DIRECTION_VALUES),
+            "requested_mode": sorted(REQUESTED_MODES),
+            "account_scope": sorted(ACCOUNT_SCOPES),
+        }
+        schema = {
+            "schema_version": SEMANTIC_SCHEMA_VERSION,
+            "primary_intent": "string",
+            "secondary_intents": ["zero or more primary intent values"],
+            "action": "string",
+            "direction": "string",
             "subtype": "string",
             "domain": "string",
             "symbols": ["raw or normalized user symbol references"],
@@ -91,8 +111,8 @@ class StructuredSemanticInterpreter:
             "requested_data": ["string"],
             "conditions": [{"subject": "RSI", "operator": "GREATER_THAN", "value": 10}],
             "context_references": ["previous_symbol"],
-            "requested_mode": sorted(REQUESTED_MODES),
-            "account_scope": sorted(ACCOUNT_SCOPES),
+            "requested_mode": "string",
+            "account_scope": "string",
             "explicit_fields": ["field paths explicitly present in the message"],
             "unresolved_fields": ["field paths that remain incomplete"],
             "negated": False,
@@ -103,7 +123,14 @@ class StructuredSemanticInterpreter:
             "pricing, permissions, or execution. Do not include any execution-authority field. "
             "Keep missing child fields in unresolved_fields while preserving explicit sibling facts. "
             "Only include indicator parameters explicitly present in the message or referenced context; "
-            "do not use conventional defaults. Do not invent indicator parameters. Required exact schema: "
+            "do not use conventional defaults. Do not invent indicator parameters. The following is a reference-only "
+            "indicator contract; do not include an indicator_contract field in the output: "
+            + json.dumps(indicator_contract, ensure_ascii=False, sort_keys=True)
+            + ". The following is a reference-only enum contract; do not include an enum_contract field in the output: "
+            + json.dumps(enum_contract, ensure_ascii=False, sort_keys=True)
+            + ". Scalar enum fields must each contain exactly one matching string. Use only the indicator IDs and "
+            "parameter keys from the indicator contract. A condition subject must exactly equal one "
+            "indicator_id in indicators; do not append a period, timeframe, or output alias. Required exact output schema: "
             + json.dumps(schema, ensure_ascii=False, sort_keys=True)
             + "\nUser message:\n"
             + str(message)
@@ -116,6 +143,7 @@ class StructuredSemanticInterpreter:
         model: str,
         provider_calls: int,
         latency_ms: int,
+        diagnostic: str = "",
     ) -> StructuredSemanticInterpretation:
         result = StructuredSemanticInterpretation(
             status="INVALID",
@@ -126,20 +154,78 @@ class StructuredSemanticInterpreter:
             provider=provider,
             model=model,
         )
-        self._log(result)
+        self._log(result, diagnostic=diagnostic)
         return result
 
     @staticmethod
-    def _log(result: StructuredSemanticInterpretation) -> None:
+    def _log(result: StructuredSemanticInterpretation, *, diagnostic: str = "") -> None:
+        if diagnostic:
+            print(f"[StructuredSemanticInvalid] {diagnostic}")
         semantic = result.semantic
+        indicator_shapes = ";".join(
+            f"{item.indicator_id}(keys={','.join(name for name, _ in item.parameters) or '-'};"
+            f"types={','.join(type(value).__name__ for _, value in item.parameters) or '-'};"
+            f"timeframe={item.timeframe or '-'})"
+            for item in (semantic.indicators if semantic else ())
+        ) or "-"
+        condition_shapes = ";".join(
+            f"{item.subject}(operator={item.operator};value_type={type(item.value).__name__})"
+            for item in (semantic.conditions if semantic else ())
+        ) or "-"
+        unresolved = ",".join(semantic.unresolved_fields if semantic else ()) or "-"
         print(
             "[StructuredSemantic] "
             f"schema={SEMANTIC_SCHEMA_VERSION} provider={result.provider or 'disabled'} "
             f"status={result.status} primary_intent={semantic.primary_intent if semantic else ''} "
-            f"unresolved_count={len(semantic.unresolved_fields) if semantic else 0} "
+            f"indicator_shapes={indicator_shapes} condition_shapes={condition_shapes} "
+            f"unresolved={unresolved} "
+            f"issues={','.join(result.issues) or '-'} "
             f"provider_calls={result.provider_calls} latency_ms={result.latency_ms}"
         )
 
 
 def _elapsed_ms(started: float) -> int:
     return round((perf_counter() - started) * 1000)
+
+
+def _safe_validation_diagnostic(raw: Any, issue: str) -> str:
+    """Reports only bounded enum-shape facts from rejected provider JSON."""
+    payload = _json_object_or_none(raw)
+    top_level_keys = sorted(key for key in (payload or {}) if key in RESULT_FIELDS)
+    primary_intent = (payload or {}).get("primary_intent", _MISSING)
+    primary_type, primary_raw, primary_normalized = _safe_primary_intent(primary_intent)
+    normalized = f" primary_intent_normalized={primary_normalized}" if primary_normalized else ""
+    return (
+        f"semantic_validation_status=INVALID issue_codes=[{issue}] "
+        f"top_level_keys=[{','.join(top_level_keys)}] "
+        f"primary_intent_raw={primary_raw} primary_intent_type={primary_type}{normalized}"
+    )
+
+
+_MISSING = object()
+
+
+def _json_object_or_none(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, str):
+        return None
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _safe_primary_intent(value: Any) -> tuple[str, str, str]:
+    if value is _MISSING:
+        return "missing", "<missing>", ""
+    if not isinstance(value, str):
+        return type(value).__name__, "<non_scalar>", ""
+    if len(value) > 64:
+        return "str", "<redacted_over_limit>", ""
+
+    normalized = value.strip().upper()
+    if normalized in PRIMARY_INTENTS:
+        return "str", value, normalized if normalized != value else ""
+    if value and all("A" <= character <= "Z" or character.isdigit() or character == "_" for character in value):
+        return "str", value, ""
+    return "str", "<redacted_non_enum_scalar>", ""

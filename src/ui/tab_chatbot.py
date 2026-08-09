@@ -7,6 +7,7 @@ or catalog code directly.
 
 import hashlib
 import html
+import logging
 import re
 import time
 import unicodedata
@@ -54,6 +55,7 @@ from src.services.trading.proposal.editable_trade_draft import (
     TradeDraftError,
     TradeParameterPatch,
     market_evidence_from_live_result,
+    semantic_prerequisite_blockers,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.authority_runtime import (
     TradingAuthorityOperatorService,
@@ -70,6 +72,9 @@ from src.ui.tab_dashboard import (
     _operator_candidate_review_controller,
     _render_autonomous_decision_review_card,
 )
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class _AnswerStreamLogger:
@@ -525,6 +530,7 @@ def _render_conversational_trading_authorization(
     if (
         request.trade_action in {"OPEN_POSITION", "GENERIC_TRADE"}
         and st.session_state.get("current_session_id")
+        and request.strategy is not None
     ):
         _render_editable_trade_draft(request, orchestrator=orchestrator)
         return
@@ -663,12 +669,17 @@ def _render_editable_trade_draft(
         f"actual fraction={_display_decimal(sizing.get('actual_risk_fraction'))} | "
         "execution_authority=false | executable=false"
     )
-    if evidence_error:
+    if evidence_error == "NOT_ATTEMPTED_PREREQUISITE_UNRESOLVED":
+        st.info("Evidence status: NOT_ATTEMPTED_PREREQUISITE_UNRESOLVED")
+    elif evidence_error:
         st.warning(f"Evidence warning: {evidence_error}")
-    if draft.blockers:
-        st.warning("Draft blockers: " + ", ".join(draft.blockers))
+    nonsemantic_blockers = tuple(
+        blocker for blocker in draft.blockers if not blocker.startswith("SEMANTIC_UNRESOLVED:")
+    )
+    if nonsemantic_blockers:
+        st.warning("Draft blockers: " + ", ".join(nonsemantic_blockers))
     else:
-        st.success("Draft validation: VALID_NON_EXECUTABLE")
+        st.success("Draft validation: BLOCKED_NON_EXECUTABLE" if draft.blockers else "Draft validation: VALID_NON_EXECUTABLE")
     if draft.warnings:
         st.caption("Warnings: " + ", ".join(draft.warnings))
 
@@ -821,6 +832,8 @@ def _render_draft_candidate_action(
 
 
 def _load_trade_draft_evidence(request: ConversationalTradingRequest):
+    if semantic_prerequisite_blockers(request):
+        return None, "NOT_ATTEMPTED_PREREQUISITE_UNRESOLVED"
     try:
         provider = ProviderRegistry.build_provider()
         feature_service = LiveFeatureService(
@@ -854,8 +867,12 @@ def _load_trade_draft_evidence(request: ConversationalTradingRequest):
             primary_timeframe=primary,
             account_environment=str(authority.get("account_environment") or "UNKNOWN"),
         ), ""
-    except Exception as exc:
-        return None, type(exc).__name__
+    except ValueError:
+        LOGGER.warning("Trade draft evidence validation failed")
+        return None, "EVIDENCE_VALIDATION_FAILED"
+    except Exception:
+        LOGGER.warning("Trade draft evidence acquisition failed")
+        return None, "EVIDENCE_ACQUISITION_FAILED"
 
 
 def _entry_rule_text(rules) -> str:

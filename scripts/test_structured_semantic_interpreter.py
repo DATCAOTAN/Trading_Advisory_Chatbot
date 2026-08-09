@@ -128,6 +128,91 @@ def test_explicit_indicator_period_remains_explicit():
     assert result.semantic.unresolved_fields == ()
 
 
+def test_prompt_uses_existing_indicator_contract_without_parameter_defaults():
+    prompt = StructuredSemanticInterpreter._prompt("buy when RSI14 M1 exceeds 10")
+
+    assert '"RSI": ["period"]' in prompt
+    assert '"MACD": ["fast_period", "slow_period", "signal_period"]' in prompt
+    assert "condition subject must exactly equal one indicator_id" in prompt
+    assert "do not include an indicator_contract field in the output" in prompt
+    assert "do not include an enum_contract field in the output" in prompt
+    output_schema = json.loads(prompt.rsplit("Required exact output schema: ", 1)[1].split("\nUser message:", 1)[0])
+    assert "indicator_contract" not in output_schema
+    assert "enum_contract" not in output_schema
+    assert output_schema["primary_intent"] == "string"
+    assert output_schema["action"] == "string"
+    assert output_schema["direction"] == "string"
+    assert '"period": 14' not in prompt
+
+
+def test_safe_structured_log_reports_shape_without_raw_message(capsys):
+    message = "private operator wording RSI14 M1 above 10"
+    result, _provider = interpreted(
+        message,
+        semantic_payload(
+            indicators=[{"indicator_id": "RSI", "parameters": {"period": 14}, "timeframe": "M1"}],
+            unresolved_fields=[],
+        ),
+    )
+
+    output = capsys.readouterr().out
+
+    assert result.is_valid
+    assert "indicator_shapes=RSI(keys=period;types=float;timeframe=M1)" in output
+    assert "condition_shapes=RSI(operator=GREATER_THAN;value_type=float)" in output
+    assert "unresolved=-" in output
+    assert "issues=-" in output
+    assert message not in output
+
+
+def test_invalid_primary_intent_logs_only_bounded_structural_diagnostic(capsys):
+    payload = semantic_payload(primary_intent="TRADING", domain="private provider prose must stay hidden")
+    raw = json.dumps(payload)
+    provider = ScriptedProvider(raw)
+
+    result = StructuredSemanticInterpreter(provider).interpret("private user input must stay hidden")
+    output = capsys.readouterr().out
+
+    assert result.issues == ("SEMANTIC_PRIMARY_INTENT_INVALID",)
+    assert "[StructuredSemanticInvalid] semantic_validation_status=INVALID" in output
+    assert "issue_codes=[SEMANTIC_PRIMARY_INTENT_INVALID]" in output
+    assert "primary_intent_type=str" in output
+    assert "primary_intent_raw=TRADING" in output
+    assert "primary_intent_normalized" not in output
+    assert raw not in output
+    assert payload["domain"] not in output
+    assert len(provider.calls) == result.provider_calls == 1
+
+
+def test_invalid_non_scalar_primary_intent_logs_type_without_payload_dump(capsys):
+    payload = semantic_payload(primary_intent={"unexpected": "STRATEGY"})
+    raw = json.dumps(payload)
+    provider = ScriptedProvider(raw)
+
+    result = StructuredSemanticInterpreter(provider).interpret("meaningful message")
+    output = capsys.readouterr().out
+
+    assert result.issues == ("SEMANTIC_PRIMARY_INTENT_INVALID",)
+    assert "primary_intent_type=dict" in output
+    assert "primary_intent_raw=<non_scalar>" in output
+    assert raw not in output
+    assert "unexpected" not in output
+    assert len(provider.calls) == result.provider_calls == 1
+
+
+def test_validation_diagnostic_keeps_valid_semantics_and_strict_rejection_unchanged(capsys):
+    valid_result, valid_provider = interpreted("buy XAUUSDm", semantic_payload())
+    valid_output = capsys.readouterr().out
+    invalid_raw = json.dumps(semantic_payload(primary_intent="TRADING"))
+
+    with pytest.raises(StructuredSemanticValidationError, match="SEMANTIC_PRIMARY_INTENT_INVALID"):
+        StructuredSemanticResult.from_json(invalid_raw)
+
+    assert valid_result.is_valid
+    assert "[StructuredSemanticInvalid]" not in valid_output
+    assert len(valid_provider.calls) == valid_result.provider_calls == 1
+
+
 def test_prompt_does_not_suggest_conventional_indicator_parameters():
     prompt = StructuredSemanticInterpreter._prompt("buy when RSI M1 exceeds 10")
 

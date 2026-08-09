@@ -1769,3 +1769,99 @@ Commit: pending review
 #### Next step
 
 - Review the documentation/code diff and create a focused local checkpoint if approved.
+
+---
+
+### Runtime Semantic Evidence-Staging Repair
+
+Date: 2026-08-08
+Verification: `FULL_REGRESSION_PASS`
+Commit: pending review
+
+#### Implemented
+
+- Kept incomplete typed strategy facts valid and non-executable while skipping evidence work that requires their unresolved calculation parameters.
+- Preserved precise semantic blockers and removed market/account/tick cascade blockers caused only by deliberate evidence non-attempt.
+- Replaced the user-facing Python exception-class warning with explicit not-attempted or sanitized evidence-failure statuses.
+
+#### Verification
+
+- Focused semantic, Draft, and thin-UI tests: 65 passed.
+- Full regression: 3,406 passed and 156 subtests passed in 137.89 seconds with 3 unchanged dependency/UTC warnings.
+- Changed-path compileall, app restart, Streamlit health `200 ok`, static safety checks, and diff checks passed.
+- Browser partial acceptance passed for BTCUSD/BTCUSDm RSI M1 with period unresolved: evidence was not attempted, cascade blockers were absent, and no Candidate was created.
+- A single explicit-period browser request stopped before evidence at `INDICATOR_PARAMETER_INVALID` during strict public-request reload. Valid complete typed semantics enter evidence planning in focused coverage; the upstream runtime provider payload was not retried.
+
+#### Current state
+
+- Partial semantics remain visible, precise, and non-executable; strict calculation remains deferred until semantic prerequisites are complete.
+- Candidate, confirmation, pre-submit, controlled submission, broker mutation, and MT5 writes remain untouched.
+
+#### Next step
+
+- Diagnose the upstream structured provider/domain strategy payload only if separately authorized; do not change evidence staging or retry the failed runtime input.
+
+---
+
+### Typed Public Request Round-Trip Guard
+
+Date: 2026-08-09
+Verification: `FULL_REGRESSION_PASS`
+Commit: pending review
+
+#### Implemented
+
+- Preserved valid complete typed indicator strategies across strict public serialization and reload, including RSI and MACD parameter families.
+- Prevented a strategy with deterministic validation errors from being published into a runtime artifact the strict reloader would reject; the request remains blocked and non-executable.
+- Preserved incomplete semantics and the existing no-evidence staging behavior unchanged.
+
+#### Verification
+
+- Focused semantic/conversational/thin-UI tests: 94 passed.
+- Full regression: 3,411 passed and 156 subtests passed in 134.56 seconds with 3 unchanged dependency/UTC warnings.
+- Changed-path compileall, app restart, Streamlit health `200 ok`, static scans, and diff checks passed.
+- Browser partial acceptance passed: RSI period remained unresolved and evidence status was `NOT_ATTEMPTED_PREREQUISITE_UNRESOLVED` without a Candidate.
+- Browser explicit-period acceptance no longer crashed on public reload, but its single provider payload was incomplete/invalid, so evidence was not reached; it was not retried.
+
+#### Current state
+
+- Complete typed round-trip validation is clean; incomplete typed semantics remain precise and non-executable.
+- The remaining runtime blocker is upstream structured-provider conformance for the explicit complete request.
+
+#### Not verified / not implemented
+
+- Runtime evidence acquisition from a complete browser-produced RSI request remains blocked by that upstream payload.
+- Candidate, confirmation, pre-submit, submission, broker execution, and MT5 writes remain out of scope.
+
+#### Next step
+
+- Diagnose the structured-provider/domain-strategy payload only under a separate approved scope; do not weaken strict reload or fabricate parameters.
+
+---
+
+### Complete Semantic-to-Evidence Runtime Acceptance
+
+Date: 2026-08-09
+Verification: `FULL_REGRESSION_PASS`
+Commit: pending review
+
+#### Implemented
+
+- Closed the coherent runtime repair covering structured intent routing, typed/public round-trip validation, partial semantic staging, and bounded invalid-semantic diagnostics.
+- Preserved incomplete semantic children without fabricating values and kept evidence acquisition behind complete typed prerequisites.
+
+#### Verification
+
+- Final production repair regression: 3,416 passed and 156 subtests passed with 3 existing warnings.
+- Bounded diagnostic tests: 45 passed.
+- One single-call runtime request passed semantic/domain validation and reached the complete Draft evidence boundary.
+- Existing evidence policy returned the genuine blocker `SPREAD_TOO_WIDE`; spread-policy tuning was not part of this repair.
+
+#### Current state
+
+- Semantic/domain runtime path: PASS; evidence boundary: REACHED.
+- Draft remains non-executable. Candidate, confirmation, pre-submit, controlled submission, broker mutation, and MT5 writes remain unchanged at zero.
+
+#### Next step
+
+- Treat any spread-policy adjustment as a separate explicitly approved policy task.

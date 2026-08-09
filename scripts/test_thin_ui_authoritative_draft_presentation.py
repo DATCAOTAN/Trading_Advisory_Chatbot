@@ -197,7 +197,7 @@ def test_legacy_fallback_remains_only_for_absent_authoritative_plan(monkeypatch)
     assert calls == [("legacy compatible request", None)]
 
 
-def test_open_request_routes_directly_to_draft_without_rendering_request_blockers(monkeypatch):
+def test_open_request_without_typed_strategy_keeps_completion_blocker_visible(monkeypatch):
     request = _request(blockers=("STALE_REQUEST_BLOCKER",))
     streamlit = _FakeStreamlit()
     rendered = []
@@ -206,8 +206,8 @@ def test_open_request_routes_directly_to_draft_without_rendering_request_blocker
 
     tab_chatbot._render_conversational_trading_authorization(None, request)
 
-    assert rendered == [request]
-    assert not any("STALE_REQUEST_BLOCKER" in value for _kind, value in streamlit.messages)
+    assert rendered == []
+    assert ("warning", "Completion blockers: STALE_REQUEST_BLOCKER") in streamlit.messages
 
 
 def test_non_draft_request_keeps_its_current_request_blocker_visible(monkeypatch):
@@ -250,6 +250,96 @@ def test_semantic_missing_child_is_presented_separately_from_draft_blockers(monk
         "Semantic input unresolved: indicators[0].parameters.period",
     ) in streamlit.messages
     assert not any("SEMANTIC_UNRESOLVED" in value for _kind, value in streamlit.messages if _kind == "warning")
+
+
+@pytest.mark.parametrize(
+    "unresolved_fields",
+    (
+        ("indicators[0].parameters.period",),
+        (
+            "indicators[0].parameters.fast_period",
+            "indicators[0].parameters.slow_period",
+            "indicators[0].parameters.signal_period",
+        ),
+    ),
+)
+def test_incomplete_semantics_skip_evidence_acquisition_before_planning(monkeypatch, unresolved_fields):
+    request = _request(
+        blockers=tuple(f"SEMANTIC_UNRESOLVED:{field}" for field in unresolved_fields),
+        strategy=SimpleNamespace(semantic_unresolved_fields=unresolved_fields),
+    )
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("incomplete semantics must not enter evidence acquisition")
+
+    monkeypatch.setattr(tab_chatbot, "plan_strategy_data", unexpected)
+    monkeypatch.setattr(tab_chatbot.ProviderRegistry, "build_provider", unexpected)
+
+    evidence, status = tab_chatbot._load_trade_draft_evidence(request)
+
+    assert evidence is None
+    assert status == "NOT_ATTEMPTED_PREREQUISITE_UNRESOLVED"
+
+
+def test_complete_semantics_attempt_evidence_planning_once(monkeypatch):
+    strategy = SimpleNamespace(semantic_unresolved_fields=(), timeframes=("M1",))
+    request = _request(strategy=strategy)
+    calls = []
+    provider = SimpleNamespace(get_account=lambda: calls.append("account") or "account")
+    plan = SimpleNamespace(candle_counts=lambda: {"M1": 100})
+
+    class FeatureService:
+        def __init__(self, *, bundle_builder):
+            calls.append(("service", bundle_builder))
+
+        def build_features(self, *args, **kwargs):
+            calls.append(("features", args, kwargs))
+            return "features"
+
+    class AuthorityService:
+        def status(self, *, refresh_runtime):
+            calls.append(("authority", refresh_runtime))
+            return {"account_environment": "DEMO"}
+
+        def close(self):
+            calls.append("close")
+
+    monkeypatch.setattr(tab_chatbot, "plan_strategy_data", lambda value: calls.append(("plan", value)) or plan)
+    monkeypatch.setattr(tab_chatbot.ProviderRegistry, "build_provider", lambda: provider)
+    monkeypatch.setattr(tab_chatbot, "MarketSnapshotBundleBuilder", lambda value: ("bundle", value))
+    monkeypatch.setattr(tab_chatbot, "LiveFeatureService", FeatureService)
+    monkeypatch.setattr(tab_chatbot, "TradingAuthorityOperatorService", AuthorityService)
+    monkeypatch.setattr(tab_chatbot, "market_evidence_from_live_result", lambda *args, **kwargs: "evidence")
+
+    evidence, status = tab_chatbot._load_trade_draft_evidence(request)
+
+    assert (evidence, status) == ("evidence", "")
+    assert [item for item in calls if isinstance(item, tuple) and item[0] == "plan"] == [("plan", strategy)]
+    assert "account" in calls
+    assert ("authority", False) in calls
+    assert "close" in calls
+
+
+def test_complete_semantics_preserve_real_evidence_failure(monkeypatch):
+    strategy = SimpleNamespace(semantic_unresolved_fields=(), timeframes=("M1",))
+    request = _request(strategy=strategy)
+
+    class FeatureService:
+        def __init__(self, **_kwargs):
+            pass
+
+        def build_features(self, *_args, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(tab_chatbot, "plan_strategy_data", lambda _value: SimpleNamespace(candle_counts=lambda: {"M1": 100}))
+    monkeypatch.setattr(tab_chatbot.ProviderRegistry, "build_provider", lambda: object())
+    monkeypatch.setattr(tab_chatbot, "MarketSnapshotBundleBuilder", lambda value: value)
+    monkeypatch.setattr(tab_chatbot, "LiveFeatureService", FeatureService)
+
+    evidence, status = tab_chatbot._load_trade_draft_evidence(request)
+
+    assert evidence is None
+    assert status == "EVIDENCE_ACQUISITION_FAILED"
 
 
 def test_draft_render_never_constructs_candidate_without_explicit_button(monkeypatch):

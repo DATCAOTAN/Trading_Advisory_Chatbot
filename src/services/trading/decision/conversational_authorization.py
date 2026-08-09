@@ -261,10 +261,15 @@ def project_conversational_trading_request(
         account_scope=account_scope,
         request_id=request_id,
     )
+    # The strict strategy projection is the authority for indicator-child completion.
+    # Retain every other semantic unresolved field, and only clear children it has
+    # independently validated against the existing indicator registry.
+    strategy_unresolved = set(strategy.semantic_unresolved_fields) if strategy is not None else None
     semantic_unresolved = tuple(
         f"SEMANTIC_UNRESOLVED:{value}"
         for value in semantic_context.get("unresolved_fields", ())
         if str(value).strip()
+        and (strategy_unresolved is None or value in strategy_unresolved)
     )
     blockers: list[str] = list(semantic_unresolved)
     if not canonical_symbol:
@@ -278,11 +283,15 @@ def project_conversational_trading_request(
     if semantic.get("hypothetical") is True:
         blockers.append("HYPOTHETICAL_TRADE_ACTION")
     if strategy is not None:
+        strategy_issues = validate_strategy(strategy)
         blockers.extend(
             f"SEMANTIC_UNRESOLVED:{field}"
             for field in strategy.semantic_unresolved_fields
         )
-        blockers.extend(validate_strategy(strategy))
+        blockers.extend(strategy_issues)
+        if any(issue != "SEMANTIC_FIELDS_UNRESOLVED" for issue in strategy_issues):
+            # Never publish a strategy that the strict public reload will reject.
+            strategy = None
 
     blockers = list(dict.fromkeys(blockers))
     response_format = (
@@ -307,7 +316,7 @@ def project_conversational_trading_request(
     timeframe_profile = (
         strategy.timeframes
         if strategy and all(strategy.timeframes)
-        else tuple(query_plan.entities.timeframes) or operator_timeframe_profile(canonical_symbol)
+        else operator_timeframe_profile(canonical_symbol)
     )
     return ConversationalTradingRequest(
         request_id=request_id,

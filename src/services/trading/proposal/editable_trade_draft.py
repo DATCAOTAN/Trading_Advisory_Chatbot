@@ -28,10 +28,26 @@ FIELD_SOURCES = {
 STOP_METHODS = {"USER_EXPLICIT", "ATR_MULTIPLE", "RECENT_STRUCTURE"}
 TARGET_METHODS = {"USER_EXPLICIT", "REWARD_RISK_RATIO", "RECENT_STRUCTURE"}
 SIZING_METHODS = {"USER_EXPLICIT_VOLUME", "ACCOUNT_RISK_FRACTION"}
+SEMANTIC_UNRESOLVED_PREFIX = "SEMANTIC_UNRESOLVED:"
 
 
 class TradeDraftError(RuntimeError):
     pass
+
+
+def semantic_prerequisite_blockers(request: Any) -> tuple[str, ...]:
+    """Return typed semantic prerequisites that must precede live evidence."""
+    strategy = getattr(request, "strategy", None)
+    fields = tuple(getattr(strategy, "semantic_unresolved_fields", ()) or ())
+    request_blockers = tuple(getattr(request, "blockers", ()) or ())
+    return tuple(
+        dict.fromkeys(
+            (
+                *(f"{SEMANTIC_UNRESOLVED_PREFIX}{field}" for field in fields if str(field).strip()),
+                *(str(blocker) for blocker in request_blockers if str(blocker).startswith(SEMANTIC_UNRESOLVED_PREFIX)),
+            )
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -423,6 +439,7 @@ class EditableTradeDraftService:
             }
         )
         identity = getattr(strategy, "identity", None)
+        semantic_blockers = semantic_prerequisite_blockers(request)
         base = EditableTradeDraft(
             draft_id=(previous.draft_id if previous else "editable_trade_draft_" + hashlib.sha256(conversation_id.encode()).hexdigest()[:24]),
             conversation_id=conversation_id,
@@ -444,6 +461,7 @@ class EditableTradeDraftService:
             mode=_field(values["mode"] or None, "VALID" if values["mode"] else "MISSING_REQUIRED", "CONVERSATION_INHERITED"),
             confirmation_policy=_field(values["confirmation_policy"] or None, "VALID" if values["confirmation_policy"] else "MISSING_REQUIRED", "CONVERSATION_INHERITED"),
             account_scope=_field(values["account_scope"] or None, "VALID" if values["account_scope"] else "MISSING_REQUIRED", "CONVERSATION_INHERITED"),
+            blockers=semantic_blockers,
         )
         return _calculate_draft(base, values, evidence, self.policy, set())
 
@@ -528,8 +546,13 @@ def _calculate_draft(
     policy: TradeDraftPolicy,
     changed: set[str],
 ) -> EditableTradeDraft:
-    blockers: list[str] = []
+    blockers = list(base.blockers)
     warnings: list[str] = []
+    evidence_not_attempted = any(
+        blocker.startswith(SEMANTIC_UNRESOLVED_PREFIX) for blocker in blockers
+    )
+    if evidence_not_attempted:
+        warnings.append("EVIDENCE_NOT_ATTEMPTED_PREREQUISITE_UNRESOLVED")
     symbol = str(values.get("canonical_symbol") or "")
     broker = str(values.get("broker_symbol") or "")
     timeframes = tuple(values.get("timeframes") or ())
@@ -560,7 +583,7 @@ def _calculate_draft(
         and evidence.freshness in {"COMPLETE", "PARTIAL"}
         and not evidence.blockers
     )
-    if symbol and not evidence_valid:
+    if symbol and not evidence_valid and not evidence_not_attempted:
         blockers.append("MARKET_DATA_STALE" if evidence and evidence.freshness == "STALE" else "MARKET_EVIDENCE_UNAVAILABLE")
     entry = _optional_decimal(values.get("entry_price"))
     if entry is None and evidence_valid and direction:
@@ -584,7 +607,7 @@ def _calculate_draft(
         atr_multiplier = atr_multiplier or policy.default_atr_multiplier
         if entry is not None and evidence_valid and evidence and evidence.atr:
             stop = entry - evidence.atr * atr_multiplier if direction == "BUY" else entry + evidence.atr * atr_multiplier
-        else:
+        elif not evidence_not_attempted:
             blockers.append("ATR_EVIDENCE_UNAVAILABLE")
     elif stop_method == "RECENT_STRUCTURE":
         structure = (
@@ -597,7 +620,7 @@ def _calculate_draft(
         if structure is not None:
             buffer = (evidence.atr or Decimal("0")) * Decimal("0.1")
             stop = structure - buffer if direction == "BUY" else structure + buffer
-        else:
+        elif not evidence_not_attempted:
             blockers.append("STRUCTURE_EVIDENCE_UNAVAILABLE")
     elif stop_method not in STOP_METHODS:
         blockers.append("STOP_POLICY_MISSING")
@@ -633,14 +656,14 @@ def _calculate_draft(
             blockers.append("TARGET_POLICY_INVALID")
         elif entry is not None and distance is not None:
             target = entry + distance * rr if direction == "BUY" else entry - distance * rr
-        else:
+        elif not evidence_not_attempted:
             blockers.append("TARGET_CALCULATION_DEPENDENCY_MISSING")
     elif target_method == "RECENT_STRUCTURE":
         target = (
             evidence.swing_high if evidence_valid and evidence and direction == "BUY"
             else evidence.swing_low if evidence_valid and evidence else None
         )
-        if target is None:
+        if target is None and not evidence_not_attempted:
             blockers.append("STRUCTURE_EVIDENCE_UNAVAILABLE")
     elif target_method not in TARGET_METHODS:
         blockers.append("TARGET_POLICY_MISSING")
@@ -672,7 +695,7 @@ def _calculate_draft(
         blockers.append("RISK_LIMIT_EXCEEDED")
     equity = evidence.account_equity if evidence_valid and evidence else None
     risk_amount = equity * risk_fraction if equity is not None else None
-    if equity is None:
+    if equity is None and not evidence_not_attempted:
         blockers.append("ACCOUNT_RISK_BASIS_UNAVAILABLE")
     risk_source = "USER_EDITED" if "risk_fraction" in changed else str(values.get("risk_source") or ("USER_EXPLICIT" if values.get("risk_fraction") else "DEMO_DEFAULT"))
 
@@ -684,7 +707,7 @@ def _calculate_draft(
         if risk_amount is not None and distance and required_metadata:
             raw_volume = risk_amount / ((distance / evidence.tick_size) * evidence.tick_value)
             proposed_volume = _floor_volume(raw_volume, evidence.volume_step, evidence.volume_min, evidence.volume_max)
-        elif not required_metadata:
+        elif not required_metadata and not evidence_not_attempted:
             blockers.append("TICK_VALUE_UNAVAILABLE" if not evidence or not evidence.tick_value else "VOLUME_STEP_INVALID")
     elif sizing_method != "USER_EXPLICIT_VOLUME":
         blockers.append("POSITION_SIZING_POLICY_MISSING")
@@ -720,7 +743,7 @@ def _calculate_draft(
     if account_scope == "UNKNOWN" and evidence and evidence.account_environment == "DEMO":
         account_scope = "DEMO"
         account_scope_source = "DEMO_DEFAULT"
-    if account_scope != "DEMO":
+    if account_scope != "DEMO" and not evidence_not_attempted:
         blockers.append("DEMO_ACCOUNT_SCOPE_REQUIRED")
     if evidence:
         blockers.extend(evidence.blockers)

@@ -421,6 +421,26 @@ def project_resolved_semantic_strategy(
         if definition is None:
             continue
         values = spec.parameter_map()
+        parameter_ranges = {
+            name: (minimum, maximum, integer)
+            for name, minimum, maximum, integer in definition.parameter_ranges
+        }
+        confirmed_parameters = {
+            name
+            for name, value in values.items()
+            if name in parameter_ranges
+            and math.isfinite(float(value))
+            and parameter_ranges[name][0] <= float(value) <= parameter_ranges[name][1]
+            and (not parameter_ranges[name][2] or int(value) == value)
+        }
+        unresolved = [
+            field
+            for field in unresolved
+            if field not in {
+                f"indicators[{index}].parameters.{name}"
+                for name in confirmed_parameters
+            }
+        ]
         unresolved.extend(
             f"indicators[{index}].parameters.{name}"
             for name in definition.parameters
@@ -456,9 +476,21 @@ def project_resolved_semantic_strategy(
         identity=StrategyIdentity("", "reasoning-strategy/v2", ""),
         semantic_unresolved_fields=unresolved,
     )
-    return ConversationalStrategyRequest(
+    strategy = ConversationalStrategyRequest(
         **{**provisional.__dict__, "identity": strategy_identity(provisional)}
     )
+    print(
+        "[StructuredDomain] "
+        f"indicator_ids={','.join(spec.indicator_id for spec in strategy.indicators) or '-'} "
+        f"parameter_keys={';'.join(','.join(name for name, _ in spec.parameters) or '-' for spec in strategy.indicators) or '-'} "
+        f"parameter_types={';'.join(','.join(type(value).__name__ for _, value in spec.parameters) or '-' for spec in strategy.indicators) or '-'} "
+        f"timeframes={','.join(spec.timeframe for spec in strategy.indicators) or '-'} "
+        f"condition_subjects={','.join(str(item.get('subject') or '').upper() for item in conditions_payload) or '-'} "
+        f"condition_operators={','.join(str(item.get('operator') or '') for item in conditions_payload) or '-'} "
+        f"unresolved={','.join(strategy.semantic_unresolved_fields) or '-'} "
+        f"domain_issues={','.join(validate_strategy(strategy)) or '-'}"
+    )
+    return strategy
 
 
 def parse_indicator_specs(text: str, default_timeframes: Sequence[str]) -> tuple[IndicatorSpec, ...]:

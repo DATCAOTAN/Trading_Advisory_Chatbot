@@ -19,6 +19,11 @@ from src.services.trading.decision import conversational_authorization
 from src.services.trading.decision.conversational_authorization import (
     parse_conversational_trading_request,
 )
+from src.services.trading.reasoning.strategy_evidence import strategy_identity
+from src.services.trading.proposal.editable_trade_draft import (
+    EditableTradeDraftService,
+    EditableTradeDraftStore,
+)
 
 
 def semantic(**changes) -> StructuredSemanticResult:
@@ -98,6 +103,172 @@ def test_missing_indicator_child_retains_typed_parent_and_rule_without_raw_repar
     assert "STRATEGY_INDICATORS_MISSING" not in request.blockers
     assert "ENTRY_RULE_MISSING" not in request.blockers
     assert type(request).from_public_dict(request.to_public_dict()) == request
+
+
+@pytest.mark.parametrize(
+    ("indicator_id", "parameters", "unresolved_fields"),
+    (
+        ("RSI", {}, ("indicators[0].parameters.period",)),
+        (
+            "MACD",
+            {},
+            (
+                "indicators[0].parameters.fast_period",
+                "indicators[0].parameters.slow_period",
+                "indicators[0].parameters.signal_period",
+            ),
+        ),
+    ),
+)
+def test_incomplete_indicator_semantics_defer_draft_evidence_without_cascades(
+    tmp_path,
+    indicator_id,
+    parameters,
+    unresolved_fields,
+):
+    _plan, request = request_from(
+        semantic(
+            symbols=["BTCUSDm"],
+            indicators=[{"indicator_id": indicator_id, "parameters": parameters, "timeframe": "M1"}],
+            conditions=[{"subject": indicator_id, "operator": "GREATER_THAN", "value": 10}],
+            unresolved_fields=list(unresolved_fields),
+        )
+    )
+
+    draft = EditableTradeDraftService(
+        store=EditableTradeDraftStore(tmp_path / "drafts.jsonl")
+    ).build_or_load(request, conversation_id="semantic-evidence", evidence=None)
+
+    assert set(f"SEMANTIC_UNRESOLVED:{field}" for field in unresolved_fields) <= set(draft.blockers)
+    assert not {
+        "MARKET_EVIDENCE_UNAVAILABLE",
+        "STRUCTURE_EVIDENCE_UNAVAILABLE",
+        "TARGET_CALCULATION_DEPENDENCY_MISSING",
+        "ACCOUNT_RISK_BASIS_UNAVAILABLE",
+        "TICK_VALUE_UNAVAILABLE",
+        "DEMO_ACCOUNT_SCOPE_REQUIRED",
+    } & set(draft.blockers)
+    assert "EVIDENCE_NOT_ATTEMPTED_PREREQUISITE_UNRESOLVED" in draft.warnings
+    assert draft.executable is False
+    assert draft.execution_authority is False
+
+
+def test_explicit_rsi_period_reloads_after_an_incomplete_prior_turn():
+    previous = resolve_structured_semantics(
+        semantic(
+            symbols=["BTCUSDm"],
+            indicators=[{"indicator_id": "RSI", "parameters": {}, "timeframe": "M1"}],
+            conditions=[{"subject": "RSI", "operator": "GREATER_THAN", "value": 10}],
+            unresolved_fields=["indicators[0].parameters.period"],
+        )
+    )
+    _plan, request = request_from(
+        semantic(
+            primary_intent="TRADE_LIFECYCLE",
+            symbols=["BTCUSDm"],
+            indicators=[{"indicator_id": "RSI", "parameters": {"period": 14}, "timeframe": "M1"}],
+            conditions=[{"subject": "RSI", "operator": "GREATER_THAN", "value": 10}],
+            unresolved_fields=[],
+        ),
+        previous=previous,
+    )
+
+    assert request.strategy.semantic_unresolved_fields == ()
+    assert request.strategy.indicators[0].parameter_map() == {"period": 14.0}
+    assert type(request).from_public_dict(request.to_public_dict()) == request
+
+
+@pytest.mark.parametrize(
+    ("indicator_id", "parameters", "unresolved_fields"),
+    (
+        ("RSI", {"period": 14}, ()),
+        ("EMA", {"period": 20}, ()),
+        ("MACD", {"fast_period": 12, "slow_period": 26, "signal_period": 9}, ()),
+        ("RSI", {}, ("indicators[0].parameters.period",)),
+        ("MACD", {"fast_period": 12, "slow_period": 26}, ("indicators[0].parameters.signal_period",)),
+    ),
+)
+def test_typed_strategy_and_public_request_round_trip_preserve_indicator_contract(
+    indicator_id,
+    parameters,
+    unresolved_fields,
+):
+    _plan, request = request_from(
+        semantic(
+            primary_intent="TRADE_LIFECYCLE",
+            symbols=["BTCUSDm"],
+            indicators=[{"indicator_id": indicator_id, "parameters": parameters, "timeframe": "M1"}],
+            conditions=[{"subject": indicator_id, "operator": "GREATER_THAN", "value": 10}],
+            unresolved_fields=list(unresolved_fields),
+        )
+    )
+
+    strategy = request.strategy
+    assert strategy is not None
+    assert type(strategy).from_dict(strategy.as_dict()) == strategy
+    assert type(request).from_public_dict(request.to_public_dict()) == request
+    assert strategy_identity(strategy) == strategy.identity
+    assert strategy.indicators[0].parameter_map() == {
+        name: float(value) for name, value in parameters.items()
+    }
+    assert strategy.semantic_unresolved_fields == unresolved_fields
+
+
+def test_invalid_structured_strategy_is_not_published_for_public_reload():
+    _plan, request = request_from(
+        semantic(
+            primary_intent="TRADE_LIFECYCLE",
+            symbols=["BTCUSDm"],
+            indicators=[
+                {
+                    "indicator_id": "RSI",
+                    "parameters": {"period": 14, "unsupported_parameter": 10},
+                    "timeframe": "M1",
+                }
+            ],
+            conditions=[{"subject": "RSI", "operator": "GREATER_THAN", "value": 10}],
+            unresolved_fields=[],
+        )
+    )
+
+    assert request.strategy is None
+    assert "INDICATOR_PARAMETER_INVALID" in request.blockers
+    assert type(request).from_public_dict(request.to_public_dict()) == request
+    assert request.to_public_dict()["executable"] is False
+
+
+def test_explicit_valid_parameter_reconciles_conflicting_unresolved_field():
+    _plan, request = request_from(
+        semantic(
+            symbols=["BTCUSDm"],
+            indicators=[{"indicator_id": "RSI", "parameters": {"period": 14}, "timeframe": "M1"}],
+            conditions=[{"subject": "RSI", "operator": "GREATER_THAN", "value": 10}],
+            unresolved_fields=["indicators[0].parameters.period"],
+        )
+    )
+
+    assert request.strategy is not None
+    assert request.strategy.semantic_unresolved_fields == ()
+    assert "SEMANTIC_UNRESOLVED:indicators[0].parameters.period" not in request.blockers
+    assert "INDICATOR_PARAMETER_INVALID" not in request.blockers
+    assert type(request).from_public_dict(request.to_public_dict()) == request
+
+
+def test_ambiguous_condition_subject_remains_unresolved():
+    _plan, request = request_from(
+        semantic(
+            indicators=[
+                {"indicator_id": "RSI", "parameters": {"period": 14}, "timeframe": "M1"},
+                {"indicator_id": "RSI", "parameters": {"period": 14}, "timeframe": "H1"},
+            ],
+            conditions=[{"subject": "RSI", "operator": "GREATER_THAN", "value": 10}],
+        )
+    )
+
+    assert request.strategy is not None
+    assert request.strategy.entry_rules == ()
+    assert request.strategy.semantic_unresolved_fields == ("conditions[0].subject_binding",)
+    assert "SEMANTIC_UNRESOLVED:conditions[0].subject_binding" in request.blockers
 
 
 @pytest.mark.parametrize(
