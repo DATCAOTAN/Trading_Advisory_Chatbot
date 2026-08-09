@@ -224,7 +224,7 @@ class RAGOrchestrator:
                 )
                 context_requirements = self.decision_context_builder.requirement_planner.plan(canonical_query_plan)
                 context_execution_plan = self.decision_context_builder.execution_planner.plan(context_requirements)
-                if canonical_query_plan.primary_intent == "position_state_read":
+                if canonical_query_plan.primary_intent in {"position_state_read", "position_management"}:
                     executor = self._context_acquisition_executor(
                         use_knowledge_v3=Config.USE_KNOWLEDGE_V3 if use_knowledge_v3 is None else use_knowledge_v3,
                         fallback_to_legacy=(
@@ -254,6 +254,29 @@ class RAGOrchestrator:
                     )
 
                     model = result.data if result and isinstance(result.data, PositionReadModel) else None
+                    if canonical_query_plan.primary_intent == "position_management":
+                        from src.services.trading.human_confirmed_management import (
+                            HumanConfirmedManagementService,
+                        )
+
+                        outcome = HumanConfirmedManagementService(
+                            position_read_service=executor.position_read_service,
+                        ).create_from_query_plan(canonical_query_plan, model=model)
+                        message = (
+                            "Management proposal ready for explicit human review."
+                            if outcome.proposal is not None
+                            else "Management request blocked: " + ", ".join(outcome.blockers)
+                        )
+                        return self._static_stream(message), [], "FINANCIAL_RAG", {
+                            "is_bounded_response": True,
+                            "query_plan": canonical_query_plan.as_dict(),
+                            "position_read_model": model.to_public_dict() if model else None,
+                            "management_proposal": outcome.to_public_dict(),
+                            "management_proposal_protected": outcome.proposal,
+                            "semantic_provider_calls": semantic_provider_calls,
+                            "provider_calls": semantic_provider_calls,
+                            "retrieval_rewrite_calls": 0,
+                        }
                     message = (
                         render_position_read_model(model)
                         if model is not None

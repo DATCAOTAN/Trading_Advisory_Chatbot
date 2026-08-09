@@ -377,6 +377,18 @@ def test_position_capability_executes_typed_service_once():
     assert read_service.bridge_client.calls == 1
 
 
+def test_pending_management_target_uses_the_same_exact_protected_selector():
+    model = service(snapshot(orders=[order()])).read(
+        query_type="PENDING",
+        canonical_symbol="BTCUSD",
+        protected_reference=HASH_B,
+        singular=True,
+    )
+    assert model.status == "AVAILABLE"
+    assert model.selected_position == model.pending_orders[0]
+    assert "account_context_fingerprint" not in model.to_public_dict()
+
+
 def test_streamlit_renderer_consumes_public_typed_artifact(monkeypatch):
     events = []
 

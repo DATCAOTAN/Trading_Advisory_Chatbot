@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import re
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -69,9 +70,11 @@ class PositionReadModel:
     blockers: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
     metadata_redacted: bool = True
+    account_context_fingerprint: str = field(default="", repr=False)
 
     def to_public_dict(self) -> dict[str, Any]:
         payload = asdict(self)
+        payload.pop("account_context_fingerprint", None)
         payload["metadata_redacted"] = True
         return payload
 
@@ -112,13 +115,19 @@ class PositionReadModelService:
         semantic_payload = dict(semantic.get("input", {}) or {})
         requested = tuple(str(value).lower() for value in semantic_payload.get("requested_data", []) or [])
         references = tuple(str(value) for value in semantic_payload.get("context_references", []) or [])
+        protected_references = tuple(
+            value for value in references if re.fullmatch(r"[0-9a-fA-F]{64}", value)
+        )
         symbols = list(getattr(getattr(query_plan, "entities", None), "symbols", []) or [])
         query_type = _query_type(requested, str(semantic_payload.get("subtype", "")))
+        management_request = getattr(query_plan, "primary_intent", "") == "position_management"
+        if management_request and len(protected_references) > 1:
+            return self._blocked(query_type, "AMBIGUOUS_POSITION_REFERENCE")
         return self.read(
             query_type=query_type,
             canonical_symbol=symbols[0] if len(symbols) == 1 else "",
-            protected_reference=references[0] if len(references) == 1 else "",
-            singular=query_type in {"DETAIL", "PNL", "PROVENANCE"} or bool(references),
+            protected_reference=protected_references[0] if len(protected_references) == 1 else "",
+            singular=management_request or query_type in {"DETAIL", "PNL", "PROVENANCE"} or bool(references),
         )
 
     def read(
@@ -188,7 +197,13 @@ class PositionReadModelService:
             for row in snapshot.get("recent_deals", [])
             if str(row.get("entry")) in {"OUT", "INOUT"}
         )
-        selectable = positions + history if query_type == "PROVENANCE" else positions
+        selectable = (
+            orders
+            if query_type == "PENDING"
+            else positions + history
+            if query_type == "PROVENANCE"
+            else positions
+        )
         selected, target_blocker = _select_position(
             selectable, canonical_symbol, protected_reference, singular
         )
@@ -217,6 +232,7 @@ class PositionReadModelService:
             selected_position=selected,
             blockers=blockers,
             warnings=warnings,
+            account_context_fingerprint=fingerprint,
         )
 
     def _item(

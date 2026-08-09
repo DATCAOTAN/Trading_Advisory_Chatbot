@@ -127,6 +127,13 @@ class StructuredSemanticInterpreter:
             "stored trade provenance as POSITION_MANAGEMENT with action NONE or EXPLAIN; list the requested "
             "facts in requested_data. Do not classify such reads as STRATEGY unless the user asks to create "
             "or change a strategy. "
+            "Classify direct human management commands as POSITION_MANAGEMENT. Use action MANAGE_POSITION "
+            "for CANCEL_PENDING_ORDER, MODIFY_POSITION_PROTECTION, and PARTIAL_CLOSE; use action CLOSE_POSITION "
+            "for CLOSE_POSITION. Put that exact management intent in subtype. Represent explicit management "
+            "numbers only as conditions with operator EQUAL and subjects requested_stop_loss, "
+            "requested_take_profit, close_fraction, close_amount, or resulting_volume. Normalize close_fraction "
+            "to a ratio greater than 0 and at most 1. Use context_references for an explicit protected target "
+            "reference or previous_position/previous_order; never invent a target or a management number. "
             "Only include indicator parameters explicitly present in the message or referenced context; "
             "do not use conventional defaults. Do not invent indicator parameters. The following is a reference-only "
             "indicator contract; do not include an indicator_contract field in the output: "
@@ -134,8 +141,9 @@ class StructuredSemanticInterpreter:
             + ". The following is a reference-only enum contract; do not include an enum_contract field in the output: "
             + json.dumps(enum_contract, ensure_ascii=False, sort_keys=True)
             + ". Scalar enum fields must each contain exactly one matching string. Use only the indicator IDs and "
-            "parameter keys from the indicator contract. A condition subject must exactly equal one "
-            "indicator_id in indicators; do not append a period, timeframe, or output alias. Required exact output schema: "
+            "parameter keys from the indicator contract. For indicator analysis, a condition subject must exactly "
+            "equal one indicator_id in indicators; management conditions use only the management subjects listed "
+            "above. Do not append a period, timeframe, or output alias. Required exact output schema: "
             + json.dumps(schema, ensure_ascii=False, sort_keys=True)
             + "\nUser message:\n"
             + str(message)

@@ -67,6 +67,11 @@ from src.services.trading.proposal.editable_trade_draft import (
 from src.services.trading.execution.mt5_live_adapter_pre_submit.authority_runtime import (
     TradingAuthorityOperatorService,
 )
+from src.services.trading.human_confirmed_management import (
+    HumanConfirmedManagementProposal,
+    HumanConfirmedManagementService,
+    ManagementProposalPatch,
+)
 from src.ui.runtime_flags import get_knowledge_v3_flags
 from src.ui.autonomous_candidate_review import (
     clear_autonomous_decision_run_result,
@@ -243,6 +248,7 @@ def render(orchestrator, feature_flags: dict):
 
             if msg["role"] == "assistant":
                 _render_position_read_card(msg.get("position_read_model"))
+                _render_management_proposal_card(msg.get("management_proposal"))
                 _render_sources(msg.get("sources", []), intent=msg.get("intent"))
                 metrics = _extract_metrics(msg["content"])
                 if metrics:
@@ -295,6 +301,7 @@ def render(orchestrator, feature_flags: dict):
                     knowledge_v3_fallback_to_legacy=knowledge_v3_flags["knowledge_v3_fallback_to_legacy"],
                     previous_structured_context=previous_structured_context,
                 )
+                _capture_management_proposal(runtime_artifacts)
 
                 trading_request, conversational_context = _trading_request_from_runtime_artifacts(
                     runtime_artifacts,
@@ -359,6 +366,7 @@ def render(orchestrator, feature_flags: dict):
                 _render_sources(sources, intent=intent, query=user_query)
                 if runtime_artifacts:
                     _render_position_read_card(runtime_artifacts.get("position_read_model"))
+                    _render_management_proposal_card(runtime_artifacts.get("management_proposal"))
 
                 metrics = _extract_metrics(full_answer)
                 if metrics:
@@ -397,6 +405,9 @@ def render(orchestrator, feature_flags: dict):
             position_read_model = runtime_artifacts.get("position_read_model")
             if isinstance(position_read_model, dict):
                 assistant_msg["position_read_model"] = position_read_model
+            management_proposal = runtime_artifacts.get("management_proposal")
+            if isinstance(management_proposal, dict):
+                assistant_msg["management_proposal"] = management_proposal
             query_plan_payload = runtime_artifacts.get("query_plan")
             semantic_context = (
                 query_plan_payload.get("semantic_context")
@@ -507,6 +518,168 @@ def _render_position_read_card(payload) -> None:
                 f"P/L={pnl} | SL={row.get('stop_loss')} | TP={row.get('take_profit')}"
             )
     st.caption("Authoritative read-only broker/lifecycle projection. NON_EXECUTABLE.")
+
+
+def _capture_management_proposal(runtime_artifacts) -> None:
+    if not isinstance(runtime_artifacts, dict):
+        return
+    proposal = runtime_artifacts.pop("management_proposal_protected", None)
+    if not isinstance(proposal, HumanConfirmedManagementProposal):
+        return
+    st.session_state.setdefault("management_proposals", {})[proposal.proposal_id] = proposal
+
+
+def _render_management_proposal_card(payload) -> None:
+    if not isinstance(payload, dict) or payload.get("schema_version") != "human-confirmed-management-proposal/v1":
+        return
+    st.markdown("#### Position Management")
+    blockers = tuple(payload.get("blockers") or ())
+    if blockers:
+        st.warning("Management blocked: " + ", ".join(blockers))
+        return
+    proposal_id = str(payload.get("proposal_id") or "")
+    proposal = st.session_state.get("management_proposals", {}).get(proposal_id)
+    if not isinstance(proposal, HumanConfirmedManagementProposal):
+        st.warning("Management proposal unavailable after session reload; create a fresh proposal.")
+        return
+    columns = st.columns(4)
+    columns[0].metric("Symbol", proposal.canonical_symbol)
+    columns[1].metric("Action", proposal.semantic_intent)
+    columns[2].metric("Current volume", proposal.backend_proposal.current_observed_volume)
+    columns[3].metric("Revision", proposal.revision)
+    st.caption(
+        f"broker={proposal.broker_symbol} | state={proposal.backend_proposal.lifecycle_state} | "
+        f"target={proposal.target_reference[:12]}... | mode={proposal.mode} | NON_EXECUTABLE"
+    )
+    if proposal.semantic_intent == "MODIFY_POSITION_PROTECTION":
+        _render_management_protection_editor(proposal)
+    elif proposal.semantic_intent == "PARTIAL_CLOSE":
+        _render_management_partial_close_editor(proposal)
+    else:
+        _render_management_confirmation(proposal)
+
+
+def _render_management_protection_editor(proposal: HumanConfirmedManagementProposal) -> None:
+    backend = proposal.backend_proposal
+    with st.form(f"management_edit_{proposal.proposal_id}_{proposal.revision}"):
+        columns = st.columns(2)
+        stop_loss = columns[0].number_input(
+            "New stop loss",
+            value=float(backend.requested_stop_loss) if backend.requested_stop_loss is not None else None,
+            placeholder="Unchanged / not set",
+            format="%.8f",
+        )
+        take_profit = columns[1].number_input(
+            "New take profit",
+            value=float(backend.requested_take_profit) if backend.requested_take_profit is not None else None,
+            placeholder="Unchanged / not set",
+            format="%.8f",
+        )
+        update = st.form_submit_button("Update Proposal", use_container_width=True)
+    if update:
+        _apply_management_patch(
+            proposal,
+            ManagementProposalPatch(
+                requested_stop_loss=_ui_decimal(stop_loss),
+                requested_take_profit=_ui_decimal(take_profit),
+            ),
+        )
+        return
+    _render_management_confirmation(proposal)
+
+
+def _render_management_partial_close_editor(proposal: HumanConfirmedManagementProposal) -> None:
+    backend = proposal.backend_proposal
+    with st.form(f"management_edit_{proposal.proposal_id}_{proposal.revision}"):
+        if proposal.close_amount is not None:
+            edited = st.number_input(
+                "Close amount", min_value=0.0, value=float(proposal.close_amount), format="%.8f"
+            )
+            patch = ManagementProposalPatch(close_amount=_ui_decimal(edited))
+        elif proposal.close_fraction is not None:
+            edited = st.number_input(
+                "Close fraction", min_value=0.01, max_value=0.99,
+                value=float(proposal.close_fraction), step=0.01, format="%.4f",
+            )
+            patch = ManagementProposalPatch(close_fraction=_ui_decimal(edited))
+        else:
+            edited = st.number_input(
+                "Resulting volume",
+                min_value=0.0,
+                value=float(backend.requested_resulting_volume or 0),
+                format="%.8f",
+            )
+            patch = ManagementProposalPatch(resulting_volume=_ui_decimal(edited))
+        st.caption(
+            f"Resulting volume: {backend.requested_resulting_volume}"
+        )
+        update = st.form_submit_button("Update Proposal", use_container_width=True)
+    if update:
+        _apply_management_patch(proposal, patch)
+        return
+    _render_management_confirmation(proposal)
+
+
+def _apply_management_patch(
+    proposal: HumanConfirmedManagementProposal,
+    patch: ManagementProposalPatch,
+) -> None:
+    outcome = HumanConfirmedManagementService().revise(proposal, patch)
+    if outcome.proposal is None:
+        st.warning("Management update blocked: " + ", ".join(outcome.blockers))
+        return
+    proposals = st.session_state.setdefault("management_proposals", {})
+    proposals.pop(proposal.proposal_id, None)
+    proposals[outcome.proposal.proposal_id] = outcome.proposal
+    _replace_management_payload(proposal.proposal_id, outcome.to_public_dict())
+    st.rerun()
+
+
+def _render_management_confirmation(proposal: HumanConfirmedManagementProposal) -> None:
+    phrase = proposal.confirmation_phrase
+    st.info(f"Type exactly: {phrase}")
+    with st.form(f"management_confirm_{proposal.proposal_id}_{proposal.revision}"):
+        typed = st.text_input("Management confirmation", type="password")
+        columns = st.columns(2)
+        confirm = columns[0].form_submit_button("Confirm Management", use_container_width=True)
+        cancel = columns[1].form_submit_button(
+            "Keep Order" if proposal.semantic_intent == "CANCEL_PENDING_ORDER" else "Cancel",
+            use_container_width=True,
+        )
+    if cancel:
+        st.session_state.setdefault("management_proposals", {}).pop(proposal.proposal_id, None)
+        cancelled = proposal.to_public_dict()
+        cancelled.update(status="CANCELLED", confirmation_required=False)
+        _replace_management_payload(proposal.proposal_id, cancelled)
+        st.rerun()
+    if not confirm:
+        return
+    receipt = HumanConfirmedManagementService().confirm_and_manage(
+        proposal,
+        typed_confirmation=typed,
+    )
+    if receipt.status == "BLOCKED":
+        st.warning(f"Management blocked: {receipt.reason}")
+    elif receipt.status == "UNKNOWN":
+        st.warning("Management result unknown; reconciliation is required and retry is prohibited.")
+    else:
+        st.success(f"Management result: {receipt.status}")
+
+
+def _replace_management_payload(proposal_id: str, payload: dict) -> None:
+    for message in st.session_state.get("messages", []):
+        current = message.get("management_proposal") if isinstance(message, dict) else None
+        if isinstance(current, dict) and current.get("proposal_id") == proposal_id:
+            message["management_proposal"] = payload
+
+
+def _ui_decimal(value) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
 
 
 def _latest_conversational_trading_request(messages) -> ConversationalTradingRequest | None:

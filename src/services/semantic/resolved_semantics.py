@@ -36,6 +36,7 @@ FIELD_SOURCES = frozenset(
 _PREVIOUS_SYMBOL = "previous_symbol"
 _PREVIOUS_INDICATOR = "previous_indicator"
 _PREVIOUS_TIMEFRAME = "previous_timeframe"
+_PREVIOUS_POSITION = frozenset({"previous_position", "previous_order"})
 _DIRECT_TRADE_ACTIONS = frozenset({"OPEN_POSITION", "CLOSE_POSITION", "MANAGE_POSITION"})
 
 
@@ -197,9 +198,10 @@ def resolve_structured_semantics(
 ) -> ResolvedSemanticState:
     """Resolve configured aliases and explicit conversational references only."""
 
-    references = set(semantic.context_references)
     field_sources: list[tuple[str, str]] = []
     unresolved = list(semantic.unresolved_fields)
+    semantic = _resolve_management_reference(semantic, previous, unresolved, field_sources)
+    references = set(semantic.context_references)
 
     for field_name, value in (
         ("action", semantic.action),
@@ -263,6 +265,38 @@ def resolve_operating_mode(semantic: StructuredSemanticResult) -> str:
     if semantic.action in _DIRECT_TRADE_ACTIONS:
         return "human_confirmed_live"
     return "advisory_only"
+
+
+def _resolve_management_reference(
+    semantic: StructuredSemanticResult,
+    previous: ResolvedSemanticState | None,
+    unresolved: list[str],
+    field_sources: list[tuple[str, str]],
+) -> StructuredSemanticResult:
+    placeholders = _PREVIOUS_POSITION & set(semantic.context_references)
+    if not placeholders:
+        return semantic
+    inherited = next(
+        (
+            value
+            for value in (previous.semantic.context_references if previous else ())
+            if re.fullmatch(r"[0-9a-fA-F]{64}", value)
+        ),
+        "",
+    )
+    references = tuple(
+        inherited if value in placeholders and inherited else value
+        for value in semantic.context_references
+        if value not in placeholders or inherited
+    )
+    for placeholder in sorted(placeholders):
+        field = f"context_references.{placeholder}"
+        if inherited:
+            field_sources.append((field, "CONVERSATION_INHERITED"))
+        else:
+            unresolved.append(field)
+            field_sources.append((field, "UNRESOLVED"))
+    return replace(semantic, context_references=references)
 
 
 def _resolve_symbols(

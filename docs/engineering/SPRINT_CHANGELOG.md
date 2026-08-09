@@ -1960,3 +1960,32 @@ Commit: this commit
 - Next: S6 `HUMAN_CONFIRMED_POSITION_MANAGEMENT`.
 
 ---
+
+### Sprint 6 - Human-Confirmed Position Management
+
+Date: 2026-08-09
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Routed cancel pending order, modify protection, partial close, and full close through the existing semantic, PositionReadModel, and controlled-management boundaries.
+- Added one non-executable typed proposal with explicit-value provenance, protected target/account/lifecycle binding, deterministic idempotency, and redacted public output.
+- Added editable Streamlit review controls and exact human confirmation without creating another execution endpoint, adapter, journal, or state machine.
+- Preserved unchanged SL/TP values and represented partial close as a deterministic resulting volume for existing broker validation.
+
+#### Verification
+
+- Focused and neighboring management/semantic/UI tests: 256 passed.
+- Full regression: 3,491 passed and 156 subtests passed with 3 unchanged warnings.
+- Compileall, app/container health, Streamlit `200 ok`, bridge health, diff, documentation, and static safety checks passed.
+- Browser acceptance failed closed at `MANAGEMENT_TARGET_REFERENCE_UNRESOLVED` / `POSITION_NOT_FOUND`; no confirmation control or broker mutation was available.
+
+#### Current state / next step
+
+- All proposals remain `NON_EXECUTABLE`; exact confirmation and the existing final app/bridge validations remain mandatory.
+- Controlled-submit, controlled-management write, runtime `order_send`, broker mutation, and MT5 writes remained zero.
+- `RESULT_UNKNOWN` remains retry-prohibited and reconciliation-only.
+- Next: S7 `AUTONOMOUS_POST_ENTRY_MANAGEMENT`.
+
+---

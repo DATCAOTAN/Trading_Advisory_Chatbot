@@ -354,6 +354,8 @@ class QueryPlanAssembler:
         primary = self._structured_primary(semantic.primary_intent, semantic.secondary_intents, event)
         if semantic.primary_intent == "POSITION_MANAGEMENT" and semantic.action in {"NONE", "EXPLAIN"}:
             primary = "position_state_read"
+        elif semantic.primary_intent == "POSITION_MANAGEMENT" and semantic.action in {"CLOSE_POSITION", "MANAGE_POSITION"}:
+            primary = "position_management"
         secondary = self._dedupe(
             [
                 self.STRUCTURED_PRIMARY_TO_PLAN[value]
@@ -377,7 +379,9 @@ class QueryPlanAssembler:
             requested_analysis.extend(["strategy_normalization", "strategy_completeness"])
         if primary == "position_state_read":
             requested_analysis.append("position_state_read")
-        temporal_scope = "current" if current_market_request or primary == "position_state_read" else "timeless" if conceptual_request else "unknown"
+        if primary == "position_management":
+            requested_analysis.append("position_management")
+        temporal_scope = "current" if current_market_request or primary in {"position_state_read", "position_management"} else "timeless" if conceptual_request else "unknown"
         base_intent = QueryIntent(
             source_preference="book_first" if primary == "book_concept_explanation" else "any",
             routing_reason="validated structured semantic projection",

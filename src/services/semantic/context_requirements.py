@@ -316,14 +316,14 @@ class ContextRequirementPlanner:
                 ]
             )
 
-        elif primary == "position_state_read":
+        elif primary in {"position_state_read", "position_management"}:
             symbol = self._symbol_target(query_plan)
             needs.append(
                 self._need(
                     "position_read",
                     symbol or "account",
                     True,
-                    "authoritative current position, pending-order, P/L, history, and provenance state",
+                    "authoritative current position, pending-order, P/L, history, provenance, and management target state",
                     freshness="fresh",
                     max_age=self.DEFAULT_MARKET_MAX_AGE_SECONDS,
                     parameters={
