@@ -496,19 +496,10 @@ def _trading_request_from_runtime_artifacts(
     messages,
 ) -> tuple[ConversationalTradingRequest | None, ConversationalIntentContext | None]:
     """Use a valid semantic plan as the UI's trading authority before legacy fallback."""
-    query_plan_payload = runtime_artifacts.get("query_plan") if isinstance(runtime_artifacts, dict) else None
-    semantic_context = (
-        query_plan_payload.get("semantic_context")
-        if isinstance(query_plan_payload, dict)
-        else None
-    )
-    authoritative_semantic_plan = isinstance(semantic_context, dict) and isinstance(
-        semantic_context.get("input"), dict
-    )
     trading_payload = runtime_artifacts.get("trading_request") if isinstance(runtime_artifacts, dict) else None
     if isinstance(trading_payload, dict):
         return ConversationalTradingRequest.from_public_dict(trading_payload), None
-    if authoritative_semantic_plan:
+    if isinstance(runtime_artifacts, dict):
         return None, None
 
     previous_context = _latest_conversational_context(messages)

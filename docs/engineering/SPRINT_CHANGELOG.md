@@ -1865,3 +1865,36 @@ Commit: pending review
 #### Next step
 
 - Treat any spread-policy adjustment as a separate explicitly approved policy task.
+
+---
+
+### Sprint 1 - Single Semantic Authority and Deterministic Mode Closure
+
+Date: 2026-08-09
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Made QueryPlan the authoritative owner of deterministic operating mode while retaining provider mode only as semantic evidence.
+- Mapped analysis to advisory, direct OPEN/CLOSE/MANAGE to human-confirmed, and explicit autonomous evidence to autonomous mode.
+- Stopped Streamlit raw-language reparsing whenever an orchestrator runtime result exists; raw fallback remains only for compatibility callers without runtime artifacts.
+
+#### Verification
+
+- Focused semantic/UI tests: 51 passed; neighboring semantic/orchestrator/authorization/UI/journal tests: 179 passed.
+- Full regression: 3,426 passed and 156 subtests passed with 3 unchanged warnings.
+- Compileall, app restart/health, Streamlit `200 ok`, `git diff --check`, and static safety scans passed.
+- Browser: one invalid provider payload failed closed into one central fallback result with no competing UI Draft and no retry.
+
+#### Current state
+
+- QueryPlan is the sole downstream semantic authority; all Draft-stage execution authority remains false.
+- One production `order_send` call-site remains isolated in the host bridge; `src/` has zero MetaTrader5 imports.
+
+#### Known limitations / next step
+
+- The single browser turn did not render the human-confirmed completion card because provider output failed strict validation.
+- Next: Strategy Completion, field provenance, completion form, and semantic-versus-operational timeframe presentation.
+
+---

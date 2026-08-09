@@ -6,7 +6,11 @@ from typing import Any, Dict, List, Optional
 from src.services.knowledge.answer_mode import AnswerMode, AnswerModeClassifier
 from src.services.knowledge.query_decomposer import QueryDecomposer
 from src.services.knowledge.query_intent import QueryIntent, QueryIntentRouter
-from src.services.semantic.resolved_semantics import ResolvedSemanticState, resolve_structured_semantics
+from src.services.semantic.resolved_semantics import (
+    ResolvedSemanticState,
+    resolve_operating_mode,
+    resolve_structured_semantics,
+)
 from src.services.semantic.structured_semantics import StructuredSemanticResult
 from src.services.trading.market.timeframes import SUPPORTED_TIMEFRAMES, resolve_symbol, resolve_symbols_from_text
 from src.services.trading.reasoning.strategy_evidence import (
@@ -344,6 +348,7 @@ class QueryPlanAssembler:
         state: ResolvedSemanticState,
     ) -> QueryPlan:
         semantic = state.semantic
+        operating_mode = resolve_operating_mode(semantic)
         event = self._structured_event(semantic.subtype)
         concept = self._structured_concept(semantic, event)
         primary = self._structured_primary(semantic.primary_intent, semantic.secondary_intents, event)
@@ -410,7 +415,8 @@ class QueryPlanAssembler:
             ambiguity=ambiguity,
             constraints={
                 "execution_allowed": False,
-                "requested_mode": semantic.requested_mode,
+                "requested_mode": operating_mode,
+                "requested_mode_evidence": semantic.requested_mode,
                 "semantic_action": semantic.action,
                 "semantic_direction": semantic.direction,
                 "semantic_negated": semantic.negated,

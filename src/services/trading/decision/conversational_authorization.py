@@ -236,7 +236,9 @@ def project_conversational_trading_request(
     }:
         return None
 
-    requested_mode = str(semantic.get("requested_mode") or "") or "advisory_only"
+    requested_mode = str(query_plan.constraints.get("requested_mode") or "")
+    if requested_mode not in TRADING_MODES:
+        return None
     account_scope = str(semantic.get("account_scope") or "") or "UNKNOWN"
     confirmation_policy = {
         "advisory_only": "NO_EXECUTION",

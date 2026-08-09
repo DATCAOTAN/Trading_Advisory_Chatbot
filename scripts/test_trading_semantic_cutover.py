@@ -366,9 +366,42 @@ def test_negated_and_hypothetical_trade_meaning_cannot_become_actionable(changes
     assert request.to_public_dict()["executable"] is False
 
 
-@pytest.mark.parametrize("mode", ("advisory_only", "human_confirmed_live", "autonomous_live"))
-def test_mode_changes_policy_not_structured_strategy_facts(mode):
-    _plan, request = request_from(semantic(requested_mode=mode))
+@pytest.mark.parametrize(
+    ("semantic_changes", "expected_mode"),
+    (
+        (
+            {
+                "primary_intent": "STRATEGY",
+                "action": "ANALYZE",
+                "requested_mode": "human_confirmed_live",
+            },
+            "advisory_only",
+        ),
+        ({"action": "OPEN_POSITION", "requested_mode": "advisory_only"}, "human_confirmed_live"),
+        ({"action": "OPEN_POSITION", "direction": "SELL", "requested_mode": ""}, "human_confirmed_live"),
+        ({"action": "CLOSE_POSITION", "direction": "", "requested_mode": ""}, "human_confirmed_live"),
+        ({"action": "MANAGE_POSITION", "direction": "", "requested_mode": ""}, "human_confirmed_live"),
+        (
+            {
+                "requested_mode": "autonomous_live",
+                "explicit_fields": [
+                    "action",
+                    "direction",
+                    "symbols[0]",
+                    "indicators[0]",
+                    "conditions[0]",
+                    "requested_mode",
+                ],
+            },
+            "autonomous_live",
+        ),
+    ),
+)
+def test_mode_is_deterministic_and_does_not_change_strategy_facts(
+    semantic_changes, expected_mode
+):
+    source = semantic(**semantic_changes)
+    plan, request = request_from(source)
 
     assert request.strategy.indicators[0].as_dict() == {
         "indicator_id": "RSI",
@@ -382,8 +415,35 @@ def test_mode_changes_policy_not_structured_strategy_facts(mode):
         "right": "",
         "constants": [30.0],
     }
-    assert request.requested_mode == mode
+    assert request.requested_mode == expected_mode
+    assert plan.constraints["requested_mode"] == expected_mode
+    assert plan.constraints["requested_mode_evidence"] == source.requested_mode
+    assert request.confirmation_policy == {
+        "advisory_only": "NO_EXECUTION",
+        "human_confirmed_live": "CONFIRM_EVERY_TRADE",
+        "autonomous_live": "STANDING_MANDATE",
+    }[expected_mode]
     assert request.to_public_dict()["execution_authority"] is False
+
+
+def test_negated_direct_action_remains_advisory_and_non_executable():
+    plan, request = request_from(
+        semantic(action="OPEN_POSITION", requested_mode="human_confirmed_live", negated=True)
+    )
+
+    assert plan.constraints["requested_mode"] == "advisory_only"
+    assert request.requested_mode == "advisory_only"
+    assert request.confirmation_policy == "NO_EXECUTION"
+    assert request.to_public_dict()["execution_authority"] is False
+    assert request.to_public_dict()["executable"] is False
+
+
+def test_unmarked_autonomous_mode_evidence_cannot_override_direct_trade_policy():
+    plan, request = request_from(semantic(requested_mode="autonomous_live"))
+
+    assert plan.constraints["requested_mode_evidence"] == "autonomous_live"
+    assert request.requested_mode == "human_confirmed_live"
+    assert request.mandate_required is False
 
 
 def test_multiple_supported_conditions_survive_projection_without_a_strategy_dsl():

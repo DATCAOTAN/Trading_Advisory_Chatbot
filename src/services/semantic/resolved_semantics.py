@@ -23,6 +23,7 @@ FIELD_SOURCES = frozenset(
 _PREVIOUS_SYMBOL = "previous_symbol"
 _PREVIOUS_INDICATOR = "previous_indicator"
 _PREVIOUS_TIMEFRAME = "previous_timeframe"
+_DIRECT_TRADE_ACTIONS = frozenset({"OPEN_POSITION", "CLOSE_POSITION", "MANAGE_POSITION"})
 
 
 @dataclass(frozen=True)
@@ -137,6 +138,21 @@ def resolve_structured_semantics(
         field_sources=tuple(field_sources),
         unresolved_fields=_dedupe(unresolved),
     )
+
+
+def resolve_operating_mode(semantic: StructuredSemanticResult) -> str:
+    """Resolve mode from validated semantic facts without granting execution authority."""
+
+    if semantic.negated or semantic.hypothetical:
+        return "advisory_only"
+    if (
+        semantic.requested_mode == "autonomous_live"
+        and "requested_mode" in semantic.explicit_fields
+    ):
+        return "autonomous_live"
+    if semantic.action in _DIRECT_TRADE_ACTIONS:
+        return "human_confirmed_live"
+    return "advisory_only"
 
 
 def _resolve_symbols(

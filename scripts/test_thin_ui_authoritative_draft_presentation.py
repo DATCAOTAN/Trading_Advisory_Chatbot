@@ -170,6 +170,31 @@ def test_authoritative_trading_result_skips_ui_raw_fallback(monkeypatch):
     assert context is None
 
 
+@pytest.mark.parametrize(
+    "runtime_artifacts",
+    (
+        {"query_plan": {"semantic_context": {}, "primary_intent": "market_state_analysis"}},
+        {"is_bounded_response": True, "semantic_provider_calls": 0},
+    ),
+)
+def test_central_runtime_result_blocks_ui_raw_reparse(monkeypatch, runtime_artifacts):
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("legacy UI fallback called")
+
+    monkeypatch.setattr(tab_chatbot, "resolve_conversational_context", unexpected)
+    monkeypatch.setattr(tab_chatbot, "parse_conversational_trading_request", unexpected)
+
+    request, context = tab_chatbot._trading_request_from_runtime_artifacts(
+        runtime_artifacts,
+        user_query="trade-like text with invalid structured output",
+        conversation_id="conversation-ui",
+        messages=[],
+    )
+
+    assert request is None
+    assert context is None
+
+
 def test_legacy_fallback_remains_only_for_absent_authoritative_plan(monkeypatch):
     request = _request()
     context = SimpleNamespace()
