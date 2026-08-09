@@ -25,6 +25,31 @@ Before sprint-level, architecture-changing, execution-related, or multi-module w
 
 For small local fixes, inspect only the necessary files and avoid loading unrelated context.
 
+
+## Canonical target architecture
+
+The locked target product architecture is defined in:
+
+`docs/architecture/TRADING_CHATBOT_TARGET_ARCHITECTURE.md`
+
+Read that document before architecture-affecting work involving semantic routing, intent/action/mode resolution, strategy completion, trading forms, field provenance, market/account evidence, deterministic Entry/SL/TP/risk/volume proposals, Draft/Candidate lifecycle, human confirmation, Standing Mandates, pre-submit validation, execution, lifecycle supervision, position read models, trade history/provenance, position management, or autonomous management.
+
+Interpret the architecture document using these rules:
+
+- It defines the **LOCKED TARGET ARCHITECTURE** and the intended final product behavior.
+- It does **not** claim that every target component is already implemented.
+- Do not alter the locked target architecture merely to fit current source.
+- If current source or tests materially conflict with the locked target, report the conflict before changing architecture.
+- For current implementation truth, inspect the handoff, changelog, current source, tests, and Git state. Source/tests/Git override stale implementation-status documentation.
+- Preserve the architecture's single-semantic-authority rule: arbitrary user language is interpreted once through the structured semantic path; downstream deterministic layers own policy, validation, calculations, permissions, execution, and broker state.
+- Missing semantic children must remain unresolved unless supplied by current-user input, valid authoritative conversation context, or explicit user confirmation of a suggestion. Do not silently convert LLM suggestions or operational defaults into user facts.
+- A direct BUY/SELL/OPEN/CLOSE/MANAGE instruction may resolve to `human_confirmed_live`, but mode selection never grants execution authority. `human_confirmed_live` still requires explicit per-action confirmation and all deterministic safety gates.
+- `autonomous_live` requires an explicit supported autonomous request and bounded Standing Mandate; every opening or management action remains subject to deterministic mandate, risk, lifecycle, account, freshness, kill-switch, and bridge validation.
+- Read-only position/status/P&L/history/provenance queries must remain non-mutating and use authoritative runtime/journal data rather than LLM memory.
+- LLMs may interpret and suggest; they must never independently calculate authoritative broker-sensitive values, grant permission, mutate broker state, or become the source of truth for live positions.
+
+The architecture document must remain self-contained enough that a new coding-agent session can understand the intended final trading chatbot without access to the conversation in which the architecture was designed.
+
 ## Session resume and context continuity
 
 At the beginning of a new sprint, new agent session, or resumed task:
