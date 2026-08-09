@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import math
+import re
 from typing import Any, Iterable, Mapping
 
 from src.services.semantic.structured_semantics import (
@@ -18,7 +20,18 @@ from src.services.trading.market.timeframes import (
 
 
 FIELD_SOURCES = frozenset(
-    {"USER_EXPLICIT", "CONVERSATION_INHERITED", "POLICY_DEFAULT", "UNRESOLVED"}
+    {
+        "USER_EXPLICIT",
+        "USER_CONFIRMED_SUGGESTION",
+        "LLM_SUGGESTION",
+        "CONVERSATION_INHERITED",
+        "STRATEGY_POLICY",
+        "MARKET_CALCULATED",
+        "SYSTEM_CALCULATED",
+        "ACCOUNT_CALCULATED",
+        "POLICY_DEFAULT",
+        "UNRESOLVED",
+    }
 )
 _PREVIOUS_SYMBOL = "previous_symbol"
 _PREVIOUS_INDICATOR = "previous_indicator"
@@ -96,6 +109,88 @@ class ResolvedSemanticState:
         return state
 
 
+@dataclass(frozen=True)
+class SemanticFieldUpdate:
+    """One explicit, typed update to an unresolved strategy child field."""
+
+    field_path: str
+    value: str | float
+    source: str
+
+    def __post_init__(self) -> None:
+        if self.source not in {"USER_EXPLICIT", "USER_CONFIRMED_SUGGESTION"}:
+            raise ValueError("SEMANTIC_COMPLETION_SOURCE_INVALID")
+
+
+@dataclass(frozen=True)
+class SemanticCompletionPatch:
+    updates: tuple[SemanticFieldUpdate, ...]
+
+    def __post_init__(self) -> None:
+        paths = tuple(update.field_path for update in self.updates)
+        if not paths or len(set(paths)) != len(paths):
+            raise ValueError("SEMANTIC_COMPLETION_PATCH_INVALID")
+
+
+def apply_semantic_completion(
+    state: ResolvedSemanticState,
+    patch: SemanticCompletionPatch,
+) -> ResolvedSemanticState:
+    """Apply form values without reparsing user language or inventing siblings."""
+
+    indicators = list(state.indicators)
+    sources = dict(state.field_sources)
+    unresolved = list(state.unresolved_fields)
+    for update in patch.updates:
+        match = re.fullmatch(
+            r"indicators\[(\d+)]\.(timeframe|parameters\.([A-Za-z][A-Za-z0-9_]*))",
+            update.field_path,
+        )
+        if match is None or int(match.group(1)) >= len(indicators):
+            raise ValueError("SEMANTIC_COMPLETION_FIELD_INVALID")
+        index = int(match.group(1))
+        indicator = indicators[index]
+        child = match.group(2)
+        if child == "timeframe":
+            timeframe = normalize_timeframe(str(update.value).strip())
+            if timeframe not in SUPPORTED_TIMEFRAMES:
+                raise ValueError("SEMANTIC_COMPLETION_TIMEFRAME_INVALID")
+            indicators[index] = replace(indicator, timeframe=timeframe)
+        else:
+            if isinstance(update.value, bool) or not isinstance(update.value, (int, float)):
+                raise ValueError("SEMANTIC_COMPLETION_PARAMETER_INVALID")
+            number = float(update.value)
+            if not math.isfinite(number):
+                raise ValueError("SEMANTIC_COMPLETION_PARAMETER_INVALID")
+            parameters = dict(indicator.parameters)
+            parameters[str(match.group(3))] = number
+            indicators[index] = replace(
+                indicator,
+                parameters=tuple(sorted(parameters.items())),
+            )
+        sources[update.field_path] = update.source
+        parent = f"indicators[{index}].parameters" if child.startswith("parameters.") else ""
+        unresolved = [
+            field for field in unresolved if field not in {update.field_path, parent}
+        ]
+
+    semantic = replace(
+        state.semantic,
+        indicators=tuple(indicators),
+        unresolved_fields=tuple(unresolved),
+        explicit_fields=_dedupe(
+            (*state.semantic.explicit_fields, *(item.field_path for item in patch.updates))
+        ),
+    )
+    return replace(
+        state,
+        semantic=semantic,
+        indicators=tuple(indicators),
+        field_sources=tuple(sources.items()),
+        unresolved_fields=tuple(unresolved),
+    )
+
+
 def resolve_structured_semantics(
     semantic: StructuredSemanticResult,
     previous: ResolvedSemanticState | None = None,
@@ -105,6 +200,21 @@ def resolve_structured_semantics(
     references = set(semantic.context_references)
     field_sources: list[tuple[str, str]] = []
     unresolved = list(semantic.unresolved_fields)
+
+    for field_name, value in (
+        ("action", semantic.action),
+        ("direction", semantic.direction),
+        ("requested_mode", semantic.requested_mode),
+    ):
+        if value:
+            field_sources.append(
+                (
+                    field_name,
+                    "USER_EXPLICIT"
+                    if field_name in semantic.explicit_fields
+                    else "LLM_SUGGESTION",
+                )
+            )
 
     canonical_symbols, broker_symbols, unresolved_symbols = _resolve_symbols(
         semantic.symbols,

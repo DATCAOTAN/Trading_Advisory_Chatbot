@@ -1898,3 +1898,35 @@ Commit: this commit
 - Next: Strategy Completion, field provenance, completion form, and semantic-versus-operational timeframe presentation.
 
 ---
+
+### Sprint 2 - Strategy Completion Provenance and Editable Form
+
+Date: 2026-08-09
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added one typed non-executable completion state and structured semantic patch transaction.
+- Preserved known strategy siblings while keeping missing indicator parameters/timeframe unresolved.
+- Added explicit provenance for user values, confirmed suggestions, LLM suggestions, inherited context, and calculated/policy sources.
+- Routed incomplete strategies to a focused Streamlit completion form, not a normal Draft or Candidate control.
+- Kept semantic timeframe distinct from the M1/H1/H4 operational acquisition profile.
+- Accepted only declared missing provider children while retaining strict malformed/conflicting-value rejection.
+- Added a domain-level Draft guard before journal/store access.
+
+#### Verification
+
+- Focused semantic/completion tests: 61 passed.
+- Focused and neighboring transition tests: 214 passed.
+- Full regression: 3,442 passed and 156 subtests passed with 3 unchanged warnings.
+- Container restart/runtime import, Streamlit `200 ok`, compile, documentation, diff, and static safety checks completed.
+
+#### Current state / limitations
+
+- Completion, provenance, UI gating, and complete-strategy reprojection are verified; execution remains disabled and non-executable.
+- Final browser acceptance used one provider call and zero retries. A valid partial BTCUSD/BTCUSDm RSI strategy rendered Strategy Completion with unresolved period, explicit M1, labeled suggestion, `human_confirmed_live`, and no Draft or Candidate before completion.
+- Accepting period 14 through the structured form preserved all siblings and entered the existing evidence/Draft path. Genuine evidence blockers remained fail-closed; no Candidate or execution authority was created.
+- Host/container source hashes matched, the container was healthy, and Streamlit returned `200 ok`. Sprints 3 and 4 are skip-or-closure-only; the next major implementation sprint is Sprint 5 Position Read Model, PnL History, and Provenance.
+
+---

@@ -245,7 +245,12 @@ def test_resolution_and_query_planning_never_grant_execution_authority():
     source = semantic(requested_mode="autonomous_live")
     plan = QueryPlanAssembler().assemble("buy now", structured_semantics=source)
 
-    assert FIELD_SOURCES == {"USER_EXPLICIT", "CONVERSATION_INHERITED", "POLICY_DEFAULT", "UNRESOLVED"}
+    assert {
+        "USER_EXPLICIT",
+        "USER_CONFIRMED_SUGGESTION",
+        "LLM_SUGGESTION",
+        "CONVERSATION_INHERITED",
+    } <= FIELD_SOURCES
     assert plan.requires_execution is False
     assert plan.constraints["execution_allowed"] is False
     assert "execution_allowed" not in plan.semantic_context["input"]

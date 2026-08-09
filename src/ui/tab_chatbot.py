@@ -28,13 +28,20 @@ from src.services.agents.evaluation_registry import register_evaluation_record
 from src.services.agents.journal_review import record_journal_review
 from src.services.trading.decision.conversational_authorization import (
     ConversationalTradingRequest,
+    StrategyCompletionState,
+    apply_strategy_completion,
+    build_strategy_completion_state,
     parse_conversational_trading_request,
 )
 from src.services.semantic.conversational_context import (
     ConversationalIntentContext,
     resolve_conversational_context,
 )
-from src.services.semantic.resolved_semantics import ResolvedSemanticState
+from src.services.semantic.resolved_semantics import (
+    ResolvedSemanticState,
+    SemanticCompletionPatch,
+    SemanticFieldUpdate,
+)
 from src.services.trading.market.live_feature_service import LiveFeatureService
 from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBundleBuilder
 from src.services.trading.market.provider_registry import ProviderRegistry
@@ -245,7 +252,11 @@ def render(orchestrator, feature_flags: dict):
         st.session_state.messages
     )
     if latest_trading_request is not None and not user_query:
-        _render_conversational_trading_authorization(orchestrator, latest_trading_request)
+        _render_conversational_trading_authorization(
+            orchestrator,
+            latest_trading_request,
+            _latest_resolved_semantic_state(st.session_state.messages),
+        )
 
     if user_query:
         previous_structured_context = _latest_resolved_semantic_state(st.session_state.messages)
@@ -449,7 +460,11 @@ def render(orchestrator, feature_flags: dict):
             _store_evaluation_runtime_artifacts(artifacts_for_review)
 
         if trading_request is not None:
-            _render_conversational_trading_authorization(orchestrator, trading_request)
+            _render_conversational_trading_authorization(
+                orchestrator,
+                trading_request,
+                _latest_resolved_semantic_state(st.session_state.messages),
+            )
 
 
 def _latest_conversational_trading_request(messages) -> ConversationalTradingRequest | None:
@@ -517,7 +532,12 @@ def _trading_request_from_runtime_artifacts(
 def _render_conversational_trading_authorization(
     orchestrator,
     request: ConversationalTradingRequest,
+    semantic_state: ResolvedSemanticState | None = None,
 ) -> None:
+    completion = build_strategy_completion_state(request, semantic_state)
+    if completion is not None:
+        _render_strategy_completion_form(request, semantic_state, completion)
+        return
     if (
         request.trade_action in {"OPEN_POSITION", "GENERIC_TRADE"}
         and st.session_state.get("current_session_id")
@@ -588,6 +608,161 @@ def _render_conversational_trading_authorization(
         key_prefix=f"chat_trade_{request.request_id}_",
         strategy=request.strategy,
     )
+
+
+def _render_strategy_completion_form(
+    request: ConversationalTradingRequest,
+    semantic_state: ResolvedSemanticState | None,
+    completion: StrategyCompletionState,
+) -> None:
+    """Render structured semantic edits before evidence, Draft, or Candidate."""
+
+    st.markdown("#### Strategy Completion Required")
+    st.caption(
+        f"action={completion.action or 'UNRESOLVED'} | "
+        f"direction={completion.direction or 'UNRESOLVED'} | "
+        f"symbol={completion.canonical_symbol or 'UNRESOLVED'} | "
+        f"broker={completion.broker_symbol or 'UNRESOLVED'} | NON_EXECUTABLE"
+    )
+    st.caption(
+        f"mode={completion.requested_mode} | "
+        f"confirmation={completion.confirmation_policy}"
+    )
+    sources = dict(completion.field_sources)
+    for index, indicator in enumerate(completion.strategy.indicators):
+        parameters = ", ".join(
+            f"{name}={value:g} [{sources.get(f'indicators[{index}].parameters.{name}', 'USER_EXPLICIT')}]"
+            for name, value in indicator.parameters
+        )
+        timeframe = (
+            f"{indicator.timeframe} [{sources.get(f'indicators[{index}].timeframe', 'USER_EXPLICIT')}]"
+            if indicator.timeframe
+            else "REQUIRED / unresolved"
+        )
+        st.caption(
+            f"Indicator {index + 1}: {indicator.indicator_id} | "
+            f"parameters={parameters or 'REQUIRED / unresolved'} | timeframe={timeframe}"
+        )
+    if completion.strategy.entry_rules:
+        st.caption(
+            "Condition: "
+            + "; ".join(
+                f"{rule.left} {rule.operator} "
+                f"{rule.right or ','.join(f'{value:g}' for value in rule.constants)}"
+                for rule in completion.strategy.entry_rules
+            )
+        )
+    st.warning("Required semantic fields: " + ", ".join(completion.unresolved_fields))
+    st.info(
+        "Suggestions are not strategy facts until explicitly accepted. "
+        "Evidence status: NOT_ATTEMPTED_PREREQUISITE_UNRESOLVED."
+    )
+    if semantic_state is None:
+        st.warning("Completion unavailable: authoritative semantic state is missing.")
+        return
+
+    suggestions = {item.field_path: item for item in completion.suggestions}
+    selected: list[tuple[str, object, str]] = []
+    prefix = f"strategy_completion_{completion.request_id}_"
+    with st.form(prefix + "form"):
+        for ordinal, field in enumerate(completion.unresolved_fields):
+            suggestion = suggestions.get(field)
+            suggested_label = (
+                f"{suggestion.value:g} (suggested)"
+                if suggestion is not None and isinstance(suggestion.value, (int, float))
+                else f"{suggestion.value} (suggested)" if suggestion is not None else ""
+            )
+            if field.endswith(".timeframe"):
+                values = ["Select..."]
+                if suggested_label:
+                    values.append(suggested_label)
+                values.extend(
+                    value
+                    for value in ("M1", "M5", "M15", "H1", "H4", "D1", "Custom")
+                    if value != (str(suggestion.value) if suggestion else "")
+                )
+                choice = st.selectbox(
+                    field,
+                    values,
+                    key=prefix + f"choice_{ordinal}",
+                )
+                custom = (
+                    st.text_input(
+                        f"Custom value for {field}",
+                        key=prefix + f"custom_{ordinal}",
+                    )
+                    if choice == "Custom"
+                    else ""
+                )
+                value = custom.strip() if choice == "Custom" else choice.split(" ", 1)[0]
+            else:
+                values = ["Select..."]
+                if suggested_label:
+                    values.append(suggested_label)
+                values.extend(("21", "Custom"))
+                choice = st.selectbox(
+                    field,
+                    values,
+                    key=prefix + f"choice_{ordinal}",
+                )
+                custom = (
+                    st.text_input(
+                        f"Custom value for {field}",
+                        key=prefix + f"custom_{ordinal}",
+                    )
+                    if choice == "Custom"
+                    else ""
+                )
+                raw = custom.strip() if choice == "Custom" else choice.split(" ", 1)[0]
+                try:
+                    value = float(raw)
+                except ValueError:
+                    value = None
+            if value not in (None, "", "Select..."):
+                source = (
+                    "USER_CONFIRMED_SUGGESTION"
+                    if choice == suggested_label
+                    else "USER_EXPLICIT"
+                )
+                selected.append((field, value, source))
+        apply_changes = st.form_submit_button(
+            "Apply Strategy Completion",
+            use_container_width=True,
+        )
+    if not apply_changes:
+        return
+    if not selected:
+        st.warning("Select at least one unresolved strategy field.")
+        return
+    try:
+        updated_request, updated_state = apply_strategy_completion(
+            request,
+            semantic_state,
+            SemanticCompletionPatch(
+                tuple(
+                    SemanticFieldUpdate(field, value, source)
+                    for field, value, source in selected
+                )
+            ),
+        )
+        message = {
+            "role": "assistant",
+            "content": "Strategy completion updated from explicit structured form input.",
+            "trading_request": updated_request.to_public_dict(),
+            "resolved_semantic_state": updated_state.as_dict(),
+        }
+        st.session_state.messages.append(message)
+        from src.services.history_service import HistoryService
+
+        HistoryService().append_message(
+            st.session_state.current_session_id,
+            message,
+            include_vector_memory=False,
+        )
+        st.success("Strategy completion saved and revalidated.")
+        st.rerun()
+    except (TypeError, ValueError) as exc:
+        st.error(f"Strategy completion blocked: {exc}")
 
 
 def _render_editable_trade_draft(

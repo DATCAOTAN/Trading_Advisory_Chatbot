@@ -23,6 +23,7 @@ from src.services.trading.reasoning.strategy_evidence import strategy_identity
 from src.services.trading.proposal.editable_trade_draft import (
     EditableTradeDraftService,
     EditableTradeDraftStore,
+    TradeDraftError,
 )
 
 
@@ -120,7 +121,7 @@ def test_missing_indicator_child_retains_typed_parent_and_rule_without_raw_repar
         ),
     ),
 )
-def test_incomplete_indicator_semantics_defer_draft_evidence_without_cascades(
+def test_incomplete_indicator_semantics_stop_before_draft_persistence(
     tmp_path,
     indicator_id,
     parameters,
@@ -135,22 +136,13 @@ def test_incomplete_indicator_semantics_defer_draft_evidence_without_cascades(
         )
     )
 
-    draft = EditableTradeDraftService(
-        store=EditableTradeDraftStore(tmp_path / "drafts.jsonl")
-    ).build_or_load(request, conversation_id="semantic-evidence", evidence=None)
+    path = tmp_path / "drafts.jsonl"
+    with pytest.raises(TradeDraftError, match="STRATEGY_COMPLETION_REQUIRED"):
+        EditableTradeDraftService(
+            store=EditableTradeDraftStore(path)
+        ).build_or_load(request, conversation_id="semantic-evidence", evidence=None)
 
-    assert set(f"SEMANTIC_UNRESOLVED:{field}" for field in unresolved_fields) <= set(draft.blockers)
-    assert not {
-        "MARKET_EVIDENCE_UNAVAILABLE",
-        "STRUCTURE_EVIDENCE_UNAVAILABLE",
-        "TARGET_CALCULATION_DEPENDENCY_MISSING",
-        "ACCOUNT_RISK_BASIS_UNAVAILABLE",
-        "TICK_VALUE_UNAVAILABLE",
-        "DEMO_ACCOUNT_SCOPE_REQUIRED",
-    } & set(draft.blockers)
-    assert "EVIDENCE_NOT_ATTEMPTED_PREREQUISITE_UNRESOLVED" in draft.warnings
-    assert draft.executable is False
-    assert draft.execution_authority is False
+    assert not path.exists()
 
 
 def test_explicit_rsi_period_reloads_after_an_incomplete_prior_turn():

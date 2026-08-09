@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
 from src.services.trading.decision.operator_candidate_generation import (
@@ -18,11 +18,17 @@ from src.services.semantic.conversational_context import (
 )
 from src.services.trading.reasoning.strategy_evidence import (
     ConversationalStrategyRequest,
+    INDICATOR_PARAMETER_SUGGESTIONS,
     parse_conversational_strategy,
     project_resolved_semantic_strategy,
     validate_strategy,
 )
 from src.services.semantic.query_plan import QueryPlan
+from src.services.semantic.resolved_semantics import (
+    ResolvedSemanticState,
+    SemanticCompletionPatch,
+    apply_semantic_completion,
+)
 from src.services.semantic.structured_semantics import SEMANTIC_SCHEMA_VERSION
 
 
@@ -138,6 +144,181 @@ class ConversationalTradingRequest:
             blockers=blockers,
             strategy=strategy,
         )
+
+
+@dataclass(frozen=True)
+class StrategyCompletionSuggestion:
+    field_path: str
+    value: str | float
+    source: str = "STRATEGY_POLICY"
+
+
+@dataclass(frozen=True)
+class StrategyCompletionState:
+    """Non-executable semantic completion state before evidence and Draft."""
+
+    request_id: str
+    action: str
+    direction: str
+    canonical_symbol: str
+    broker_symbol: str
+    requested_mode: str
+    confirmation_policy: str
+    strategy: ConversationalStrategyRequest
+    unresolved_fields: tuple[str, ...]
+    field_sources: tuple[tuple[str, str], ...]
+    suggestions: tuple[StrategyCompletionSuggestion, ...]
+    operational_timeframe_profile: tuple[str, ...]
+    blockers: tuple[str, ...]
+    execution_allowed: bool = False
+    executable: bool = False
+
+
+def build_strategy_completion_state(
+    request: ConversationalTradingRequest,
+    semantic_state: ResolvedSemanticState | None,
+) -> StrategyCompletionState | None:
+    strategy = request.strategy
+    if strategy is None or not strategy.semantic_unresolved_fields:
+        return None
+    if (
+        semantic_state is not None
+        and (
+            semantic_state.canonical_symbols
+            and semantic_state.canonical_symbols[0] != request.canonical_symbol
+            or sorted(
+                (item.indicator_id, item.parameters, item.timeframe)
+                for item in semantic_state.indicators
+            )
+            != sorted(
+                (item.indicator_id, item.parameters, item.timeframe)
+                for item in strategy.indicators
+            )
+        )
+    ):
+        raise ValueError("STRATEGY_COMPLETION_BINDING_INVALID")
+    suggestions: list[StrategyCompletionSuggestion] = []
+    for field in strategy.semantic_unresolved_fields:
+        match = re.fullmatch(
+            r"indicators\[(\d+)]\.(timeframe|parameters\.([A-Za-z][A-Za-z0-9_]*))",
+            field,
+        )
+        if match is None or int(match.group(1)) >= len(strategy.indicators):
+            continue
+        indicator = strategy.indicators[int(match.group(1))]
+        if match.group(2) == "timeframe":
+            if request.timeframe_profile:
+                suggestions.append(
+                    StrategyCompletionSuggestion(field, request.timeframe_profile[0])
+                )
+        else:
+            value = INDICATOR_PARAMETER_SUGGESTIONS.get(
+                indicator.indicator_id, {}
+            ).get(str(match.group(3)))
+            if value is not None:
+                suggestions.append(StrategyCompletionSuggestion(field, value))
+    return StrategyCompletionState(
+        request_id=request.request_id,
+        action=request.trade_action,
+        direction=request.trade_direction,
+        canonical_symbol=request.canonical_symbol,
+        broker_symbol=request.broker_symbol,
+        requested_mode=request.requested_mode,
+        confirmation_policy=request.confirmation_policy,
+        strategy=strategy,
+        unresolved_fields=strategy.semantic_unresolved_fields,
+        field_sources=strategy.field_sources,
+        suggestions=tuple(suggestions),
+        operational_timeframe_profile=request.timeframe_profile,
+        blockers=request.blockers,
+    )
+
+
+def apply_strategy_completion(
+    request: ConversationalTradingRequest,
+    semantic_state: ResolvedSemanticState,
+    patch: SemanticCompletionPatch,
+) -> tuple[ConversationalTradingRequest, ResolvedSemanticState]:
+    """Reproject one typed completion transaction through the existing strategy owner."""
+
+    current = build_strategy_completion_state(request, semantic_state)
+    if current is None:
+        raise ValueError("STRATEGY_COMPLETION_NOT_REQUIRED")
+    if any(update.field_path not in current.unresolved_fields for update in patch.updates):
+        raise ValueError("STRATEGY_COMPLETION_FIELD_NOT_UNRESOLVED")
+    updated_state = apply_semantic_completion(semantic_state, patch)
+    request_material = json.dumps(
+        {"source_request_id": request.request_id, "semantic_context": updated_state.as_dict()},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    request_id = "conversation_trade_" + hashlib.sha256(
+        request_material.encode("utf-8")
+    ).hexdigest()[:24]
+    strategy = project_resolved_semantic_strategy(
+        updated_state.as_dict(),
+        canonical_symbol=request.canonical_symbol,
+        requested_mode=request.requested_mode,
+        confirmation_policy=request.confirmation_policy,
+        account_scope=request.account_scope,
+        request_id=request_id,
+    )
+    if strategy is None:
+        raise ValueError("STRATEGY_COMPLETION_PROJECTION_INVALID")
+    issues = validate_strategy(strategy)
+    hard_issues = tuple(issue for issue in issues if issue != "SEMANTIC_FIELDS_UNRESOLVED")
+    if hard_issues:
+        raise ValueError(",".join(hard_issues))
+    retained = tuple(
+        blocker
+        for blocker in request.blockers
+        if not blocker.startswith("SEMANTIC_UNRESOLVED:")
+        and blocker not in {
+            "SEMANTIC_FIELDS_UNRESOLVED",
+            "INDICATOR_PARAMETER_INVALID",
+            "UNSUPPORTED_TIMEFRAME",
+        }
+    )
+    blockers = tuple(
+        dict.fromkeys(
+            (
+                *retained,
+                *(f"SEMANTIC_UNRESOLVED:{field}" for field in strategy.semantic_unresolved_fields),
+                *issues,
+            )
+        )
+    )
+    response_format = (
+        "STRATEGY_COMPLETION_REQUIRED_CARD"
+        if blockers
+        else {
+            "advisory_only": "CLARIFICATION_OR_BLOCKER_RESPONSE",
+            "human_confirmed_live": "MT5_ACCESS_CARD",
+            "autonomous_live": "STANDING_MANDATE_CARD",
+        }[request.requested_mode]
+    )
+    next_action = {
+        "advisory_only": "ANALYZE_ONLY",
+        "human_confirmed_live": "GRANT_MT5_DEMO_ACCESS",
+        "autonomous_live": "REVIEW_STANDING_MANDATE",
+    }[request.requested_mode]
+    return (
+        replace(
+            request,
+            request_id=request_id,
+            timeframe_profile=(
+                strategy.timeframes
+                if not strategy.semantic_unresolved_fields
+                else request.timeframe_profile
+            ),
+            strategy_description=strategy.strategy_description,
+            allowed_next_action="BLOCKED" if blockers else next_action,
+            response_format=response_format,
+            blockers=blockers,
+            strategy=strategy,
+        ),
+        updated_state,
+    )
 
 
 def parse_conversational_trading_request(
@@ -317,7 +498,7 @@ def project_conversational_trading_request(
     trade_direction = "" if is_non_actionable else str(semantic.get("direction") or "")
     timeframe_profile = (
         strategy.timeframes
-        if strategy and all(strategy.timeframes)
+        if strategy and strategy.timeframes and all(strategy.timeframes)
         else operator_timeframe_profile(canonical_symbol)
     )
     return ConversationalTradingRequest(

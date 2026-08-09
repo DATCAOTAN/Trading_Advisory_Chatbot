@@ -338,6 +338,8 @@ class EditableTradeDraftService:
         conversation_id: str,
         evidence: TradeDraftMarketEvidence | None,
     ) -> EditableTradeDraft:
+        if semantic_prerequisite_blockers(request):
+            raise TradeDraftError("STRATEGY_COMPLETION_REQUIRED")
         previous = self.store.latest_for_conversation(conversation_id)
         if previous is not None and previous.source_request_id == request.request_id:
             return previous

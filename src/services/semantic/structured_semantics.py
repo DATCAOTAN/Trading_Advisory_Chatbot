@@ -11,6 +11,7 @@ from pydantic import (
     AfterValidator,
     BaseModel,
     ConfigDict,
+    Field,
     StrictBool,
     StrictFloat,
     StrictInt,
@@ -127,8 +128,8 @@ class _StrictSemanticPayload(BaseModel):
 
 class _PydanticSemanticIndicatorPayload(_StrictSemanticPayload):
     indicator_id: str
-    parameters: dict[str, StrictFiniteNumber]
-    timeframe: str
+    parameters: dict[str, StrictFiniteNumber] = Field(default_factory=dict)
+    timeframe: str = ""
 
     @field_validator("indicator_id", mode="before")
     @classmethod
@@ -383,7 +384,7 @@ class StructuredSemanticResult:
             raise StructuredSemanticValidationError("SEMANTIC_OUTPUT_AUTHORITY_FIELD_FORBIDDEN")
         return _validate_payload(
             _PydanticStructuredSemanticPayload,
-            payload,
+            _normalize_declared_missing_indicator_children(payload),
             "SEMANTIC_OUTPUT_NOT_OBJECT",
         ).to_internal()
 
@@ -471,6 +472,38 @@ def _validation_error_code(exc: ValidationError) -> str:
         "negated": "SEMANTIC_NEGATED_INVALID",
         "hypothetical": "SEMANTIC_HYPOTHETICAL_INVALID",
     }.get(root, "SEMANTIC_OUTPUT_FIELDS_INVALID")
+
+
+def _normalize_declared_missing_indicator_children(payload: dict[str, Any]) -> dict[str, Any]:
+    unresolved = payload.get("unresolved_fields")
+    indicators = payload.get("indicators")
+    if not isinstance(unresolved, list) or not isinstance(indicators, list):
+        return payload
+
+    unresolved_paths = {item for item in unresolved if isinstance(item, str)}
+    normalized_indicators: list[Any] = []
+    changed = False
+    for index, indicator in enumerate(indicators):
+        if not isinstance(indicator, dict):
+            normalized_indicators.append(indicator)
+            continue
+        normalized = dict(indicator)
+        parameters = normalized.get("parameters")
+        if isinstance(parameters, dict):
+            normalized_parameters = dict(parameters)
+            parent_path = f"indicators[{index}].parameters"
+            for name, value in parameters.items():
+                child_path = f"{parent_path}.{name}"
+                if value is None and (child_path in unresolved_paths or parent_path in unresolved_paths):
+                    normalized_parameters.pop(name)
+                    changed = True
+            normalized["parameters"] = normalized_parameters
+        timeframe_path = f"indicators[{index}].timeframe"
+        if normalized.get("timeframe") is None and timeframe_path in unresolved_paths:
+            normalized.pop("timeframe")
+            changed = True
+        normalized_indicators.append(normalized)
+    return {**payload, "indicators": normalized_indicators} if changed else payload
 
 
 def _reject_json_constant(_: str) -> None:

@@ -11,6 +11,7 @@ from datetime import datetime
 from statistics import mean
 from typing import Any, Iterable, Mapping, Sequence
 
+from src.services.semantic.resolved_semantics import FIELD_SOURCES
 from src.services.trading.market.indicators import atr, ema_series, rsi, sma
 from src.services.trading.market.timeframes import normalize_timeframe
 
@@ -67,6 +68,15 @@ INDICATOR_REGISTRY: dict[str, IndicatorDefinition] = {
     "ATR": IndicatorDefinition("ATR", ("atr", "average true range"), ("period",), ("high", "low", "close"), ("value",), "atr/v1", 3, (), (("period", 2, 500, True),)),
     "MACD": IndicatorDefinition("MACD", ("macd",), ("fast_period", "slow_period", "signal_period"), ("close",), ("line", "signal", "histogram"), "macd/v1", 27, (("fast_period", 12), ("slow_period", 26), ("signal_period", 9)), (("fast_period", 2, 500, True), ("slow_period", 2, 500, True), ("signal_period", 2, 500, True))),
     "BOLLINGER_BANDS": IndicatorDefinition("BOLLINGER_BANDS", ("bollinger", "bollinger bands", "bbands"), ("period", "deviation"), ("close",), ("middle", "upper", "lower"), "bollinger/v1", 3, (("period", 20), ("deviation", 2)), (("period", 2, 500, True), ("deviation", 0.1, 10, False))),
+}
+
+INDICATOR_PARAMETER_SUGGESTIONS: dict[str, dict[str, float]] = {
+    "EMA": {"period": 20},
+    "SMA": {"period": 20},
+    "RSI": {"period": 14},
+    "ATR": {"period": 14},
+    "MACD": {"fast_period": 12, "slow_period": 26, "signal_period": 9},
+    "BOLLINGER_BANDS": {"period": 20, "deviation": 2},
 }
 
 
@@ -129,10 +139,15 @@ class ConversationalStrategyRequest:
     request_id: str
     identity: StrategyIdentity
     semantic_unresolved_fields: tuple[str, ...] = ()
+    field_sources: tuple[tuple[str, str], ...] = ()
 
     @property
     def timeframes(self) -> tuple[str, ...]:
-        return tuple(dict.fromkeys(item.timeframe for item in self.indicators))
+        return tuple(
+            dict.fromkeys(
+                item.timeframe for item in self.indicators if item.timeframe
+            )
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -148,6 +163,7 @@ class ConversationalStrategyRequest:
             "request_id": self.request_id,
             "identity": self.identity.as_dict(),
             "semantic_unresolved_fields": list(self.semantic_unresolved_fields),
+            "field_sources": dict(self.field_sources),
         }
 
     @classmethod
@@ -190,7 +206,14 @@ class ConversationalStrategyRequest:
             semantic_unresolved_fields=tuple(
                 str(item) for item in payload.get("semantic_unresolved_fields", ())
             ),
+            field_sources=tuple(
+                (str(field), str(source))
+                for field, source in dict(payload.get("field_sources") or {}).items()
+                if str(field).strip() and str(source) in FIELD_SOURCES
+            ),
         )
+        if len(value.field_sources) != len(dict(payload.get("field_sources") or {})):
+            raise ValueError("STRATEGY_FIELD_PROVENANCE_INVALID")
         issues = tuple(issue for issue in validate_strategy(value) if issue != "SEMANTIC_FIELDS_UNRESOLVED")
         if issues or value.identity != strategy_identity(value):
             raise ValueError(",".join(issues or ("STRATEGY_IDENTITY_INVALID",)))
@@ -447,6 +470,9 @@ def project_resolved_semantic_strategy(
             if name not in values
         )
     unresolved = tuple(dict.fromkeys(unresolved))
+    field_sources_payload = semantic_context.get("field_sources") or {}
+    if not isinstance(field_sources_payload, Mapping):
+        return None
     rules: list[StrategyRule] = []
     for index, item in enumerate(conditions_payload):
         if not isinstance(item, Mapping):
@@ -475,6 +501,11 @@ def project_resolved_semantic_strategy(
         request_id=request_id,
         identity=StrategyIdentity("", "reasoning-strategy/v2", ""),
         semantic_unresolved_fields=unresolved,
+        field_sources=tuple(
+            (str(field), str(source))
+            for field, source in field_sources_payload.items()
+            if str(field).strip() and str(source) in FIELD_SOURCES
+        ),
     )
     strategy = ConversationalStrategyRequest(
         **{**provisional.__dict__, "identity": strategy_identity(provisional)}
@@ -594,7 +625,10 @@ def validate_strategy(strategy: ConversationalStrategyRequest) -> tuple[str, ...
         if definition is None:
             issues.append("UNSUPPORTED_INDICATOR")
             continue
-        if spec.timeframe not in definition.supported_timeframes:
+        timeframe_unresolved = (
+            f"indicators[{index}].timeframe" in unresolved and not spec.timeframe
+        )
+        if spec.timeframe not in definition.supported_timeframes and not timeframe_unresolved:
             issues.append("UNSUPPORTED_TIMEFRAME")
         if spec.output_alias in aliases:
             issues.append("DUPLICATE_OUTPUT_ALIAS")
