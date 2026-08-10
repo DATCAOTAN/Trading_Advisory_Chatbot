@@ -42,6 +42,8 @@ from src.services.trading.market.regime_detector import MarketRegimeDetector
 from src.services.trading.reasoning import MethodSelectorService
 from src.services.trading.reasoning.strategy_evidence import (
     ConversationalStrategyRequest,
+    _evaluate_level_rule_previous,
+    _evaluate_rule,
     plan_strategy_data,
     validate_strategy,
 )
@@ -320,10 +322,69 @@ def _reasoning_evidence_summary(feature_result: Any) -> str:
         "regime_confidence": evidence.regime_confidence,
         "scores": dict(evidence.setup.scores),
         "hard_blockers": list(evidence.setup.hard_blockers),
+        "indicator_values": {
+            key: dict(value)
+            for key, value in evidence.features.indicator_values.items()
+        },
         "reasons": [item.as_dict() for item in evidence.reasons[:12]],
         "history": [item.as_dict() for item in evidence.history],
     }
     return json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+def strategy_monitor_projection(
+    strategy: ConversationalStrategyRequest, evidence_summary: str
+) -> dict[str, Any]:
+    try:
+        evidence = json.loads(evidence_summary or "{}")
+    except json.JSONDecodeError:
+        return {}
+    if not strategy.entry_rules or not isinstance(evidence, dict):
+        return {}
+    rule = strategy.entry_rules[0]
+    values = evidence.get("indicator_values")
+    if not isinstance(values, dict):
+        return {}
+    indicator = next(
+        (item for item in strategy.indicators if item.output_alias == rule.left),
+        None,
+    )
+    observed = values.get(rule.left)
+    if indicator is None or not isinstance(observed, dict):
+        return {}
+    current_condition = _evaluate_rule(rule, values)
+    level_rule = rule.operator in {"GREATER_THAN", "LESS_THAN", "BETWEEN"}
+    previous_condition = (
+        _evaluate_level_rule_previous(rule, values) if level_rule else None
+    )
+    if level_rule and current_condition and previous_condition:
+        signal_state = "WAITING_FOR_REARM"
+    elif current_condition:
+        signal_state = "TRIGGERED"
+    else:
+        signal_state = "ARMED"
+    parameters = indicator.parameter_map()
+    threshold: Any = list(rule.constants)
+    if len(rule.constants) == 1:
+        threshold = rule.constants[0]
+    elif rule.right:
+        threshold = rule.right
+    return {
+        "strategy_reference": strategy.identity.strategy_id,
+        "strategy_version": strategy.identity.strategy_version,
+        "strategy_hash_prefix": strategy.identity.normalized_strategy_hash[:12],
+        "semantic_timeframe": indicator.timeframe,
+        "indicator_name": indicator.indicator_id,
+        "indicator_period": parameters.get("period"),
+        "previous_indicator_value": observed.get("previous"),
+        "current_indicator_value": observed.get("current"),
+        "operator": rule.operator,
+        "threshold": threshold,
+        "previous_condition": previous_condition,
+        "current_condition": current_condition,
+        "rearm_state": signal_state,
+        "hard_blockers": list(evidence.get("hard_blockers") or ()),
+    }
 
 
 def _manual_inputs(
@@ -659,7 +720,9 @@ def _validate_market_sources(
     )
     if entry_blockers:
         raise OperatorCandidateInputError(
-            "STRUCTURED_PROPOSAL_NOT_AVAILABLE", *entry_blockers
+            "STRUCTURED_PROPOSAL_NOT_AVAILABLE",
+            *entry_blockers,
+            evidence_summary=_reasoning_evidence_summary(feature_result),
         )
 
 

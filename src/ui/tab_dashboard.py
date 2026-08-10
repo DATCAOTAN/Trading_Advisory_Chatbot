@@ -97,7 +97,6 @@ from src.services.trading.decision.autonomous_candidate_monitor import (
     DEFAULT_MONITOR_JOURNAL_PATH,
     AutonomousCandidateMonitorError,
     AutonomousCandidateMonitorJournal,
-    monitor_profile_id,
 )
 from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionJournal,
@@ -304,8 +303,14 @@ def _render_autonomous_decision_review_card(
     key_prefix="",
     strategy=None,
     order_family="",
+    strategy_direction="",
+    strategy_action="",
 ):
-    monitor_row = _latest_monitor_row(selected_symbol, selected_timeframes)
+    monitor_row = _latest_monitor_row(
+        selected_symbol,
+        selected_timeframes,
+        getattr(getattr(strategy, "identity", None), "strategy_id", ""),
+    )
     active_mode, runtime_blockers = _render_trading_runtime_controls(
         selected_symbol,
         selected_timeframes,
@@ -315,6 +320,8 @@ def _render_autonomous_decision_review_card(
         key_prefix=key_prefix,
         strategy=strategy,
         order_family=order_family,
+        strategy_direction=strategy_direction,
+        strategy_action=strategy_action,
     )
     mode_ui = _mode_ui_capabilities(requested_mode or active_mode)
     actions = st.columns(2)
@@ -411,11 +418,26 @@ def _render_autonomous_decision_review_card(
         _render_pending_candidate_handoff(run_result, key_prefix=key_prefix)
 
 
-def _latest_monitor_row(symbol: str, timeframes: tuple[str, ...]):
+def _latest_monitor_row(
+    symbol: str, timeframes: tuple[str, ...], strategy_reference: str = ""
+):
     try:
-        return AutonomousCandidateMonitorJournal(DEFAULT_MONITOR_JOURNAL_PATH).latest(
-            monitor_profile_id(symbol, timeframes)
-        )
+        rows = AutonomousCandidateMonitorJournal(
+            DEFAULT_MONITOR_JOURNAL_PATH
+        ).records()
+        matches = [
+            row
+            for row in rows
+            if row["symbol"] == symbol
+            and tuple(row["timeframes"]) == tuple(timeframes)
+            and row["phase"] == "COMPLETED"
+            and (
+                not strategy_reference
+                or (row.get("strategy_evaluation") or {}).get("strategy_reference")
+                == strategy_reference
+            )
+        ]
+        return matches[-1] if matches else None
     except AutonomousCandidateMonitorError:
         st.warning("Candidate monitor journal is unavailable or invalid.")
         return None
@@ -470,6 +492,8 @@ def _render_trading_runtime_controls(
     key_prefix="",
     strategy=None,
     order_family="",
+    strategy_direction="",
+    strategy_action="",
 ) -> tuple[str, tuple[str, ...]]:
     with st.expander("Trading Authority and Runtime Supervisor", expanded=True):
         st.caption(
@@ -607,6 +631,8 @@ def _render_trading_runtime_controls(
                 setup = service.build_mandate_setup(
                     strategy,
                     order_family=order_family,
+                    strategy_direction=strategy_direction,
+                    strategy_action=strategy_action,
                     duration_minutes=int(duration_minutes),
                 )
             except Exception as exc:
@@ -618,6 +644,10 @@ def _render_trading_runtime_controls(
                 st.caption(
                     f"Strategy: {setup.strategy_description} | "
                     f"id={setup.strategy_id} | version={setup.strategy_version}"
+                )
+                st.caption(
+                    f"direction={setup.strategy_direction} | action={setup.strategy_action} | "
+                    f"hash={setup.normalized_strategy_hash[:12]}"
                 )
                 facts = st.columns(4)
                 facts[0].metric("Mode", setup.operating_mode)
@@ -787,6 +817,37 @@ def _render_trading_runtime_controls(
                 st.caption(
                     f"latest={monitor_row['status']} | blocker={monitor_row['blocker'] or 'none'}"
                 )
+                evaluation = dict(monitor_row.get("strategy_evaluation") or {})
+                if evaluation:
+                    st.markdown("**Autonomous Runtime**")
+                    runtime = st.columns(4)
+                    runtime[0].metric(
+                        "Signal state", evaluation.get("rearm_state") or "UNAVAILABLE"
+                    )
+                    runtime[1].metric(
+                        "Last decision", evaluation.get("decision") or monitor_row["status"]
+                    )
+                    runtime[2].metric(
+                        "Completed bar", monitor_row.get("closed_bar_time") or "UNAVAILABLE"
+                    )
+                    runtime[3].metric(
+                        "Candidate", evaluation.get("candidate_reference") or "none"
+                    )
+                    st.caption(
+                        f"strategy={evaluation.get('strategy_reference') or 'UNAVAILABLE'} | "
+                        f"{evaluation.get('direction') or ''} {symbol} | "
+                        f"{evaluation.get('indicator_name') or 'indicator'}"
+                        f"{evaluation.get('indicator_period') or ''}@"
+                        f"{evaluation.get('semantic_timeframe') or 'UNAVAILABLE'} "
+                        f"{evaluation.get('operator') or ''} {evaluation.get('threshold') or ''}"
+                    )
+                    st.caption(
+                        f"previous={evaluation.get('previous_indicator_value')} | "
+                        f"current={evaluation.get('current_indicator_value')} | "
+                        f"previous_condition={evaluation.get('previous_condition')} | "
+                        f"current_condition={evaluation.get('current_condition')} | "
+                        f"firewall={evaluation.get('execution_firewall') or 'BLOCKED'}"
+                    )
         return status["mode"], runtime_blockers
 
 

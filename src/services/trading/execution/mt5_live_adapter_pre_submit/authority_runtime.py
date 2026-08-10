@@ -4,10 +4,10 @@ import hashlib
 import hmac
 import secrets
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Mapping
 
 from src.config import Config
 from src.services.trading.execution.mt5_live_adapter_pre_submit.adapter import (
@@ -50,6 +50,12 @@ class MandateGrantCommand:
     active_until: str
     expires_at: str
     kill_switch_engaged: bool
+    strategy_id: str = ""
+    strategy_version: str = ""
+    normalized_strategy_hash: str = ""
+    strategy_direction: str = ""
+    strategy_action: str = ""
+    protected_strategy: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
 
 @dataclass(frozen=True)
@@ -59,6 +65,10 @@ class MandateSetupProjection:
     strategy_id: str
     strategy_version: str
     strategy_description: str
+    strategy_direction: str
+    strategy_action: str
+    normalized_strategy_hash: str
+    protected_strategy: Mapping[str, Any] = field(repr=False)
     operating_mode: str
     account_environment: str
     account_binding_status: str
@@ -104,6 +114,8 @@ class TradingAuthorityOperatorService:
         strategy: Any,
         *,
         order_family: str,
+        strategy_direction: str,
+        strategy_action: str,
         duration_minutes: int = 60,
         now: datetime | None = None,
     ) -> MandateSetupProjection:
@@ -117,6 +129,8 @@ class TradingAuthorityOperatorService:
             or not strategy.canonical_symbol
             or not strategy.identity.strategy_id
             or order_family not in {"MARKET", "PENDING"}
+            or strategy_direction not in {"BUY", "SELL"}
+            or strategy_action != "OPEN_POSITION"
         ):
             raise ValueError("MANDATE_STRATEGY_NOT_READY")
 
@@ -177,6 +191,10 @@ class TradingAuthorityOperatorService:
             strategy_id=strategy.identity.strategy_id,
             strategy_version=strategy.identity.strategy_version,
             strategy_description=strategy.strategy_description,
+            strategy_direction=strategy_direction,
+            strategy_action=strategy_action,
+            normalized_strategy_hash=strategy.identity.normalized_strategy_hash,
+            protected_strategy=strategy.as_dict(),
             operating_mode="autonomous_live",
             account_environment=str(account["account_environment"]),
             account_binding_status="DEMO_ACCOUNT_MATCHED",
@@ -266,6 +284,12 @@ class TradingAuthorityOperatorService:
             active_until=setup.active_until,
             expires_at=setup.expires_at,
             kill_switch_engaged=bool(kill_switch_engaged),
+            strategy_id=setup.strategy_id,
+            strategy_version=setup.strategy_version,
+            normalized_strategy_hash=setup.normalized_strategy_hash,
+            strategy_direction=setup.strategy_direction,
+            strategy_action=setup.strategy_action,
+            protected_strategy=dict(setup.protected_strategy),
         )
 
     def status(self, *, refresh_runtime: bool = False) -> dict[str, Any]:

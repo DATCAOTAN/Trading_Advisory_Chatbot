@@ -9,6 +9,7 @@ from src.services.trading.decision.operator_candidate_generation import (
 )
 from src.ui.tab_dashboard import (
     _candidate_runtime_blockers,
+    _latest_monitor_row,
     _market_runtime_projection,
     _mode_ui_capabilities,
 )
@@ -242,3 +243,37 @@ def test_generate_control_is_disabled_until_runtime_blockers_clear():
 
     assert "or bool(runtime_blockers)" in source
     assert "Generate Candidate is unavailable until Refresh Runtime Health" in source
+
+
+def test_dashboard_reads_latest_authoritative_strategy_evaluation(monkeypatch):
+    rows = [
+        {
+            "symbol": "XAUUSD",
+            "timeframes": ["M1"],
+            "phase": "COMPLETED",
+            "strategy_evaluation": {"rearm_state": "WAITING_FOR_REARM"},
+        }
+    ]
+    monkeypatch.setattr(
+        "src.ui.tab_dashboard.AutonomousCandidateMonitorJournal",
+        lambda _path: SimpleNamespace(records=lambda: rows),
+    )
+
+    row = _latest_monitor_row("XAUUSD", ("M1",), "strategy-current")
+
+    assert row is None
+
+    rows[0]["strategy_evaluation"]["strategy_reference"] = "strategy-current"
+    row = _latest_monitor_row("XAUUSD", ("M1",), "strategy-current")
+    assert row["strategy_evaluation"]["rearm_state"] == "WAITING_FOR_REARM"
+
+
+def test_dashboard_only_presents_monitor_strategy_evaluation():
+    source = Path("src/ui/tab_dashboard.py").read_text(encoding="utf-8")
+
+    assert 'st.markdown("**Autonomous Runtime**")' in source
+    assert "previous_indicator_value" in source
+    assert "current_indicator_value" in source
+    assert "rearm_state" in source
+    assert "strategy_monitor_projection" not in source
+    assert "_evaluate_rule" not in source

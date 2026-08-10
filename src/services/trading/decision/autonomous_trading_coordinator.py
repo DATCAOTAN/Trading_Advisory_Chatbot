@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
+from src.config import Config
 from src.services.trading.decision.autonomous_candidate_monitor import (
     AutonomousCandidateMonitor,
     AutonomousCandidateMonitorJournal,
@@ -23,6 +24,7 @@ from src.services.trading.decision.autonomous_execution_policy import (
 )
 from src.services.trading.decision.operator_candidate_generation import (
     OperatorCandidateInputError,
+    strategy_monitor_projection,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.approval_pre_submit import (
     ApprovalPreSubmitLifecycleService,
@@ -104,6 +106,9 @@ class AutonomousTradingCoordinator:
         *,
         feature_service: Any,
         input_assembler: Any,
+        strategy: Any | None = None,
+        strategy_direction: str = "",
+        strategy_action: str = "",
         account_context_provider: Any,
         authority_service: TradingAuthorityService,
         decision_orchestrator: Any | None = None,
@@ -119,6 +124,9 @@ class AutonomousTradingCoordinator:
         clock: Any | None = None,
     ) -> None:
         self.input_assembler = input_assembler
+        self.strategy = strategy
+        self.strategy_direction = str(strategy_direction or "").upper()
+        self.strategy_action = str(strategy_action or "").upper()
         self.account_context_provider = account_context_provider
         self.authority_service = authority_service
         self.decision_orchestrator = decision_orchestrator or AutonomousDecisionOrchestrator()
@@ -143,6 +151,17 @@ class AutonomousTradingCoordinator:
     def run_once(
         self, *, symbol: str, timeframes: tuple[str, ...]
     ) -> AutonomousCandidateMonitorResult:
+        if self.strategy is not None and (
+            str(symbol).upper() != self.strategy.canonical_symbol
+            or tuple(timeframes) != self.strategy.timeframes
+        ):
+            return AutonomousCandidateMonitorResult(
+                "BLOCKED",
+                symbol,
+                timeframes=timeframes,
+                blocker="COORDINATOR_STRATEGY_PROFILE_MISMATCH",
+                coordinator_status="BLOCKED",
+            )
         if not self._run_lock.acquire(blocking=False):
             return AutonomousCandidateMonitorResult(
                 "BLOCKED", symbol, timeframes=timeframes,
@@ -182,7 +201,12 @@ class AutonomousTradingCoordinator:
             account.account_context_fingerprint.encode("utf-8")
         ).hexdigest()[:24]
         return self.monitor.run_once(
-            symbol=symbol, timeframes=timeframes, account_scope=account_scope
+            symbol=symbol,
+            timeframes=timeframes,
+            account_scope=account_scope,
+            strategy_reference=(
+                self.strategy.identity.strategy_id if self.strategy is not None else "legacy"
+            ),
         )
 
     def _handle_completed_bar(
@@ -195,9 +219,14 @@ class AutonomousTradingCoordinator:
         account_scope: str,
     ) -> AutonomousCandidateMonitorResult:
         try:
-            inputs = self.input_assembler.build(symbol=symbol, timeframes=timeframes)
+            inputs = self.input_assembler.build(
+                symbol=symbol,
+                timeframes=timeframes,
+                strategy=self.strategy,
+            )
         except OperatorCandidateInputError as exc:
             no_action = bool(exc.blockers) and exc.blockers[0] == "STRUCTURED_PROPOSAL_NOT_AVAILABLE"
+            projection = self._strategy_projection(exc.evidence_summary)
             return self._result(
                 "NO_ACTION" if no_action else "BLOCKED",
                 symbol,
@@ -207,6 +236,7 @@ class AutonomousTradingCoordinator:
                 account_scope,
                 intent="NO_ACTION" if no_action else "",
                 blocker=str(exc),
+                strategy_evaluation=projection,
             )
         if not _runtime_safe(inputs):
             return self._result(
@@ -230,6 +260,26 @@ class AutonomousTradingCoordinator:
                 account_scope, blocker="COORDINATOR_RESULT_INVALID",
             )
         candidate = run_result.candidate
+        if self.strategy is not None and (
+            candidate.strategy_id != self.strategy.identity.strategy_id
+            or candidate.strategy_version != self.strategy.identity.strategy_version
+            or candidate.normalized_strategy_hash
+            != self.strategy.identity.normalized_strategy_hash
+            or (
+                candidate.intent == "OPEN_POSITION"
+                and candidate.direction != self.strategy_direction
+            )
+        ):
+            return self._candidate_result(
+                candidate,
+                symbol,
+                broker_symbol,
+                timeframes,
+                closed_bar_time,
+                account_scope,
+                "BLOCKED",
+                "COORDINATOR_STRATEGY_BINDING_MISMATCH",
+            )
         if not run_result.validation.valid or not run_result.persistence_safe:
             blocker = run_result.journal_warning or (
                 run_result.validation.issues[0]
@@ -647,23 +697,49 @@ class AutonomousTradingCoordinator:
             authorization_source="STANDING_MANDATE",
         )
 
-    @staticmethod
     def _result(
-        status, symbol, broker_symbol, timeframes, closed_bar_time, account_scope,
-        *, intent="", blocker="",
+        self, status, symbol, broker_symbol, timeframes, closed_bar_time, account_scope,
+        *, intent="", blocker="", strategy_evaluation=None,
     ) -> AutonomousCandidateMonitorResult:
+        projection = dict(
+            strategy_evaluation
+            if strategy_evaluation is not None
+            else self._strategy_projection("")
+        )
+        projection.update(
+            decision=status,
+            blocker=blocker,
+            mandate_state="ACTIVE",
+            execution_firewall=self._execution_firewall_state(),
+        )
         return AutonomousCandidateMonitorResult(
             status, symbol, broker_symbol, timeframes, closed_bar_time,
             intent=intent, blocker=blocker, generation_count=1,
             proposal_provider_max_invocations=1, account_scope=account_scope,
             coordinator_status=status,
+            strategy_evaluation=projection,
         )
 
-    @staticmethod
     def _candidate_result(
-        candidate, symbol, broker_symbol, timeframes, closed_bar_time, account_scope,
+        self, candidate, symbol, broker_symbol, timeframes, closed_bar_time, account_scope,
         status, blocker, *, authorization_source="", pre_submit_ready=False,
     ) -> AutonomousCandidateMonitorResult:
+        projection = self._strategy_projection(
+            str(getattr(candidate, "reasoning_evidence_summary", "") or "")
+        )
+        projection.update(
+            decision=status,
+            blocker=blocker,
+            candidate_reference=candidate.candidate_reference,
+            proposal={
+                "entry": candidate.entry_price or candidate.trigger_price,
+                "stop_loss": candidate.stop_loss,
+                "take_profit": candidate.take_profit,
+                "volume": candidate.proposed_volume,
+            },
+            mandate_state="ACTIVE",
+            execution_firewall=self._execution_firewall_state(),
+        )
         return AutonomousCandidateMonitorResult(
             status, symbol, broker_symbol, timeframes, closed_bar_time,
             candidate_reference=candidate.candidate_reference,
@@ -676,7 +752,30 @@ class AutonomousTradingCoordinator:
             coordinator_status=status,
             authorization_source=authorization_source,
             pre_submit_ready=pre_submit_ready,
+            strategy_evaluation=projection,
         )
+
+    def _strategy_projection(self, evidence_summary: str) -> dict[str, Any]:
+        if self.strategy is None:
+            return {}
+        projection = strategy_monitor_projection(self.strategy, evidence_summary)
+        projection.update(
+            strategy_reference=self.strategy.identity.strategy_id,
+            strategy_version=self.strategy.identity.strategy_version,
+            strategy_hash_prefix=self.strategy.identity.normalized_strategy_hash[:12],
+            direction=self.strategy_direction,
+            action=self.strategy_action,
+        )
+        return projection
+
+    @staticmethod
+    def _execution_firewall_state() -> str:
+        if (
+            Config.TRADING_EXECUTION_KILL_SWITCH
+            or Config.TRADING_MT5_KILL_SWITCH_ENGAGED
+        ):
+            return "BLOCKED_KILL_SWITCH"
+        return "BLOCKED_DISABLED_PERMISSIONS"
 
 
 def _runtime_safe(inputs: Any) -> bool:

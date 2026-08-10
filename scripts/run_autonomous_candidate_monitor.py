@@ -55,9 +55,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--watch", action="store_true")
     parser.add_argument("--interval-seconds", type=float, default=15.0)
     parser.add_argument("--journal", default=DEFAULT_MONITOR_JOURNAL_PATH)
-    parser.add_argument("--mandate-id", default="")
+    parser.add_argument("--mandate-id", required=True)
     args = parser.parse_args(argv)
-    timeframes = tuple(item.strip().upper() for item in args.timeframes.split(",") if item.strip())
 
     live_service = get_live_service()
     adapter = MT5LiveAdapterDisabled()
@@ -74,6 +73,21 @@ def main(argv: list[str] | None = None) -> int:
         return payload
 
     authority_service = TradingAuthorityService(TradingAuthorityStore())
+    initial_account = account_context()
+    mandate, strategy = authority_service.load_supervisor_strategy(
+        args.mandate_id,
+        account_fingerprint=initial_account["account_context_fingerprint"],
+        account_is_demo=initial_account["account_is_demo"],
+    )
+    symbol = strategy.canonical_symbol
+    timeframes = strategy.timeframes
+    requested_timeframes = tuple(
+        item.strip().upper()
+        for item in args.timeframes.split(",")
+        if item.strip()
+    )
+    if str(args.symbol).strip().upper() != symbol or requested_timeframes != timeframes:
+        raise RuntimeError("SUPERVISOR_STRATEGY_PROFILE_MISMATCH")
     approval_service = ApprovalPreSubmitLifecycleService(
         candidate_journal=AutonomousDecisionJournal(
             Config.TRADING_AUTONOMOUS_DECISION_JOURNAL_PATH,
@@ -106,6 +120,9 @@ def main(argv: list[str] | None = None) -> int:
             bundle_builder=MarketSnapshotBundleBuilder(live_service.provider)
         ),
         input_assembler=AuthoritativeAutonomousInputAssembler(live_service),
+        strategy=strategy,
+        strategy_direction=mandate.strategy_direction,
+        strategy_action=mandate.strategy_action,
         account_context_provider=account_context,
         authority_service=authority_service,
         approval_service=approval_service,
@@ -115,7 +132,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         while True:
-            result = coordinator.run_once(symbol=args.symbol, timeframes=timeframes)
+            current_account = account_context()
+            current_mandate, current_strategy = authority_service.load_supervisor_strategy(
+                args.mandate_id,
+                account_fingerprint=current_account["account_context_fingerprint"],
+                account_is_demo=current_account["account_is_demo"],
+            )
+            if (
+                current_strategy != strategy
+                or current_mandate.strategy_direction != mandate.strategy_direction
+                or current_mandate.strategy_action != mandate.strategy_action
+            ):
+                raise RuntimeError("SUPERVISOR_STRATEGY_BINDING_CHANGED")
+            result = coordinator.run_once(symbol=symbol, timeframes=timeframes)
             print(json.dumps(result.to_public_dict(), ensure_ascii=True, sort_keys=True), flush=True)
             if not args.watch:
                 return 0 if result.status not in {"BLOCKED", "RESULT_UNKNOWN"} else 2

@@ -4,10 +4,10 @@ import hashlib
 import hmac
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from src.config import Config
 DEFAULT_MONITOR_JOURNAL_PATH = (
@@ -62,6 +62,7 @@ class AutonomousCandidateMonitorResult:
     coordinator_status: str = ""
     authorization_source: str = ""
     pre_submit_ready: bool = False
+    strategy_evaluation: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +85,7 @@ class AutonomousCandidateMonitorResult:
             "coordinator_status": self.coordinator_status,
             "authorization_source": self.authorization_source,
             "pre_submit_ready": bool(self.pre_submit_ready),
+            "strategy_evaluation": dict(self.strategy_evaluation or {}),
         }
 
 
@@ -107,6 +109,7 @@ class AutonomousCandidateMonitorJournal:
         "coordinator_status",
         "authorization_source",
         "pre_submit_ready",
+        "strategy_evaluation",
         "execution_authority",
         "export_called",
         "submission_called",
@@ -119,7 +122,9 @@ class AutonomousCandidateMonitorJournal:
         "coordinator_status",
         "authorization_source",
         "pre_submit_ready",
+        "strategy_evaluation",
     }
+    _previous_required = _required - {"strategy_evaluation"}
 
     def __init__(self, path: str | Path = DEFAULT_MONITOR_JOURNAL_PATH):
         self.path = Path(path)
@@ -143,7 +148,11 @@ class AutonomousCandidateMonitorJournal:
             if not isinstance(row, dict):
                 raise AutonomousCandidateMonitorError("MONITOR_JOURNAL_CORRUPT")
             keys = frozenset(row)
-            if keys not in {frozenset(self._required), frozenset(self._legacy_required)}:
+            if keys not in {
+                frozenset(self._required),
+                frozenset(self._previous_required),
+                frozenset(self._legacy_required),
+            }:
                 raise AutonomousCandidateMonitorError("MONITOR_JOURNAL_CORRUPT")
             expected = _record_hash({key: value for key, value in row.items() if key != "record_hash"})
             if not hmac.compare_digest(str(row["record_hash"]), expected):
@@ -152,6 +161,7 @@ class AutonomousCandidateMonitorJournal:
             row.setdefault("coordinator_status", row.get("status", ""))
             row.setdefault("authorization_source", "")
             row.setdefault("pre_submit_ready", False)
+            row.setdefault("strategy_evaluation", {})
             records.append(row)
         return records
 
@@ -170,6 +180,7 @@ class AutonomousCandidateMonitorJournal:
         broker_symbol: str,
         timeframes: tuple[str, ...],
         closed_bar_time: str,
+        strategy_reference: str = "legacy",
     ) -> bool:
         with self._exclusive_lock():
             rows = self.records()
@@ -206,6 +217,7 @@ class AutonomousCandidateMonitorJournal:
                     broker_symbol=broker_symbol,
                     timeframes=timeframes,
                     closed_bar_time=closed_bar_time,
+                    strategy_evaluation={"strategy_reference": strategy_reference},
                     phase="STARTED",
                     status="STARTED",
                 )
@@ -214,7 +226,10 @@ class AutonomousCandidateMonitorJournal:
 
     def complete(self, result: AutonomousCandidateMonitorResult) -> None:
         profile_id = monitor_profile_id(
-            result.symbol, result.timeframes, result.account_scope
+            result.symbol,
+            result.timeframes,
+            result.account_scope,
+            str((result.strategy_evaluation or {}).get("strategy_reference") or "legacy"),
         )
         with self._exclusive_lock():
             matching = [
@@ -245,6 +260,7 @@ class AutonomousCandidateMonitorJournal:
                     coordinator_status=result.coordinator_status,
                     authorization_source=result.authorization_source,
                     pre_submit_ready=result.pre_submit_ready,
+                    strategy_evaluation=result.strategy_evaluation or {},
                 )
             )
 
@@ -294,12 +310,23 @@ class AutonomousCandidateMonitor:
         self.journal = journal or AutonomousCandidateMonitorJournal()
 
     def run_once(
-        self, *, symbol: str, timeframes: Iterable[str], account_scope: str
+        self,
+        *,
+        symbol: str,
+        timeframes: Iterable[str],
+        account_scope: str,
+        strategy_reference: str = "legacy",
     ) -> AutonomousCandidateMonitorResult:
         normalized_symbol = str(symbol or "").strip().upper()
         normalized_account_scope = str(account_scope or "").strip().lower()
         normalized_timeframes = tuple(str(item).strip().upper() for item in timeframes if str(item).strip())
-        if not normalized_symbol or not normalized_timeframes or not normalized_account_scope:
+        normalized_strategy_reference = str(strategy_reference or "").strip()
+        if (
+            not normalized_symbol
+            or not normalized_timeframes
+            or not normalized_account_scope
+            or not normalized_strategy_reference
+        ):
             return AutonomousCandidateMonitorResult(
                 "BLOCKED", normalized_symbol, timeframes=normalized_timeframes,
                 blocker="MONITOR_PROFILE_INVALID", account_scope=normalized_account_scope,
@@ -312,7 +339,9 @@ class AutonomousCandidateMonitor:
             )
         try:
             feature_result = self.feature_service.build_features(
-                normalized_symbol, normalized_timeframes, 2
+                normalized_symbol,
+                normalized_timeframes,
+                Config.MARKET_DEFAULT_CANDLE_COUNT,
             )
             quality = str(getattr(feature_result.quality_report, "status", "")).upper()
             snapshot = feature_result.bundle.timeframes.get(normalized_timeframes[0])
@@ -331,7 +360,10 @@ class AutonomousCandidateMonitor:
             )
 
         profile_id = monitor_profile_id(
-            normalized_symbol, normalized_timeframes, normalized_account_scope
+            normalized_symbol,
+            normalized_timeframes,
+            normalized_account_scope,
+            normalized_strategy_reference,
         )
         if not self.journal.claim(
             profile_id=profile_id,
@@ -340,6 +372,7 @@ class AutonomousCandidateMonitor:
             broker_symbol=broker_symbol,
             timeframes=normalized_timeframes,
             closed_bar_time=closed_bar_time,
+            strategy_reference=normalized_strategy_reference,
         ):
             latest = self.journal.latest(profile_id)
             return AutonomousCandidateMonitorResult(
@@ -368,12 +401,22 @@ class AutonomousCandidateMonitor:
                 closed_bar_time, blocker="MONITOR_COORDINATOR_FAILED",
                 account_scope=normalized_account_scope,
             )
+        if not result.strategy_evaluation:
+            result = replace(
+                result,
+                strategy_evaluation={
+                    "strategy_reference": normalized_strategy_reference
+                },
+            )
         self.journal.complete(result)
         return result
 
 
 def monitor_profile_id(
-    symbol: str, timeframes: Iterable[str], account_scope: str = "legacy"
+    symbol: str,
+    timeframes: Iterable[str],
+    account_scope: str = "legacy",
+    strategy_reference: str = "legacy",
 ) -> str:
     material = (
         str(account_scope).lower()
@@ -381,6 +424,8 @@ def monitor_profile_id(
         + str(symbol).upper()
         + "|"
         + ",".join(str(item).upper() for item in timeframes)
+        + "|"
+        + str(strategy_reference)
     )
     return "monitor_profile_" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
@@ -403,6 +448,7 @@ def _row(
     coordinator_status: str = "",
     authorization_source: str = "",
     pre_submit_ready: bool = False,
+    strategy_evaluation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     created_at = datetime.now(timezone.utc).isoformat()
     payload = {
@@ -426,6 +472,7 @@ def _row(
         "coordinator_status": coordinator_status,
         "authorization_source": authorization_source,
         "pre_submit_ready": bool(pre_submit_ready),
+        "strategy_evaluation": dict(strategy_evaluation or {}),
         "execution_authority": False,
         "export_called": False,
         "submission_called": False,

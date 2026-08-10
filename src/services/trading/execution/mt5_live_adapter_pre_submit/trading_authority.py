@@ -11,6 +11,12 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping
 
+from src.services.trading.market.timeframes import broker_symbol_for
+from src.services.trading.reasoning.strategy_evidence import (
+    ConversationalStrategyRequest,
+    validate_strategy,
+)
+
 
 OPERATING_MODES = {"advisory_only", "human_confirmed_live", "autonomous_live"}
 AUTHORIZATION_SOURCES = {"HUMAN_CONFIRMATION", "STANDING_MANDATE"}
@@ -78,6 +84,12 @@ class StandingTradingMandate:
     idempotency_key: str
     kill_switch_engaged: bool
     operator_grant: bool
+    strategy_id: str = ""
+    strategy_version: str = ""
+    normalized_strategy_hash: str = ""
+    strategy_direction: str = ""
+    strategy_action: str = ""
+    protected_strategy: Mapping[str, Any] = field(default_factory=dict, repr=False)
     revoked: bool = False
     revoked_at: str = ""
     revocation_nonce: str = ""
@@ -91,6 +103,17 @@ class StandingTradingMandate:
         payload["permitted_management_actions"] = list(
             self.permitted_management_actions
         )
+        payload["protected_strategy"] = dict(self.protected_strategy)
+        if not self.strategy_id and not self.protected_strategy:
+            for name in (
+                "strategy_id",
+                "strategy_version",
+                "normalized_strategy_hash",
+                "strategy_direction",
+                "strategy_action",
+                "protected_strategy",
+            ):
+                payload.pop(name, None)
         payload["artifact_hash"] = ""
         return payload
 
@@ -113,6 +136,12 @@ class StandingTradingMandate:
             "permitted_broker_symbols": list(self.permitted_broker_symbols),
             "permitted_order_families": list(self.permitted_order_families),
             "permitted_management_actions": list(self.permitted_management_actions),
+            "strategy_id": self.strategy_id,
+            "strategy_version": self.strategy_version,
+            "strategy_hash_prefix": self.normalized_strategy_hash[:12],
+            "strategy_direction": self.strategy_direction,
+            "strategy_action": self.strategy_action,
+            "strategy_bound": bool(self.strategy_id and self.protected_strategy),
             "maximum_volume": self.maximum_volume,
             "maximum_risk_per_trade": self.maximum_risk_per_trade,
             "maximum_concurrent_positions": self.maximum_concurrent_positions,
@@ -467,6 +496,12 @@ class TradingAuthorityService:
         idempotency_key: str,
         kill_switch_engaged: bool,
         operator_grant: bool,
+        strategy_id: str = "",
+        strategy_version: str = "",
+        normalized_strategy_hash: str = "",
+        strategy_direction: str = "",
+        strategy_action: str = "",
+        protected_strategy: Mapping[str, Any] | None = None,
         now: datetime | None = None,
     ) -> StandingTradingMandate:
         created_at = _utc(now).isoformat()
@@ -484,6 +519,43 @@ class TradingAuthorityService:
             or not _identifier(idempotency_key)
         ):
             raise TradingAuthorityError("MANDATE_GRANT_INVALID")
+        normalized_symbols = tuple(str(item).strip().upper() for item in permitted_symbols)
+        normalized_broker_symbols = tuple(
+            str(item).strip() for item in permitted_broker_symbols
+        )
+        strategy_payload = dict(protected_strategy or {})
+        if strategy_payload:
+            try:
+                strategy = ConversationalStrategyRequest.from_dict(strategy_payload)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise TradingAuthorityError("MANDATE_STRATEGY_BINDING_INVALID") from exc
+            identity = strategy.identity
+            if (
+                validate_strategy(strategy)
+                or (strategy_id, strategy_version, normalized_strategy_hash)
+                != (
+                    identity.strategy_id,
+                    identity.strategy_version,
+                    identity.normalized_strategy_hash,
+                )
+                or strategy.requested_mode != "autonomous_live"
+                or strategy.canonical_symbol not in normalized_symbols
+                or broker_symbol_for(strategy.canonical_symbol)
+                not in normalized_broker_symbols
+                or strategy_direction not in {"BUY", "SELL"}
+                or strategy_action not in {"OPEN_POSITION"}
+            ):
+                raise TradingAuthorityError("MANDATE_STRATEGY_BINDING_INVALID")
+        elif any(
+            (
+                strategy_id,
+                strategy_version,
+                normalized_strategy_hash,
+                strategy_direction,
+                strategy_action,
+            )
+        ):
+            raise TradingAuthorityError("MANDATE_STRATEGY_BINDING_INVALID")
         fingerprint_hash = _fingerprint_hash(account_fingerprint)
         if not hmac.compare_digest(
             current_mode.account_fingerprint_hash, fingerprint_hash
@@ -540,10 +612,81 @@ class TradingAuthorityService:
             idempotency_key=idempotency_key,
             kill_switch_engaged=bool(kill_switch_engaged),
             operator_grant=True,
+            strategy_id=strategy_id,
+            strategy_version=strategy_version,
+            normalized_strategy_hash=normalized_strategy_hash,
+            strategy_direction=strategy_direction,
+            strategy_action=strategy_action,
+            protected_strategy=strategy_payload,
         )
         mandate = replace(mandate, artifact_hash=_hash(mandate.protected_payload()))
         self.store.append("MANDATE_GRANTED", mandate)
         return mandate
+
+    def load_supervisor_strategy(
+        self,
+        mandate_id: str,
+        *,
+        account_fingerprint: str,
+        account_is_demo: bool,
+        now: datetime | None = None,
+    ) -> tuple[StandingTradingMandate, ConversationalStrategyRequest]:
+        evaluated_at = _utc(now)
+        mode = self.store.latest_mode()
+        mandate = self.store.latest_mandate(mandate_id)
+        if mandate is None:
+            raise TradingAuthorityError("MANDATE_NOT_FOUND")
+        if (
+            mode is None
+            or not mode.integrity_valid()
+            or mode.operating_mode != "autonomous_live"
+            or not mode.account_is_demo
+            or not mandate.integrity_valid()
+            or mandate.revoked
+            or not mandate.account_is_demo
+            or not account_is_demo
+            or mandate.operating_mode != "autonomous_live"
+            or not (
+                _time(mandate.active_from)
+                <= evaluated_at
+                < min(_time(mandate.active_until), _time(mandate.expires_at))
+            )
+        ):
+            raise TradingAuthorityError("SUPERVISOR_MANDATE_INACTIVE")
+        fingerprint_hash = _fingerprint_hash(account_fingerprint)
+        if not (
+            hmac.compare_digest(mode.account_fingerprint_hash, fingerprint_hash)
+            and hmac.compare_digest(mandate.account_fingerprint_hash, fingerprint_hash)
+        ):
+            raise TradingAuthorityError("SUPERVISOR_ACCOUNT_MISMATCH")
+        try:
+            strategy = ConversationalStrategyRequest.from_dict(
+                dict(mandate.protected_strategy)
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise TradingAuthorityError("SUPERVISOR_STRATEGY_NOT_FOUND") from exc
+        identity = strategy.identity
+        if (
+            validate_strategy(strategy)
+            or (
+                mandate.strategy_id,
+                mandate.strategy_version,
+                mandate.normalized_strategy_hash,
+            )
+            != (
+                identity.strategy_id,
+                identity.strategy_version,
+                identity.normalized_strategy_hash,
+            )
+            or strategy.requested_mode != "autonomous_live"
+            or strategy.canonical_symbol not in mandate.permitted_symbols
+            or broker_symbol_for(strategy.canonical_symbol)
+            not in mandate.permitted_broker_symbols
+            or mandate.strategy_direction not in {"BUY", "SELL"}
+            or mandate.strategy_action != "OPEN_POSITION"
+        ):
+            raise TradingAuthorityError("SUPERVISOR_STRATEGY_BINDING_MISMATCH")
+        return mandate, strategy
 
     def revoke_mandate(
         self,
@@ -1212,6 +1355,7 @@ def _mandate_from_payload(payload: Mapping[str, Any]) -> StandingTradingMandate:
         "permitted_management_actions",
     ):
         values[name] = tuple(values.get(name, ()))
+    values["protected_strategy"] = dict(values.get("protected_strategy") or {})
     record = StandingTradingMandate(**values)
     if not record.integrity_valid():
         raise TradingAuthorityError("MANDATE_INTEGRITY_INVALID")

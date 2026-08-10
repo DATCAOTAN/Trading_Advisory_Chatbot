@@ -16,6 +16,13 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.trading_authorit
     TradingAuthorityService,
     TradingAuthorityStore,
 )
+from src.services.trading.reasoning.strategy_evidence import (
+    ConversationalStrategyRequest,
+    IndicatorSpec,
+    StrategyIdentity,
+    StrategyRule,
+    strategy_identity,
+)
 
 
 NOW = datetime(2026, 8, 10, 8, 0, tzinfo=timezone.utc)
@@ -58,7 +65,8 @@ class MarketProvider:
 def test_completed_strategy_projects_authoritative_mandate_setup(tmp_path):
     service = _service(tmp_path)
 
-    setup = service.build_mandate_setup(
+    setup = _build_setup(
+        service,
         _strategy(), order_family="MARKET", duration_minutes=60, now=NOW
     )
 
@@ -81,6 +89,9 @@ def test_completed_strategy_projects_authoritative_mandate_setup(tmp_path):
     assert setup.suggested_maximum_concurrent_positions == 1
     assert setup.suggested_maximum_trades_per_day == 1
     assert setup.suggested_maximum_loss_per_day == "1"
+    assert setup.strategy_direction == "BUY"
+    assert setup.strategy_action == "OPEN_POSITION"
+    assert setup.protected_strategy == _strategy().as_dict()
     assert setup.unresolved_fields == ()
     assert dict(setup.field_sources)["maximum_volume"] == "BROKER_METADATA"
     assert dict(setup.field_sources)["maximum_risk_per_trade"] == "CONFIGURED_POLICY"
@@ -88,10 +99,11 @@ def test_completed_strategy_projects_authoritative_mandate_setup(tmp_path):
 
 
 def test_volume_suggestion_uses_current_broker_minimum(tmp_path):
-    setup = _service(
+    service = _service(
         tmp_path,
         market_provider=MarketProvider(volume_min="0.05", volume_max="10", volume_step="0.05"),
-    ).build_mandate_setup(_strategy(), order_family="MARKET", now=NOW)
+    )
+    setup = _build_setup(service, _strategy(), order_family="MARKET", now=NOW)
 
     assert setup.suggested_maximum_volume == "0.05"
 
@@ -110,8 +122,8 @@ def test_configured_demo_policy_values_are_projected(monkeypatch, tmp_path):
         Config, "TRADING_AUTONOMOUS_DEMO_MANDATE_MAX_LOSS_PER_DAY", "7.5"
     )
 
-    setup = _service(tmp_path).build_mandate_setup(
-        _strategy(), order_family="MARKET", now=NOW
+    setup = _build_setup(
+        _service(tmp_path), _strategy(), order_family="MARKET", now=NOW
     )
 
     assert setup.suggested_maximum_risk_per_trade == "2.5"
@@ -134,13 +146,12 @@ def test_demo_policy_configuration_is_required_and_never_uses_llm_values(
 ):
     monkeypatch.setattr(Config, setting, invalid)
     strategy = _strategy()
-    strategy.maximum_risk_per_trade = "999"
 
     with pytest.raises(
         ValueError, match="DEMO_MANDATE_POLICY_CONFIGURATION_REQUIRED"
     ):
-        _service(tmp_path).build_mandate_setup(
-            strategy, order_family="MARKET", now=NOW
+        _build_setup(
+            _service(tmp_path), strategy, order_family="MARKET", now=NOW
         )
 
 
@@ -151,13 +162,13 @@ def test_non_demo_environment_never_inherits_demo_policy(tmp_path, environment):
     )
 
     with pytest.raises(RuntimeError, match="REAL_ACCOUNT_AUTHORITY_FORBIDDEN"):
-        service.build_mandate_setup(_strategy(), order_family="MARKET", now=NOW)
+        _build_setup(service, _strategy(), order_family="MARKET", now=NOW)
 
 
 def test_user_edits_build_typed_command_and_revalidate_broker_volume(tmp_path):
     service = _service(tmp_path)
-    setup = service.build_mandate_setup(
-        _strategy(), order_family="MARKET", duration_minutes=30, now=NOW
+    setup = _build_setup(
+        service, _strategy(), order_family="MARKET", duration_minutes=30, now=NOW
     )
 
     command = service.command_from_mandate_setup(
@@ -180,6 +191,8 @@ def test_user_edits_build_typed_command_and_revalidate_broker_volume(tmp_path):
     assert command.maximum_trades_per_day == 1
     assert command.maximum_loss_per_day == "20"
     assert command.kill_switch_engaged is True
+    assert command.strategy_id == setup.strategy_id
+    assert command.protected_strategy == setup.protected_strategy
     with pytest.raises(
         ValueError, match="MANDATE_MAXIMUM_VOLUME_OUTSIDE_BROKER_CONSTRAINTS"
     ):
@@ -197,8 +210,8 @@ def test_user_edits_build_typed_command_and_revalidate_broker_volume(tmp_path):
 
 def test_missing_policy_limits_remain_required_and_do_not_grant(tmp_path):
     service = _service(tmp_path)
-    setup = service.build_mandate_setup(
-        _strategy(), order_family="MARKET", duration_minutes=60, now=NOW
+    setup = _build_setup(
+        service, _strategy(), order_family="MARKET", duration_minutes=60, now=NOW
     )
 
     with pytest.raises(ValueError, match="MANDATE_MAXIMUM_RISK_INVALID"):
@@ -217,8 +230,8 @@ def test_missing_policy_limits_remain_required_and_do_not_grant(tmp_path):
 
 def test_mandate_id_is_stable_and_version_uses_authority_store(tmp_path):
     service = _service(tmp_path)
-    first = service.build_mandate_setup(
-        _strategy(), order_family="MARKET", duration_minutes=60
+    first = _build_setup(
+        service, _strategy(), order_family="MARKET", duration_minutes=60
     )
     command = service.command_from_mandate_setup(
         first,
@@ -233,9 +246,16 @@ def test_mandate_id_is_stable_and_version_uses_authority_store(tmp_path):
     with pytest.raises(TradingAuthorityError, match="MANDATE_GRANT_INVALID"):
         service.grant_mandate(command, operator_grant=False)
     service.grant_mandate(command, operator_grant=True)
+    stored, reloaded = service.authority.load_supervisor_strategy(
+        command.mandate_id,
+        account_fingerprint="a" * 64,
+        account_is_demo=True,
+    )
+    assert stored.strategy_direction == "BUY"
+    assert reloaded == _strategy()
 
-    second = service.build_mandate_setup(
-        _strategy(), order_family="MARKET", duration_minutes=60
+    second = _build_setup(
+        service, _strategy(), order_family="MARKET", duration_minutes=60
     )
     assert second.mandate_id == first.mandate_id
     assert second.mandate_version == 2
@@ -244,16 +264,16 @@ def test_mandate_id_is_stable_and_version_uses_authority_store(tmp_path):
 def test_setup_fails_closed_without_authoritative_volume_metadata(tmp_path):
     service = _service(tmp_path, market_provider=MarketProvider(volume_step=None))
     with pytest.raises(ValueError, match="BROKER_VOLUME_STEP_INVALID"):
-        service.build_mandate_setup(
-            _strategy(), order_family="MARKET", duration_minutes=60, now=NOW
+        _build_setup(
+            service, _strategy(), order_family="MARKET", duration_minutes=60, now=NOW
         )
 
 
 def test_setup_fails_closed_when_current_account_does_not_match_mode(tmp_path):
     service = _service(tmp_path, account_adapter=AccountAdapter("b" * 64))
     with pytest.raises(ValueError, match="MANDATE_ACCOUNT_MISMATCH"):
-        service.build_mandate_setup(
-            _strategy(), order_family="MARKET", duration_minutes=60, now=NOW
+        _build_setup(
+            service, _strategy(), order_family="MARKET", duration_minutes=60, now=NOW
         )
 
 
@@ -303,14 +323,30 @@ def _service(tmp_path, *, market_provider=None, account_adapter=None):
     )
 
 
+def _build_setup(service, strategy, **kwargs):
+    return service.build_mandate_setup(
+        strategy,
+        strategy_direction="BUY",
+        strategy_action="OPEN_POSITION",
+        **kwargs,
+    )
+
+
 def _strategy():
-    return SimpleNamespace(
+    provisional = ConversationalStrategyRequest(
         canonical_symbol="XAUUSD",
         requested_mode="autonomous_live",
+        confirmation_policy="STANDING_MANDATE",
+        account_scope="DEMO",
+        indicators=(IndicatorSpec("RSI", "M1", (("period", 14.0),), "rsi_14_m1"),),
+        entry_rules=(StrategyRule("GREATER_THAN", "rsi_14_m1", constants=(10.0,)),),
+        exit_rules=(),
         semantic_unresolved_fields=(),
         strategy_description="BUY XAUUSD when RSI14 M1 is above 10",
-        identity=SimpleNamespace(
-            strategy_id="strategy_prefill_xauusd",
-            strategy_version="reasoning-strategy/v2",
-        ),
+        risk_policy_reference="CONFIGURED_RISK_POLICY",
+        request_id="conversation_trade_prefill",
+        identity=StrategyIdentity("", "reasoning-strategy/v2", ""),
+    )
+    return ConversationalStrategyRequest(
+        **{**provisional.__dict__, "identity": strategy_identity(provisional)}
     )

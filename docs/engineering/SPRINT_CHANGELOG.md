@@ -2184,3 +2184,35 @@ Commit: this commit
 - Verdict: `AUTONOMOUS_DEMO_POLICY_AND_CONTROL_PLANE_COMPLETE`.
 
 ---
+
+### Post-release fix - Typed Autonomous Supervisor Binding
+
+Date: 2026-08-10
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Bound each new autonomous mandate to the exact protected typed strategy, identity/hash, direction, and opening action.
+- Made supervisor startup and every observation cycle reload and validate that binding through the existing authority store.
+- Passed the recovered strategy into the existing assembler/coordinator and kept legacy unbound mandates fail-closed.
+- Reused the normal market-history count so the completed-bar quality gate can evaluate indicator-ready data.
+- Extended the existing monitor journal and Dashboard with a redacted, strategy-filtered condition/re-arm projection.
+
+#### Verification
+
+- Final focused supervisor/monitor/UI/re-arm group: 75 passed.
+- Neighboring autonomous/authority group: 337 passed.
+- Canonical product acceptance: 67 passed, including all 60 canonical cases.
+- Full regression: 3,670 passed and 156 subtests passed with 3 unchanged warnings.
+- Live DEMO supervisor persisted three advancing XAUUSDm M1 completed bars; TRUE-to-TRUE RSI14 remained `WAITING_FOR_REARM` with no Candidate.
+- A controlled process restart reloaded the same strategy/mandate, preserved deduplication, and processed the next bar.
+
+#### Current state / limitations
+
+- Supervisor remains read-only with execution and management kill switches engaged.
+- Natural false-to-true Candidate creation was not observed during the bounded live window; deterministic re-arm and Candidate freshness contracts remain covered by tests.
+- Controlled-submit, management writes, runtime `order_send`, broker mutation, and MT5 writes remained zero.
+- Verdict: `REALTIME_AUTONOMOUS_TYPED_STRATEGY_OBSERVATION_COMPLETE`.
+
+---
