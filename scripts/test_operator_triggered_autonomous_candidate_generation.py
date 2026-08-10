@@ -135,10 +135,7 @@ def test_autonomous_entry_condition_blocks_before_proposal_provider(blocker):
             max_age_seconds=300,
         )
 
-    assert exc_info.value.blockers == (
-        "STRUCTURED_PROPOSAL_NOT_AVAILABLE",
-        blocker,
-    )
+    assert exc_info.value.blockers == (blocker,)
 
 
 def test_typed_result_is_stored_through_existing_owner(tmp_path):

@@ -279,19 +279,21 @@ class AuthoritativeAutonomousInputAssembler:
                 maximum_age_seconds=Config.TRADING_AUTONOMOUS_DECISION_INPUT_MAX_AGE_SECONDS,
             )
         )
-        if proposal_result.blockers == ("STRUCTURED_PROPOSAL_NOT_AVAILABLE",):
-            evidence = getattr(feature_result.feature_snapshot, "reasoning_evidence_v2", None)
-            evidence_codes = (
-                tuple(item.code for item in evidence.reasons)
-                if evidence is not None
-                else ()
-            )
+        evidence_summary = _with_proposal_observability(
+            inputs.reasoning_evidence_summary, proposal_result
+        )
+        if proposal_result.proposal_status == "VALID_NO_PROPOSAL":
             raise OperatorCandidateInputError(
-                "STRUCTURED_PROPOSAL_NOT_AVAILABLE",
-                *evidence_codes,
-                evidence_summary=inputs.reasoning_evidence_summary,
+                "VALID_NO_PROPOSAL",
+                *proposal_result.reason_codes,
+                evidence_summary=evidence_summary,
             )
-        _validate_proposal_result(proposal_result, feature_result, inputs)
+        try:
+            _validate_proposal_result(proposal_result, feature_result, inputs)
+        except OperatorCandidateInputError as exc:
+            raise OperatorCandidateInputError(
+                *exc.blockers, evidence_summary=evidence_summary
+            ) from exc
         return AutonomousDecisionInputs(
             runtime_context=context,
             method_selection=method,
@@ -308,7 +310,7 @@ class AuthoritativeAutonomousInputAssembler:
             strategy_id=inputs.strategy_id,
             strategy_version=inputs.strategy_version,
             normalized_strategy_hash=inputs.normalized_strategy_hash,
-            reasoning_evidence_summary=inputs.reasoning_evidence_summary,
+            reasoning_evidence_summary=evidence_summary,
         )
 
 
@@ -358,7 +360,7 @@ def strategy_monitor_projection(
         threshold = rule.constants[0]
     elif rule.right:
         threshold = rule.right
-    return {
+    projection = {
         "strategy_reference": strategy.identity.strategy_id,
         "strategy_version": strategy.identity.strategy_version,
         "strategy_hash_prefix": strategy.identity.normalized_strategy_hash[:12],
@@ -376,6 +378,26 @@ def strategy_monitor_projection(
         "opening_eligibility": evaluation["opening_eligibility"],
         "hard_blockers": list(evidence.get("hard_blockers") or ()),
     }
+    observability = evidence.get("proposal_observability")
+    if isinstance(observability, dict):
+        projection["proposal_observability"] = dict(observability)
+    return projection
+
+
+def _with_proposal_observability(
+    evidence_summary: str,
+    proposal_result: AutonomousOrderProposalResult,
+) -> str:
+    try:
+        payload = json.loads(evidence_summary or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    payload["proposal_observability"] = proposal_result.observability()
+    return json.dumps(
+        payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    )
 
 
 def _manual_inputs(
@@ -711,7 +733,6 @@ def _validate_market_sources(
     )
     if entry_blockers:
         raise OperatorCandidateInputError(
-            "STRUCTURED_PROPOSAL_NOT_AVAILABLE",
             *entry_blockers,
             evidence_summary=_reasoning_evidence_summary(feature_result),
         )

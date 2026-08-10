@@ -850,6 +850,20 @@ def _render_trading_runtime_controls(
                         f"opening_eligibility={evaluation.get('opening_eligibility') or 'UNAVAILABLE'} | "
                         f"firewall={evaluation.get('execution_firewall') or 'BLOCKED'}"
                     )
+                    provider = dict(evaluation.get("proposal_observability") or {})
+                    if provider:
+                        st.caption(
+                            f"provider={'INVOKED' if provider.get('provider_invoked') else 'NOT_INVOKED'} | "
+                            f"name={provider.get('provider_name') or 'UNAVAILABLE'} | "
+                            f"model={provider.get('model_name') or 'UNAVAILABLE'} | "
+                            f"attempts={provider.get('attempt_count', 0)} | "
+                            f"retries={provider.get('retry_count', 0)} | "
+                            f"transport={provider.get('transport_status') or 'UNAVAILABLE'} | "
+                            f"parse={provider.get('parse_status') or 'UNAVAILABLE'} | "
+                            f"schema={provider.get('schema_status') or 'UNAVAILABLE'} | "
+                            f"proposal={provider.get('proposal_status') or 'UNAVAILABLE'} | "
+                            f"reason={provider.get('reason_code') or 'none'}"
+                        )
         return status["mode"], runtime_blockers
 
 

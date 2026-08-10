@@ -242,6 +242,18 @@ def test_coordinator_passes_exact_strategy_and_projects_level_condition(tmp_path
                 "rsi_14_m1": {"previous": 30.3172, "current": 27.8983}
             },
             "hard_blockers": [],
+            "proposal_observability": {
+                "provider_invoked": True,
+                "provider_name": "groq",
+                "model_name": "safe-model",
+                "attempt_count": 1,
+                "retry_count": 0,
+                "transport_status": "OK",
+                "parse_status": "OK",
+                "schema_status": "VALID",
+                "proposal_status": "VALID_NO_PROPOSAL",
+                "reason_code": "NO_SETUP",
+            },
         }
     )
 
@@ -249,8 +261,7 @@ def test_coordinator_passes_exact_strategy_and_projects_level_condition(tmp_path
         def build(self, **kwargs):
             calls.append(kwargs)
             raise OperatorCandidateInputError(
-                "STRUCTURED_PROPOSAL_NOT_AVAILABLE",
-                "STRUCTURED_PROPOSAL_NOT_AVAILABLE",
+                "VALID_NO_PROPOSAL",
                 evidence_summary=summary,
             )
 
@@ -280,6 +291,10 @@ def test_coordinator_passes_exact_strategy_and_projects_level_condition(tmp_path
     assert result.strategy_evaluation["rearm_state"] == "CONDITION_TRUE"
     assert result.strategy_evaluation["opening_eligibility"] == "ENTRY_ELIGIBLE"
     assert result.strategy_evaluation["direction"] == "BUY"
+    assert result.proposal_provider_max_invocations == 1
+    assert result.strategy_evaluation["proposal_observability"]["proposal_status"] == (
+        "VALID_NO_PROPOSAL"
+    )
 
 
 def test_monitor_journal_persists_safe_strategy_projection(tmp_path):

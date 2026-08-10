@@ -53,6 +53,17 @@ class AutonomousOrderProposalResult:
     source_bindings: tuple[str, ...] = ()
     provenance_hash: str = ""
     blockers: tuple[str, ...] = ()
+    reason_codes: tuple[str, ...] = ()
+    provider_invoked: bool = False
+    provider_name: str = ""
+    model_name: str = ""
+    attempt_count: int = 0
+    retry_count: int = 0
+    transport_status: str = "NOT_ATTEMPTED"
+    parse_status: str = "NOT_ATTEMPTED"
+    schema_status: str = "NOT_ATTEMPTED"
+    proposal_status: str = "BLOCKED"
+    reason_code: str = ""
 
     @property
     def valid(self) -> bool:
@@ -62,6 +73,20 @@ class AutonomousOrderProposalResult:
             and self.order_market_snapshot and self.provenance_hash
             and valid_autonomous_order_proposal_bindings(self.source_bindings)
         )
+
+    def observability(self) -> dict[str, Any]:
+        return {
+            "provider_invoked": self.provider_invoked,
+            "provider_name": self.provider_name,
+            "model_name": self.model_name,
+            "attempt_count": self.attempt_count,
+            "retry_count": self.retry_count,
+            "transport_status": self.transport_status,
+            "parse_status": self.parse_status,
+            "schema_status": self.schema_status,
+            "proposal_status": self.proposal_status,
+            "reason_code": self.reason_code,
+        }
 
 
 class AutonomousOrderProposalProvider:
@@ -75,7 +100,11 @@ class AutonomousOrderProposalProvider:
         if blockers:
             return _blocked(request, blockers)
         if self.model_provider is None and not Config.TRADING_REASONING_LLM_ENABLED:
-            return _blocked(request, ["STRUCTURED_PROPOSAL_MODEL_DISABLED"])
+            return _blocked(
+                request,
+                ["STRUCTURED_PROPOSAL_MODEL_DISABLED"],
+                proposal_status="PROVIDER_UNAVAILABLE",
+            )
         snapshot = market_snapshot_from_feature_result(request.feature_result)
         try:
             raw = (
@@ -86,13 +115,52 @@ class AutonomousOrderProposalProvider:
                 Config.TRADING_REASONING_TEMPERATURE,
             )
         except Exception as exc:
-            return _blocked(request, [_provider_failure_blocker(exc)])
+            blocker = _provider_failure_blocker(exc)
+            return _blocked(
+                request,
+                [blocker],
+                provider_invoked=True,
+                attempt_count=1,
+                transport_status=(
+                    "TIMEOUT"
+                    if blocker == "STRUCTURED_PROPOSAL_REQUEST_TIMEOUT"
+                    else "ERROR"
+                ),
+                proposal_status="PROVIDER_UNAVAILABLE",
+            )
         payload, blockers = _parse(raw)
         if blockers:
-            return _blocked(request, blockers)
+            no_proposal = blockers == ["VALID_NO_PROPOSAL"]
+            parse_failed = blockers[0] in {
+                "STRUCTURED_PROPOSAL_OUTPUT_NOT_TEXT",
+                "STRUCTURED_PROPOSAL_OUTPUT_INVALID_JSON",
+            }
+            return _blocked(
+                request,
+                blockers,
+                reason_codes=tuple(payload.get("reason_codes") or ()),
+                provider_invoked=True,
+                attempt_count=1,
+                transport_status="OK",
+                parse_status="FAILED" if parse_failed else "OK",
+                schema_status=(
+                    "VALID" if no_proposal else "NOT_ATTEMPTED" if parse_failed else "INVALID"
+                ),
+                proposal_status="VALID_NO_PROPOSAL" if no_proposal else "INVALID",
+            )
         proposal, blockers = _make_proposal(payload, request, snapshot)
         if blockers:
-            return _blocked(request, blockers)
+            return _blocked(
+                request,
+                blockers,
+                reason_codes=tuple(payload.get("reason_codes") or ()),
+                provider_invoked=True,
+                attempt_count=1,
+                transport_status="OK",
+                parse_status="OK",
+                schema_status="INVALID",
+                proposal_status="INVALID",
+            )
 
         created_at, bindings = _utc(request.evaluated_at).isoformat(), _bindings(request)
         material = {
@@ -118,6 +186,17 @@ class AutonomousOrderProposalProvider:
             order_market_snapshot=snapshot,
             source_bindings=bindings,
             provenance_hash=digest,
+            reason_codes=tuple(payload["reason_codes"]),
+            provider_invoked=True,
+            provider_name=_provider_name(),
+            model_name=_model_name(),
+            attempt_count=1,
+            retry_count=0,
+            transport_status="OK",
+            parse_status="OK",
+            schema_status="VALID",
+            proposal_status="VALID_PROPOSAL",
+            reason_code=payload["reason_codes"][0],
         )
 
 
@@ -332,7 +411,8 @@ def _parse(raw):
             invalid.append("STRUCTURED_PROPOSAL_NO_PROPOSAL_REASON_CODES_MISSING")
         if invalid:
             return {}, invalid
-        return {}, blockers or ["STRUCTURED_PROPOSAL_NOT_AVAILABLE"]
+        payload["reason_codes"] = reasons
+        return payload, blockers or ["VALID_NO_PROPOSAL"]
     if status != "PROPOSE":
         return {}, ["STRUCTURED_PROPOSAL_STATUS_INVALID"]
     if blockers:
@@ -473,10 +553,59 @@ def _valid_source_identifier(value) -> bool:
     )
 
 
-def _blocked(request, blockers):
+def _blocked(
+    request,
+    blockers,
+    *,
+    reason_codes=(),
+    provider_invoked=False,
+    attempt_count=0,
+    transport_status="NOT_ATTEMPTED",
+    parse_status="NOT_ATTEMPTED",
+    schema_status="NOT_ATTEMPTED",
+    proposal_status="BLOCKED",
+):
+    unique_blockers = tuple(dict.fromkeys(blockers))
     return AutonomousOrderProposalResult(
-        source_bindings=_bindings(request), blockers=tuple(dict.fromkeys(blockers))
+        source_bindings=_bindings(request),
+        blockers=unique_blockers,
+        reason_codes=tuple(reason_codes),
+        provider_invoked=provider_invoked,
+        provider_name=_provider_name(),
+        model_name=_model_name(),
+        attempt_count=attempt_count,
+        retry_count=0,
+        transport_status=transport_status,
+        parse_status=parse_status,
+        schema_status=schema_status,
+        proposal_status=proposal_status,
+        reason_code=(
+            str(reason_codes[0])
+            if reason_codes
+            else unique_blockers[0]
+            if unique_blockers
+            else ""
+        ),
     )
+
+
+def _provider_name() -> str:
+    return str(
+        Config.TRADING_REASONING_LLM_PROVIDER or Config.LLM_PROVIDER or "disabled"
+    ).strip().lower()
+
+
+def _model_name() -> str:
+    provider = _provider_name()
+    configured = str(Config.TRADING_REASONING_MODEL or "").strip()
+    if configured:
+        return configured
+    models = {
+        "groq": Config.GROQ_MODEL_NAME,
+        "openrouter": Config.OPENROUTER_MODEL_NAME,
+        "google": Config.GOOGLE_MODEL_NAME,
+    }
+    return str(models.get(provider) or Config.LLM_MODEL_NAME).strip()
 
 
 def _codes(value):

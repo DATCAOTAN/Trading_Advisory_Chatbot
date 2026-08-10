@@ -215,6 +215,18 @@ def test_valid_structured_output_becomes_complete_typed_result():
     assert result.order_market_snapshot.snapshot_reference == "market-bundle-fixture"
     assert result.proposal_reference in result.semantic_parameter_references
     assert result.provenance_hash
+    assert result.observability() == {
+        "provider_invoked": True,
+        "provider_name": Config.TRADING_REASONING_LLM_PROVIDER or "disabled",
+        "model_name": Config.TRADING_REASONING_MODEL or Config.LLM_MODEL_NAME,
+        "attempt_count": 1,
+        "retry_count": 0,
+        "transport_status": "OK",
+        "parse_status": "OK",
+        "schema_status": "VALID",
+        "proposal_status": "VALID_PROPOSAL",
+        "reason_code": result.reason_codes[0],
+    }
 
 
 @pytest.mark.parametrize(
@@ -255,6 +267,11 @@ def test_formatted_prose_is_not_parsed_for_values():
     model = StaticModel("proposal: " + model_output())
     result = AutonomousOrderProposalProvider(model).produce(request())
     assert result.blockers == ("STRUCTURED_PROPOSAL_OUTPUT_INVALID_JSON",)
+    assert result.provider_invoked is True
+    assert result.transport_status == "OK"
+    assert result.parse_status == "FAILED"
+    assert result.schema_status == "NOT_ATTEMPTED"
+    assert result.proposal_status == "INVALID"
 
 
 def test_one_outer_json_fence_is_normalized():
@@ -283,6 +300,9 @@ def test_extra_json_key_is_rejected():
     payload["unexpected"] = "value"
     result, _model = produced_raw(json.dumps(payload))
     assert result.blockers == ("STRUCTURED_PROPOSAL_OUTPUT_FIELDS_INVALID",)
+    assert result.parse_status == "OK"
+    assert result.schema_status == "INVALID"
+    assert result.proposal_status == "INVALID"
     assert result.order_proposal is None
 
 
@@ -306,7 +326,14 @@ def test_live_no_proposal_field_set_failure_is_reproduced_without_provider_call(
 
 def test_no_proposal_uses_deterministic_blocker_without_fallback():
     result, model = produced_raw(no_proposal_output())
-    assert result.blockers == ("STRUCTURED_PROPOSAL_NOT_AVAILABLE",)
+    assert result.blockers == ("VALID_NO_PROPOSAL",)
+    assert result.reason_codes == ("NO_PROPOSAL",)
+    assert result.proposal_status == "VALID_NO_PROPOSAL"
+    assert result.parse_status == "OK"
+    assert result.schema_status == "VALID"
+    assert result.provider_invoked is True
+    assert result.attempt_count == 1
+    assert result.retry_count == 0
     assert result.order_proposal is None
     assert model.calls == 1
 
@@ -575,6 +602,11 @@ def test_project_provider_missing_groq_credential_fails_before_client(monkeypatc
 def test_provider_failure_mapping_is_specific_and_redacted(error, blocker):
     result = AutonomousOrderProposalProvider(RaisingModel(error)).produce(request())
     assert result.blockers == (blocker,)
+    assert result.provider_invoked is True
+    assert result.attempt_count == 1
+    assert result.retry_count == 0
+    assert result.proposal_status == "PROVIDER_UNAVAILABLE"
+    assert result.transport_status in {"ERROR", "TIMEOUT"}
     assert "fixture-key" not in json.dumps(result.blockers)
 
 

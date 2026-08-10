@@ -2244,3 +2244,31 @@ Commit: this commit
 - Verdict: `LEVEL_AND_EDGE_TRIGGER_SEMANTICS_COMPLETE`.
 
 ---
+
+### Post-release fix - Realtime Structured Proposal Observability
+
+Date: 2026-08-10
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Replaced the generic realtime proposal blocker with precise provider, transport, parse, schema, no-proposal, and valid-proposal outcomes.
+- Added redacted provider telemetry to the existing reasoning evidence, monitor projection, and Dashboard status.
+- Preserved valid `NO_PROPOSAL` as a legitimate no-Candidate result and kept every failure fail-closed with zero retries.
+
+#### Verification
+
+- Focused proposal/coordinator/monitor/UI group: 148 passed.
+- Neighboring autonomous/strategy group: 182 passed.
+- Canonical product acceptance: 67 passed, including all 60 canonical cases.
+- Full regression: 3,684 passed and 156 subtests passed with 3 unchanged warnings.
+
+#### Current state / limitations
+
+- App and Streamlit health passed after restart; structured-reasoning configuration was available without exposing credentials.
+- Live provider observation was blocked because the persisted DEMO mandate had expired; no replacement authority was created automatically.
+- Controlled-submit, management writes, runtime `order_send`, MT5 writes, and broker mutations remained zero.
+- Verdict: `REALTIME_AUTONOMOUS_STRUCTURED_PROPOSAL_INCOMPLETE` pending an explicit fresh bounded DEMO mandate.
+
+---

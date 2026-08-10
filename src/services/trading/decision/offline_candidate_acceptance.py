@@ -293,12 +293,12 @@ def _run_offline_candidate_acceptance(
         )
     except OperatorCandidateInputError as exc:
         blockers = list(exc.blockers)
-        if blockers == ["STRUCTURED_PROPOSAL_NOT_AVAILABLE"]:
+        if blockers and blockers[0] == "VALID_NO_PROPOSAL":
             result.update(
                 natural_intent="NO_PROPOSAL",
                 eligibility="NOT_ELIGIBLE",
                 validation_result=True,
-                ordered_reason_codes=blockers,
+                ordered_reason_codes=blockers[1:] or ["NO_PROPOSAL"],
                 ordered_blockers=[],
             )
             result["deterministic_proposal_adapter_invocation_count"] = adapter.invocation_count

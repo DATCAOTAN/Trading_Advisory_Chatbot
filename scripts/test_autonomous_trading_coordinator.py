@@ -141,7 +141,6 @@ def test_rearm_reason_is_terminal_no_action_before_orchestrator(tmp_path):
     class RearmAssembler:
         def build(self, **_kwargs):
             raise OperatorCandidateInputError(
-                "STRUCTURED_PROPOSAL_NOT_AVAILABLE",
                 "ENTRY_CONDITION_WAITING_FOR_REARM",
             )
 
@@ -151,10 +150,7 @@ def test_rearm_reason_is_terminal_no_action_before_orchestrator(tmp_path):
     )
 
     assert result.status == result.intent == "NO_ACTION"
-    assert result.blocker == (
-        "STRUCTURED_PROPOSAL_NOT_AVAILABLE,"
-        "ENTRY_CONDITION_WAITING_FOR_REARM"
-    )
+    assert result.blocker == "ENTRY_CONDITION_WAITING_FOR_REARM"
     assert orchestrator.calls == 0
 
 

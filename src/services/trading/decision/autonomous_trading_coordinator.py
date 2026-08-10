@@ -225,7 +225,10 @@ class AutonomousTradingCoordinator:
                 strategy=self.strategy,
             )
         except OperatorCandidateInputError as exc:
-            no_action = bool(exc.blockers) and exc.blockers[0] == "STRUCTURED_PROPOSAL_NOT_AVAILABLE"
+            no_action = bool(exc.blockers) and (
+                exc.blockers[0] == "VALID_NO_PROPOSAL"
+                or exc.blockers[0].startswith("ENTRY_CONDITION_")
+            )
             projection = self._strategy_projection(exc.evidence_summary)
             return self._result(
                 "NO_ACTION" if no_action else "BLOCKED",
@@ -726,7 +729,8 @@ class AutonomousTradingCoordinator:
         return AutonomousCandidateMonitorResult(
             status, symbol, broker_symbol, timeframes, closed_bar_time,
             intent=intent, blocker=blocker, generation_count=1,
-            proposal_provider_max_invocations=1, account_scope=account_scope,
+            proposal_provider_max_invocations=_provider_attempts(projection),
+            account_scope=account_scope,
             coordinator_status=status,
             strategy_evaluation=projection,
         )
@@ -758,7 +762,7 @@ class AutonomousTradingCoordinator:
             blocker=blocker,
             validation_valid=True,
             generation_count=1,
-            proposal_provider_max_invocations=1,
+            proposal_provider_max_invocations=_provider_attempts(projection),
             account_scope=account_scope,
             coordinator_status=status,
             authorization_source=authorization_source,
@@ -846,6 +850,16 @@ def _runtime_safe(inputs: Any) -> bool:
         not in {"AMBIGUOUS_MATCH", "QUERY_FAILED", "RESULT_UNKNOWN"}
         and reconciliation.retry_decision == "RETRY_PROHIBITED"
     )
+
+
+def _provider_attempts(projection: Mapping[str, Any]) -> int:
+    observability = projection.get("proposal_observability")
+    if not isinstance(observability, Mapping):
+        return 0
+    try:
+        return max(0, int(observability.get("attempt_count", 0)))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _future(value: str, now: datetime) -> bool:
