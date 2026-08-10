@@ -2,11 +2,14 @@
 
 **Status:** LOCKED TARGET ARCHITECTURE  
 **Purpose:** Canonical north-star architecture for the Trading Advisory Chatbot  
-**Scope:** Semantic understanding, mode/policy resolution, strategy completion, deterministic proposal generation, Draft/Candidate lifecycle, confirmation/mandate authority, execution boundaries, post-entry lifecycle, position read models, conversational position management, provenance, recovery, and product acceptance.  
+**Scope:** Semantic understanding, mode/policy resolution, strategy completion, deterministic proposal generation, mode-specific trade setup, recurring signal/re-entry semantics, Draft/Candidate lifecycle, confirmation/mandate authority, execution boundaries, post-entry lifecycle, position read models, conversational position management, provenance, recovery, and product acceptance.  
 
 > This document defines the intended final product architecture. It does **not** claim that every component described here is already implemented.
 >
 > A new coding-agent session should be able to understand the intended final trading chatbot architecture from this document without access to the conversation in which it was designed.
+
+>
+> **Locked mode-UX clarification:** `human_confirmed_live` is **trade-centric**: every new trade instance requires a fresh deterministic Draft/Candidate and explicit per-trade confirmation. `autonomous_live` is **strategy/mandate-centric**: the user explicitly completes the strategy and confirms a bounded Standing Mandate; while that mandate remains valid, each new eligible signal creates a fresh internally generated Draft/Candidate with fresh evidence and recalculated Entry/SL/TP/Risk/Volume, without per-trade human confirmation. Mode never grants authority by itself, and autonomous recurring entry must obey an explicit deterministic re-entry/re-arm policy.
 
 ---
 
@@ -467,7 +470,7 @@ EXPLICIT AUTONOMOUS REQUEST
 autonomous_live
         |
         v
-STANDING_MANDATE
+STRATEGY + STANDING_MANDATE_SETUP
 ```
 
 Representative cases:
@@ -491,15 +494,30 @@ Representative cases:
 "đóng position BTCUSD"
 -> human_confirmed_live
 
-"hãy tự động chạy chiến lược này"
--> autonomous_live only through the explicit supported mandate workflow
+"hãy tự động buy XAUUSD khi RSI14 M5 > 10"
+-> autonomous_live through explicit strategy + Standing Mandate setup
 ```
 
----
+Mode is derived from canonical typed semantics, not raw UI keyword parsing.
+
+The UX/authority distinction is locked:
+
+```text
+human_confirmed_live
+-> each NEW trade instance gets fresh evidence + fresh Draft/Candidate
+-> USER CONFIRMS EACH TRADE
+
+autonomous_live
+-> user confirms strategy + bounded Standing Mandate setup/revision
+-> each NEW eligible signal gets fresh evidence + fresh Draft/Candidate internally
+-> NO per-trade user confirmation while action remains inside the valid mandate
+```
+
+For autonomous mode, the first user confirmation is **not** "permission for trade #1 that implicitly authorizes future trades." It is explicit confirmation of a bounded reusable strategy/mandate authority contract.
 
 ## 14. Mode never grants execution authority
 
-At semantic, strategy-completion, and Draft stages:
+At semantic, strategy-completion, Draft, Candidate-construction, or autonomous-evaluation stages:
 
 ```text
 execution_allowed   = false
@@ -507,11 +525,34 @@ execution_authority = false
 executable          = false
 ```
 
-For `human_confirmed_live`, explicit confirmation is still required for each mutation.
+For `human_confirmed_live`:
 
-For `autonomous_live`, a bounded Standing Mandate is still required and every mutation remains subject to deterministic validation.
+```text
+mode
++ fresh Draft/Candidate
++ exact per-trade human confirmation
++ deterministic final validation
+= authority may proceed to the protected execution boundary
+```
 
----
+Every later trade instance requires a new Draft/Candidate and a new confirmation. A confirmation for trade N cannot authorize trade N+1.
+
+For `autonomous_live`:
+
+```text
+mode
++ valid active Standing Mandate
++ exact strategy/symbol/action scope
++ fresh evidence
++ deterministic Candidate
++ mandate authorization
++ deterministic final validation
+= authority may proceed to the protected execution boundary
+```
+
+No individual trade confirmation is required while the trade remains inside the already confirmed mandate, but the mandate must be revalidated for every trade instance and every management action.
+
+Mode alone, LLM output alone, a previous trade confirmation, or a previous Draft never grants execution authority.
 
 # PART IV — CAPABILITY ROUTING
 
@@ -674,24 +715,68 @@ STRATEGY COMPLETION MODEL
         v
 EDITABLE COMPLETION FORM
         |
-        +--> user edits values
+        +--> user edits semantic leaf values
         |
-        +--> user accepts suggestions
+        +--> user accepts explicit suggestions
         |
         v
 USER-CONFIRMED COMPLETE STRATEGY
 ```
 
----
+The completion model owns **semantic strategy facts**, not concrete broker-sensitive trade parameters.
+
+Typical completion fields include:
+
+```text
+indicator period
+timeframe
+condition/comparator
+threshold
+strategy-specific required semantic children
+```
+
+Completion fields must be editable **leaf fields**. A container path must not be presented as an editable scalar while a required child of that same container is also exposed.
+
+Example:
+
+```text
+ALLOWED:
+indicators[0].parameters.period
+indicators[0].timeframe
+
+NOT ALLOWED AS SIMULTANEOUS EDITABLE FIELDS:
+indicators[0].parameters
+indicators[0].parameters.period
+```
+
+Mode-specific continuation after strategy completion:
+
+```text
+human_confirmed_live
+    -> Evidence
+    -> deterministic Entry/SL/TP/Risk/Volume
+    -> FULL EditableTradeDraft
+    -> Candidate
+    -> USER CONFIRM EACH TRADE
+
+autonomous_live
+    -> Autonomous Strategy + Standing Mandate Setup
+    -> user confirms bounded strategy/mandate authority
+    -> recurring signal loop
+    -> fresh evidence + fresh Draft/Candidate PER eligible signal
+    -> mandate authorization, no per-trade human confirmation
+```
+
+Strategy Completion is therefore never the final trade form and never the final autonomous authority contract.
 
 ## 21. Strategy Completion UI contract
 
-For a partial trade instruction, the UI should expose recognized facts and missing fields.
+For a partial trade instruction, the UI should expose recognized facts and only the missing semantic **leaf** fields.
 
-Conceptual form:
+Conceptual human-confirmed form:
 
 ```text
-Trade Setup
+Trade Setup — Strategy Completion
 
 Action
     BUY
@@ -727,29 +812,62 @@ Mode
 Execution
     NON_EXECUTABLE
 
-[Edit]
-[Accept Suggestions]
+Entry
+    WAITING_FOR_STRATEGY_COMPLETION
+
+Stop Loss
+    WAITING_FOR_STRATEGY_COMPLETION
+
+Take Profit
+    WAITING_FOR_STRATEGY_COMPLETION
+
+Risk
+    WAITING_FOR_STRATEGY_COMPLETION
+
+Volume
+    WAITING_FOR_STRATEGY_COMPLETION
+
+[Apply Semantic Changes]
 [Confirm Strategy Parameters]
 ```
+
+This may be visually presented as a progressive trade builder, but the backend states remain separate:
+
+```text
+StrategyCompletionState
+    !=
+EditableTradeDraft
+```
+
+After all semantic prerequisites are complete in `human_confirmed_live`, the same UI may expand/transition into the full Draft containing fresh deterministic Entry/SL/TP/Risk/Volume.
+
+For `autonomous_live`, partial semantics use the same leaf-level completion principles, but the next user-facing authority surface is **Autonomous Strategy + Standing Mandate Setup**, not a per-trade confirmation form.
 
 No evidence calculation should be attempted while calculation-critical strategy prerequisites remain unresolved.
 
 No Candidate should be created from a completion-only invalid state.
 
----
-
 ## 22. Suggestion semantics
 
-The system may offer suggestions for missing semantic fields.
+The system may offer suggestions for missing semantic or policy fields, but suggestions must never silently become user facts or mutation authority.
 
-LLM may suggest:
+LLM/system may suggest semantic fields such as:
 
 ```text
 indicator period
 timeframe
-stop method
-target method
 strategy explanation
+```
+
+For autonomous strategy/mandate setup, the system may also present bounded policy choices such as:
+
+```text
+stop policy
+target policy
+risk/sizing policy
+re-entry/re-arm policy
+management permissions
+validity / trade-limit policy
 ```
 
 However:
@@ -760,9 +878,19 @@ LLM_SUGGESTION
 USER_CONFIRMED_SUGGESTION
 ```
 
-A suggestion cannot be consumed as authoritative user strategy input until accepted or explicitly edited by the user.
+A suggestion cannot be consumed as authoritative user semantic input or mandate scope until accepted or explicitly edited by the user.
 
----
+Concrete per-trade numeric values are a different category and must not be fabricated as semantic suggestions:
+
+```text
+Entry
+SL
+TP
+risk amount
+volume
+```
+
+Those values come from the existing deterministic evidence/proposal pipeline for each trade instance. They must be refreshed/recalculated rather than copied from a previous trade.
 
 # PART VII — FIELD PROVENANCE
 
@@ -1111,23 +1239,32 @@ No auto-confirmation from the LLM.
 
 ## 37. human_confirmed_live opening lifecycle
 
+`human_confirmed_live` is **trade-centric**. Every new trade instance requires a fresh proposal and a fresh explicit user confirmation.
+
 ```text
 DIRECT TRADE COMMAND
+or persistent human-confirmed strategy signal
         |
         v
 human_confirmed_live
         |
         v
-Strategy Completion
+Strategy Completion if required
         |
         v
-Draft
+fresh Market / Account / Broker Evidence
         |
         v
-Candidate
+fresh deterministic Entry / SL / TP / Risk / Volume
         |
         v
-USER CONFIRM
+FULL EditableTradeDraft #N
+        |
+        v
+Candidate #N
+        |
+        v
+USER CONFIRM #N
         |
         v
 Pre-Submit Validation
@@ -1138,11 +1275,28 @@ READY / BLOCKED
 
 User confirmation binds to an exact Candidate and does not grant blanket future authority.
 
----
+If a human-confirmed strategy remains active and later produces another eligible signal:
+
+```text
+new signal
+-> refresh evidence
+-> build Draft #N+1
+-> build Candidate #N+1
+-> show the FULL form/review again
+-> USER CONFIRM #N+1
+```
+
+Trade parameters are never copied as authority from the previous trade. Entry/SL/TP/Risk/Volume are recomputed or revalidated from the new signal's current evidence.
+
+`CONFIRM_EVERY_TRADE` therefore means exactly that: trade #1 confirmation cannot authorize trade #2.
 
 # PART XIII — AUTONOMOUS MODE
 
 ## 38. autonomous_live opening lifecycle
+
+`autonomous_live` is **strategy/mandate-centric**, not per-trade-confirmation-centric.
+
+Initial setup:
 
 ```text
 EXPLICIT AUTONOMOUS REQUEST
@@ -1151,24 +1305,95 @@ EXPLICIT AUTONOMOUS REQUEST
 autonomous_live
         |
         v
+Strategy Completion if required
+        |
+        v
+Autonomous Strategy Setup
+        |
+        v
 Standing Mandate Setup / Review
         |
         v
-Strategy / Draft / Candidate
+USER CONFIRMS STRATEGY + MANDATE
         |
         v
-Mandate Authorization
-        |
-        v
-Pre-Submit Validation
-        |
-        v
-READY / BLOCKED
+MANDATE ACTIVE
 ```
 
-Autonomous mode means bounded mandate-based authority, not unrestricted LLM autonomy.
+The initial user confirmation authorizes a **bounded reusable mandate**, not merely the first trade.
 
----
+A mandate may define or bind policy methods instead of freezing one trade's numeric values. Examples:
+
+```text
+strategy identity
+symbol / direction / allowed opening actions
+stop policy
+target policy
+risk / sizing policy
+re-entry / re-arm policy
+position limits
+trade/day limits
+loss limits
+management permissions
+account/environment
+validity / expiry
+```
+
+Recurring opening lifecycle while the mandate is active:
+
+```text
+completed bar / approved evaluation point
+        |
+        v
+deterministic strategy signal evaluation
+        |
+        v
+NEW ELIGIBLE SIGNAL?
+      /         \
+    NO           YES
+    |             |
+ NO_ACTION        v
+             refresh evidence
+                  |
+                  v
+       deterministic trade proposal
+                  |
+                  v
+              Draft #N
+                  |
+                  v
+            Candidate #N
+                  |
+                  v
+       Standing Mandate Authorization
+                  |
+                  v
+          Pre-Submit Validation
+                  |
+                  v
+          READY / BLOCKED
+```
+
+No per-trade user confirmation is required for Candidate #N when the action remains inside the exact active mandate and every deterministic gate passes.
+
+Every trade instance is fresh:
+
+```text
+Strategy            -> REUSED while valid
+Standing Mandate    -> REUSED while valid
+Market evidence     -> REFRESHED per trade
+Account evidence    -> REFRESHED per trade
+Broker constraints  -> REVALIDATED per trade
+Draft                -> NEW per trade
+Candidate            -> NEW per trade
+Entry                -> RECALCULATED / revalidated per trade
+SL                   -> RECALCULATED / revalidated per trade
+TP                   -> RECALCULATED / revalidated per trade
+Risk amount          -> RECALCULATED / revalidated per trade
+Volume               -> RECALCULATED / revalidated per trade
+```
+
+Autonomous mode never means copying the first trade's Draft into future trades and never means unrestricted LLM autonomy.
 
 ## 39. Standing Mandate boundaries
 
@@ -1177,19 +1402,73 @@ A mandate may constrain:
 ```text
 strategy identity
 symbol universe
-allowed action types
-risk bounds
+direction / allowed opening action types
+stop policy
+target policy
+risk / sizing policy
+re-entry / re-arm policy
 position-count bounds
 trade/day bounds
 loss bounds
 management permissions
 expiration/freshness
-account context
+account/environment context
 ```
 
-Every autonomous action must still pass deterministic policy and runtime gates.
+Every autonomous opening or management action must still pass deterministic policy and runtime gates.
 
----
+### Re-entry / re-arm contract
+
+Recurring autonomous strategies must define a deterministic rule for when a previously triggered condition becomes eligible to trigger again.
+
+A default safe target behavior for persistent level conditions is conceptually:
+
+```text
+condition FALSE
+-> ARMED
+
+condition transitions / becomes TRUE
+-> TRIGGER ONCE
+-> create at most one eligible trade instance
+
+condition remains TRUE
+-> NO NEW ENTRY from the same continuously-active signal
+
+trade closes while condition remains TRUE
+-> WAIT_FOR_REARM
+
+condition becomes FALSE again
+-> REARMED
+
+next eligible FALSE -> TRUE event
+-> next trade may be proposed
+```
+
+Example:
+
+```text
+RSI14 M5 > 10
+
+08:00 RSI=8   -> ARMED
+08:05 RSI=12  -> signal #1, trade #1 may be proposed
+08:10 RSI=15  -> no new entry from the same active level
+trade #1 closes
+08:15 RSI=13  -> WAIT_FOR_REARM, still no new entry
+08:20 RSI=9   -> REARMED
+08:25 RSI=11  -> signal #2, fresh Draft/Candidate #2 may be proposed
+```
+
+The exact implementation may use edge/cross semantics or another explicit supported policy, but it must prevent accidental re-entry loops caused by a continuously true level condition.
+
+If the required re-entry, stop, target, sizing, or management policy is unresolved or outside the current mandate:
+
+```text
+BLOCK
+-> request explicit mandate setup/revision
+-> user confirms the revised mandate
+```
+
+The system must never silently expand mandate scope.
 
 # PART XIV — PRE-SUBMIT VALIDATION
 
@@ -1611,6 +1890,10 @@ Blockers
 
 ## 53. Autonomous monitoring continues after entry
 
+A trade instance does not consume or destroy the standing strategy/mandate. While the mandate remains valid, the system continues to supervise the current trade and, after the trade closes and the re-entry policy re-arms, may evaluate future independent signals.
+
+Post-entry management:
+
 ```text
 Standing Mandate
       |
@@ -1646,7 +1929,29 @@ Mandate + Policy Validation
       Lifecycle Supervisor
 ```
 
----
+After closure:
+
+```text
+POSITION_CLOSED
+      |
+      v
+preserve history / provenance
+      |
+      v
+re-entry policy state
+      |
+      +--> WAIT_FOR_REARM
+      |
+      +--> ARMED when reset condition is satisfied
+              |
+              v
+       next eligible signal
+              |
+              v
+       fresh Draft/Candidate
+```
+
+There is no copy-forward of the previous trade's concrete Entry/SL/TP/Risk/Volume.
 
 ## 54. Autonomous management authority
 
@@ -1997,48 +2302,77 @@ Understand
 
 ```text
 Understand
--> Complete Strategy
--> Evidence
+-> Complete Strategy if needed
+-> wait for / receive eligible trade opportunity
+-> refresh Evidence
 -> Deterministic Proposal
--> Editable Draft
--> Candidate
--> User Confirm
+-> FULL Editable Draft #N
+-> Candidate #N
+-> User Confirm #N
 -> Pre-Submit Gates
 -> Controlled Execution Boundary
 -> Lifecycle Supervisor
 -> Position Read Model
 -> Management Proposal
--> User Confirm
+-> User Confirm each mutation
 -> Controlled Management
 -> Lifecycle Supervisor
 -> History / Provenance
 ```
 
----
+If another eligible trade opportunity appears later:
+
+```text
+NEW SIGNAL
+-> NEW evidence
+-> NEW Draft #N+1
+-> NEW Candidate #N+1
+-> SHOW FULL FORM AGAIN
+-> NEW USER CONFIRMATION
+```
+
+No previous trade confirmation authorizes the next trade.
 
 ## 69. autonomous_live
 
 ```text
-Understand
--> Complete Strategy
--> Evidence
--> Deterministic Proposal
--> Editable Draft
--> Standing Mandate
--> Candidate
+Understand explicit autonomous request
+-> Complete Strategy if needed
+-> Autonomous Strategy Setup
+-> Standing Mandate Setup / Review
+-> USER CONFIRMS STRATEGY + MANDATE ONCE
+-> Mandate ACTIVE
+-> completed-bar / approved evaluation loop
+-> deterministic signal evaluation
+-> re-entry/re-arm gate
+-> fresh Evidence for each eligible signal
+-> fresh Deterministic Proposal
+-> fresh Draft #N
+-> fresh Candidate #N
 -> Mandate Authorization
 -> Pre-Submit Gates
 -> Controlled Execution Boundary
 -> Lifecycle Supervisor
--> Strategy / Exit Monitoring
+-> Strategy / Exit / Protection Monitoring
 -> Autonomous Management Proposal
 -> Mandate + Deterministic Policy Validation
 -> Controlled Management
 -> Lifecycle Supervisor
--> History / Provenance
+-> Position Closed / History / Provenance
+-> re-entry state waits for reset
+-> next eligible signal creates Draft/Candidate #N+1
 ```
 
----
+No per-trade user confirmation is required while the action remains inside the active mandate.
+
+The mandate is reusable; concrete trade parameters are not:
+
+```text
+strategy / mandate -> persist while valid
+Entry / SL / TP / Risk / Volume -> refreshed/recalculated per trade
+```
+
+If the next action requires policy or authority not covered by the current mandate, fail closed and request an explicit mandate revision.
 
 # PART XXX — FULL END-TO-END DIAGRAM
 
@@ -2083,26 +2417,54 @@ MODE / POLICY                        CAPABILITIES
           v                     v
       COMPLETE               PARTIAL
           |                     |
-          v                     v
-       EVIDENCE          STRATEGY COMPLETION
+          |                     v
+          |               STRATEGY COMPLETION
           |                     |
           |               user confirm/edit
           |                     |
           +----------+----------+
                      |
                      v
-         DETERMINISTIC PROPOSAL
-                     |
-                     v
-            EDITABLE TRADE DRAFT
-                     |
-                     v
-                 CANDIDATE
+              COMPLETE STRATEGY
                      |
           +----------+-----------+
           |                      |
           v                      v
- HUMAN CONFIRM             STANDING MANDATE
+ human_confirmed_live        autonomous_live
+          |                      |
+          |                AUTONOMOUS STRATEGY
+          |                 + MANDATE SETUP
+          |                      |
+          |                USER CONFIRMS
+          |                BOUNDED MANDATE
+          |                      |
+          |                      v
+          |                RECURRING SIGNAL LOOP
+          |                      |
+          |                re-entry / re-arm gate
+          |                      |
+          +----------+-----------+
+                     |
+                     v
+              ELIGIBLE TRADE INSTANCE
+                     |
+                     v
+               REFRESH EVIDENCE
+                     |
+                     v
+         DETERMINISTIC PROPOSAL
+          Entry / SL / TP / Risk / Volume
+                     |
+                     v
+            FRESH EDITABLE DRAFT #N
+                     |
+                     v
+              FRESH CANDIDATE #N
+                     |
+          +----------+-----------+
+          |                      |
+          v                      v
+ HUMAN CONFIRM #N          MANDATE VALIDATION
           |                      |
           +----------+-----------+
                      |
@@ -2143,9 +2505,17 @@ MODE / POLICY                        CAPABILITIES
                      |
                      v
              HISTORY / PROVENANCE
+                     |
+          +----------+-----------+
+          |                      |
+          v                      v
+ human strategy may         autonomous strategy
+ await next signal          enters WAIT_FOR_REARM
+ and show FULL form         then next eligible signal
+ again                      creates NEW Draft/Candidate
 ```
 
----
+The full product flow intentionally reuses the same deterministic evidence, proposal, Candidate, execution, lifecycle, read, and management boundaries in both modes. The difference is the authority model and recurring UX, not separate trading engines.
 
 # PART XXXI — ACCEPTANCE BEHAVIOR FAMILIES
 
@@ -2163,62 +2533,62 @@ The architecture should support a representative acceptance set covering at leas
 7. Current technical indicator
 8. Mixed macro + market analysis
 9. Strategy analysis only
-10. Direct BUY command
-11. Direct SELL command
-12. Direct CLOSE command
-13. Direct MANAGE command
-14. Partial strategy: missing indicator period
-15. Partial strategy: missing timeframe
-16. Partial strategy: both missing
-17. Complete strategy
-18. User-confirmed suggestion
-19. User edits suggested field
-20. Conversation inheritance
-21. Current user overrides inherited context
-22. Unsupported symbol
-23. Unsupported timeframe
-24. Unsupported indicator
+10. Direct BUY command -> human_confirmed_live
+11. Direct SELL command -> human_confirmed_live
+12. Direct CLOSE command -> human_confirmed_live
+13. Direct MANAGE command -> human_confirmed_live
+14. Explicit autonomous command -> autonomous_live
+15. Partial strategy: missing indicator period
+16. Partial strategy: missing timeframe
+17. Partial strategy: both missing
+18. Leaf-only completion fields; no editable parent container duplication
+19. Complete strategy
+20. User-confirmed suggestion
+21. User edits suggested field
+22. Conversation inheritance
+23. Current user overrides inherited context
+24. Unsupported symbol/timeframe/indicator
 25. Stale market data
-26. Provider unavailable
-27. Structured provider invalid
-28. Fallback trade-like completion
-29. Fallback normal knowledge request
-30. Deterministic Entry proposal
-31. Deterministic Stop proposal
-32. Deterministic Target proposal
-33. Deterministic risk proposal
-34. Deterministic volume proposal
-35. Draft revision editing
-36. Candidate creation
-37. Candidate rejection
-38. Candidate confirmation
-39. Confirmation mismatch
-40. Pre-submit blocked by freshness
-41. Pre-submit blocked by account mismatch
-42. Pre-submit blocked by kill switch
-43. Duplicate/idempotent request
-44. Broker-result confirmed
-45. Broker-result rejected
-46. Broker-result unknown/reconciliation
-47. Open-position query
-48. Pending-order query
-49. Current P/L query
-50. Position detail query
-51. SL/TP query
-52. Trade-history query
-53. Why-entered query
-54. Why-exited query
-55. Cancel-pending management
-56. Modify protection management
-57. Partial-close management
-58. Full-close management
-59. Autonomous mandate validation
-60. Autonomous post-entry management lifecycle
+26. Provider unavailable / structured provider invalid
+27. Bounded fallback with no split semantic authority
+28. Deterministic Entry/Stop/Target/Risk/Volume proposal
+29. Draft revision editing
+30. Candidate creation and blocked-Draft gating
+31. Candidate confirmation / rejection / mismatch
+32. Pre-submit blocked by freshness/account/kill switch
+33. Duplicate/idempotent opening request
+34. Broker-result confirmed/rejected/unknown
+35. RESULT_UNKNOWN -> reconciliation, no retry
+36. Open-position query
+37. Pending-order query
+38. Current P/L / position detail / SL/TP query
+39. Trade-history / why-entered / why-exited query
+40. Cancel-pending management
+41. Modify-protection management
+42. Partial-close management
+43. Full-close management
+44. Human-confirmed management requires exact per-action confirmation
+45. Human-confirmed recurring signal creates NEW full Draft/Candidate and asks again
+46. Autonomous Strategy + Standing Mandate setup
+47. Autonomous mode without valid mandate cannot mutate
+48. Autonomous mandate validation by strategy/symbol/action/account/limits
+49. Autonomous trade instance refreshes evidence and recalculates Entry/SL/TP/Risk/Volume
+50. Autonomous trade #2 does not reuse trade #1 Draft values as authority
+51. Autonomous continuously-true level condition does not re-enter repeatedly
+52. Autonomous re-arm after reset allows the next independent signal
+53. Mandate expiry/revocation blocks future openings
+54. Mandate revision required for unresolved/out-of-scope stop/target/risk/re-entry policy
+55. Autonomous post-entry protection management
+56. Autonomous partial/full close management
+57. Autonomous pending-order cancellation
+58. Read-only queries remain read-only while autonomous mode is active
+59. Ambiguous/stale target fails closed
+60. Security/redaction + singular bridge mutation boundary + no implicit real-account activation
 ```
 
 A final exact 60-question product acceptance suite may vary in wording, but must cover these bounded behavior families without sentence-specific patches.
 
----
+For recurring autonomous acceptance, use deterministic fixtures rather than creating real broker trades merely to exercise re-entry.
 
 ## 72. Acceptance dimensions
 
@@ -2353,61 +2723,88 @@ DOMAIN CORE
               |
               +--> PARTIAL -> STRATEGY COMPLETION FORM
               |
-              +--> COMPLETE -> EVIDENCE
-                                  |
-                                  v
-                         DETERMINISTIC PROPOSAL
-                                  |
-                                  v
-                           EDITABLE DRAFT
-                                  |
-                                  v
-                              CANDIDATE
-                                  |
-                       +----------+----------+
-                       |                     |
-                       v                     v
-                  HUMAN CONFIRM       STANDING MANDATE
-                       |                     |
-                       +----------+----------+
-                                  |
-                                  v
-                              PRE-SUBMIT
-                                  |
-                                  v
-                         CONTROLLED EXECUTION
-                                  |
-                                  v
-                         LIFECYCLE SUPERVISOR
-                                  |
-                                  v
-                             POSITION STATE
-                                  |
-                         +--------+--------+
-                         |                 |
-                         v                 v
-                    READ MODEL        MANAGEMENT
-                         |                 |
-                         |         +-------+-------+
-                         |         |               |
-                         |         v               v
-                         |    HUMAN CONFIRM   MANDATE VALIDATION
-                         |         |               |
-                         |         +-------+-------+
-                         |                 |
-                         |                 v
-                         |       CONTROLLED MANAGEMENT
-                         |                 |
-                         +--------+--------+
-                                  |
-                                  v
-                         LIFECYCLE SUPERVISOR
-                                  |
-                                  v
-                           CLOSED / HISTORY
-                                  |
-                                  v
-                              PROVENANCE
+              +--> COMPLETE STRATEGY
+                         |
+                 +-------+--------+
+                 |                |
+                 v                v
+        human_confirmed_live   autonomous_live
+                 |                |
+                 |          STRATEGY + MANDATE SETUP
+                 |                |
+                 |          USER CONFIRMS MANDATE
+                 |                |
+                 |          RECURRING SIGNAL LOOP
+                 |                |
+                 |          RE-ENTRY / RE-ARM GATE
+                 |                |
+                 +-------+--------+
+                         |
+                         v
+                      EVIDENCE
+                         |
+                         v
+               DETERMINISTIC PROPOSAL
+               Entry / SL / TP / Risk / Volume
+                         |
+                         v
+                    FRESH DRAFT #N
+                         |
+                         v
+                  FRESH CANDIDATE #N
+                         |
+                  +------+-------+
+                  |              |
+                  v              v
+          HUMAN CONFIRM #N   MANDATE VALIDATION
+                  |              |
+                  +------+-------+
+                         |
+                         v
+                     PRE-SUBMIT
+                         |
+                         v
+                CONTROLLED EXECUTION
+                         |
+                         v
+                LIFECYCLE SUPERVISOR
+                         |
+                         v
+                    POSITION STATE
+                         |
+                  +------+-------+
+                  |              |
+                  v              v
+             READ MODEL      MANAGEMENT
+                  |              |
+                  |       +------+-------+
+                  |       |              |
+                  |       v              v
+                  |  HUMAN CONFIRM   MANDATE VALIDATION
+                  |       |              |
+                  |       +------+-------+
+                  |              |
+                  |              v
+                  |    CONTROLLED MANAGEMENT
+                  |              |
+                  +------+-------+
+                         |
+                         v
+                LIFECYCLE SUPERVISOR
+                         |
+                         v
+                  CLOSED / HISTORY
+                         |
+                         v
+                     PROVENANCE
+                         |
+                  +------+-------+
+                  |              |
+                  v              v
+             HUMAN MODE       AUTONOMOUS MODE
+          next signal ->      WAIT_FOR_REARM ->
+          NEW full Draft      next signal ->
+          + USER CONFIRM      NEW Draft/Candidate
 ```
 
 Locked responsibility split:
@@ -2434,20 +2831,29 @@ Market/account services
 Strategy/domain validation
 -> domain validity
 
+Strategy Completion
+-> unresolved semantic leaf fields only
+
+Autonomous Strategy + Standing Mandate Setup
+-> user-confirmed reusable bounded strategy/policy authority
+
 Proposal engine
--> deterministic Entry/SL/TP/Risk/Volume
+-> deterministic fresh Entry/SL/TP/Risk/Volume for each trade instance
 
 Draft
--> editable proposal
+-> editable per-trade proposal; never reusable as authority for a later trade
 
 Candidate
--> immutable candidate artifact
+-> immutable per-trade candidate artifact
 
 Human confirmation
--> per-action authority in human_confirmed_live
+-> exact per-trade/per-management-action authority in human_confirmed_live
 
 Standing Mandate
--> bounded authority in autonomous_live
+-> bounded reusable authority in autonomous_live; revalidated for each action
+
+Re-entry / re-arm policy
+-> prevents repeated entries from one continuously-active signal and defines eligibility for the next independent trade
 
 Pre-submit
 -> deterministic final app-side gate
@@ -2471,14 +2877,13 @@ Journals
 -> durable provenance, reconciliation, and history
 ```
 
----
-
 ## 78. Non-negotiable invariants
 
 ```text
 ONE canonical semantic authority
 NO arbitrary UI semantic reparsing
 NO fabricated missing semantic values
+NO editable parent-container completion field when a child leaf is the actual unresolved requirement
 NO LLM execution authority
 NO Draft execution authority
 NO Candidate self-confirmation
@@ -2487,6 +2892,32 @@ NO implicit real-account activation
 NO blind retry after unknown broker mutation
 NO broker truth from LLM memory
 NO post-entry "fire and forget"
+
+human_confirmed_live:
+NO reuse of a previous trade confirmation for a new trade
+NEW trade signal -> NEW evidence -> NEW Draft/Candidate -> NEW human confirmation
+
+autonomous_live:
+NO per-trade human confirmation inside a valid bounded mandate
+NO reuse of previous trade's concrete Entry/SL/TP/Risk/Volume as authority
+NEW eligible signal -> NEW evidence -> NEW Draft/Candidate -> mandate revalidation
+NO repeated re-entry while one level condition remains continuously true unless an explicit supported policy says otherwise
+NO mandate scope expansion without explicit user-confirmed mandate revision
 ```
 
 The final product must remain conversational before, during, and after a trade lifecycle: it understands, proposes, obtains the required authority, observes resulting state, supports read-only position/history questions, supports bounded position management, preserves provenance, and remains fail-closed at every mutation boundary.
+
+The two active trading modes intentionally share the same deterministic domain/execution infrastructure but differ in authority and recurring UX:
+
+```text
+human_confirmed_live
+= trade-centric
+= full fresh per-trade form/review
+= confirm every trade
+
+autonomous_live
+= strategy/mandate-centric
+= confirm strategy + bounded mandate setup/revision
+= generate fresh per-trade proposals internally
+= autonomous recurring entry/management only while every action stays inside mandate
+```
