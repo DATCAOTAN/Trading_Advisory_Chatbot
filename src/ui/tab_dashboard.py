@@ -644,84 +644,88 @@ def _render_trading_runtime_controls(
                     )
                 )
 
-                with st.form(f"{key_prefix}standing_mandate_form"):
-                    st.markdown("**Review / Edit bounded limits**")
-                    management_actions = tuple(
-                        st.multiselect(
-                            "Management actions",
-                            (
-                                "OBSERVE",
-                                "NO_ACTION",
-                                "CANCEL_PENDING_ORDER",
-                                "MODIFY_POSITION_PROTECTION",
-                                "PARTIAL_CLOSE",
-                                "CLOSE_POSITION",
-                            ),
-                            default=setup.suggested_management_actions,
-                            key=f"{key_prefix}mandate_management_actions",
-                        )
+                st.markdown("**Review / Edit bounded limits**")
+                management_actions = tuple(
+                    st.multiselect(
+                        "Management actions",
+                        (
+                            "OBSERVE",
+                            "NO_ACTION",
+                            "CANCEL_PENDING_ORDER",
+                            "MODIFY_POSITION_PROTECTION",
+                            "PARTIAL_CLOSE",
+                            "CLOSE_POSITION",
+                        ),
+                        default=setup.suggested_management_actions,
+                        key=f"{key_prefix}mandate_management_actions",
                     )
-                    limit_columns = st.columns(5)
-                    maximum_volume = limit_columns[0].text_input(
-                        "Max volume (broker units)",
-                        placeholder="REQUIRES_USER_CONFIRMATION",
-                        key=f"{key_prefix}mandate_max_volume",
+                )
+                limit_columns = st.columns(5)
+                maximum_volume = limit_columns[0].text_input(
+                    "Max volume (broker units)",
+                    value=setup.suggested_maximum_volume,
+                    key=f"{key_prefix}mandate_max_volume",
+                )
+                maximum_risk = limit_columns[1].text_input(
+                    "Max risk / trade (account currency)",
+                    value=setup.suggested_maximum_risk_per_trade,
+                    key=f"{key_prefix}mandate_max_risk",
+                )
+                maximum_positions = limit_columns[2].number_input(
+                    "Max positions",
+                    min_value=1,
+                    step=1,
+                    value=setup.suggested_maximum_concurrent_positions,
+                    key=f"{key_prefix}mandate_max_positions",
+                )
+                maximum_trades = limit_columns[3].number_input(
+                    "Max trades / day",
+                    min_value=1,
+                    step=1,
+                    value=setup.suggested_maximum_trades_per_day,
+                    key=f"{key_prefix}mandate_max_trades",
+                )
+                maximum_loss = limit_columns[4].text_input(
+                    "Max loss / day (account currency)",
+                    value=setup.suggested_maximum_loss_per_day,
+                    key=f"{key_prefix}mandate_max_loss",
+                )
+                mandate_kill_switch = st.checkbox(
+                    "Mandate kill switch engaged",
+                    value=True,
+                    key=f"{key_prefix}mandate_kill_switch",
+                )
+                grant_mandate = st.checkbox(
+                    "I explicitly confirm this bounded demo-account Standing Mandate",
+                    key=f"{key_prefix}grant_mandate",
+                )
+                command = None
+                validation_blocker = ""
+                try:
+                    command = service.command_from_mandate_setup(
+                        setup,
+                        maximum_volume=maximum_volume,
+                        maximum_risk_per_trade=maximum_risk,
+                        maximum_concurrent_positions=maximum_positions,
+                        maximum_trades_per_day=maximum_trades,
+                        maximum_loss_per_day=maximum_loss,
+                        permitted_management_actions=management_actions,
+                        kill_switch_engaged=mandate_kill_switch,
                     )
-                    maximum_risk = limit_columns[1].text_input(
-                        "Max risk / trade (account currency)",
-                        placeholder="REQUIRES_USER_CONFIRMATION",
-                        key=f"{key_prefix}mandate_max_risk",
-                    )
-                    maximum_positions = limit_columns[2].number_input(
-                        "Max positions",
-                        min_value=1,
-                        step=1,
-                        value=None,
-                        placeholder="Required",
-                        key=f"{key_prefix}mandate_max_positions",
-                    )
-                    maximum_trades = limit_columns[3].number_input(
-                        "Max trades / day",
-                        min_value=1,
-                        step=1,
-                        value=None,
-                        placeholder="Required",
-                        key=f"{key_prefix}mandate_max_trades",
-                    )
-                    maximum_loss = limit_columns[4].text_input(
-                        "Max loss / day (account currency)",
-                        placeholder="REQUIRES_USER_CONFIRMATION",
-                        key=f"{key_prefix}mandate_max_loss",
-                    )
-                    mandate_kill_switch = st.checkbox(
-                        "Mandate kill switch engaged",
-                        value=True,
-                        key=f"{key_prefix}mandate_kill_switch",
-                    )
-                    grant_mandate = st.checkbox(
-                        "I explicitly confirm this bounded demo-account Standing Mandate",
-                        key=f"{key_prefix}grant_mandate",
-                    )
-                    if st.form_submit_button("Confirm Standing Mandate"):
-                        try:
-                            command = service.command_from_mandate_setup(
-                                setup,
-                                maximum_volume=maximum_volume,
-                                maximum_risk_per_trade=maximum_risk,
-                                maximum_concurrent_positions=maximum_positions,
-                                maximum_trades_per_day=maximum_trades,
-                                maximum_loss_per_day=maximum_loss,
-                                permitted_management_actions=management_actions,
-                                kill_switch_engaged=mandate_kill_switch,
-                            )
-                            service.grant_mandate(
-                                command, operator_grant=grant_mandate
-                            )
-                            st.success(
-                                "Standing mandate stored with protected integrity."
-                            )
-                        except Exception as exc:
-                            st.warning(f"Mandate grant blocked: {str(exc)}")
+                except ValueError as exc:
+                    validation_blocker = str(exc)
+                if validation_blocker:
+                    st.warning(f"Mandate limits invalid: {validation_blocker}")
+                if st.button(
+                    "Confirm Standing Mandate",
+                    disabled=command is None or not grant_mandate,
+                    key=f"{key_prefix}confirm_standing_mandate",
+                ):
+                    try:
+                        service.grant_mandate(command, operator_grant=True)
+                        st.success("Standing mandate stored with protected integrity.")
+                    except Exception as exc:
+                        st.warning(f"Mandate grant blocked: {str(exc)}")
 
         mandate_ids = tuple(
             item["mandate_id"]

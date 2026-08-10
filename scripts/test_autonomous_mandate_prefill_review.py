@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.config import Config
 from src.services.trading.execution.mt5_live_adapter_pre_submit.authority_runtime import (
     MandateGrantCommand,
     TradingAuthorityOperatorService,
@@ -23,12 +24,13 @@ CHATBOT = Path("src/ui/tab_chatbot.py")
 
 
 class AccountAdapter:
-    def __init__(self, fingerprint="a" * 64):
+    def __init__(self, fingerprint="a" * 64, environment="DEMO"):
         self.fingerprint = fingerprint
+        self.environment = environment
 
     def capture_account_context(self):
         return {
-            "account_environment": "DEMO",
+            "account_environment": self.environment,
             "account_context_fingerprint": self.fingerprint,
             "trade_allowed": True,
         }
@@ -74,9 +76,82 @@ def test_completed_strategy_projects_authoritative_mandate_setup(tmp_path):
     assert setup.active_from == NOW.isoformat()
     assert setup.active_until == setup.expires_at
     assert setup.active_until == "2026-08-10T09:00:00+00:00"
-    assert "maximum_risk_per_trade" in setup.unresolved_fields
-    assert "maximum_loss_per_day" in setup.unresolved_fields
+    assert setup.suggested_maximum_volume == "0.01"
+    assert setup.suggested_maximum_risk_per_trade == "1"
+    assert setup.suggested_maximum_concurrent_positions == 1
+    assert setup.suggested_maximum_trades_per_day == 1
+    assert setup.suggested_maximum_loss_per_day == "1"
+    assert setup.unresolved_fields == ()
+    assert dict(setup.field_sources)["maximum_volume"] == "BROKER_METADATA"
+    assert dict(setup.field_sources)["maximum_risk_per_trade"] == "CONFIGURED_POLICY"
     assert service.authority.store.latest_mandates() == ()
+
+
+def test_volume_suggestion_uses_current_broker_minimum(tmp_path):
+    setup = _service(
+        tmp_path,
+        market_provider=MarketProvider(volume_min="0.05", volume_max="10", volume_step="0.05"),
+    ).build_mandate_setup(_strategy(), order_family="MARKET", now=NOW)
+
+    assert setup.suggested_maximum_volume == "0.05"
+
+
+def test_configured_demo_policy_values_are_projected(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        Config, "TRADING_AUTONOMOUS_DEMO_MANDATE_MAX_RISK_PER_TRADE", "2.5"
+    )
+    monkeypatch.setattr(
+        Config, "TRADING_AUTONOMOUS_DEMO_MANDATE_MAX_CONCURRENT_POSITIONS", 2
+    )
+    monkeypatch.setattr(
+        Config, "TRADING_AUTONOMOUS_DEMO_MANDATE_MAX_TRADES_PER_DAY", 3
+    )
+    monkeypatch.setattr(
+        Config, "TRADING_AUTONOMOUS_DEMO_MANDATE_MAX_LOSS_PER_DAY", "7.5"
+    )
+
+    setup = _service(tmp_path).build_mandate_setup(
+        _strategy(), order_family="MARKET", now=NOW
+    )
+
+    assert setup.suggested_maximum_risk_per_trade == "2.5"
+    assert setup.suggested_maximum_concurrent_positions == 2
+    assert setup.suggested_maximum_trades_per_day == 3
+    assert setup.suggested_maximum_loss_per_day == "7.5"
+
+
+@pytest.mark.parametrize(
+    ("setting", "invalid"),
+    (
+        ("TRADING_AUTONOMOUS_DEMO_MANDATE_MAX_RISK_PER_TRADE", ""),
+        ("TRADING_AUTONOMOUS_DEMO_MANDATE_MAX_CONCURRENT_POSITIONS", 0),
+        ("TRADING_AUTONOMOUS_DEMO_MANDATE_MAX_TRADES_PER_DAY", 0),
+        ("TRADING_AUTONOMOUS_DEMO_MANDATE_MAX_LOSS_PER_DAY", ""),
+    ),
+)
+def test_demo_policy_configuration_is_required_and_never_uses_llm_values(
+    monkeypatch, tmp_path, setting, invalid
+):
+    monkeypatch.setattr(Config, setting, invalid)
+    strategy = _strategy()
+    strategy.maximum_risk_per_trade = "999"
+
+    with pytest.raises(
+        ValueError, match="DEMO_MANDATE_POLICY_CONFIGURATION_REQUIRED"
+    ):
+        _service(tmp_path).build_mandate_setup(
+            strategy, order_family="MARKET", now=NOW
+        )
+
+
+@pytest.mark.parametrize("environment", ("REAL", "UNKNOWN"))
+def test_non_demo_environment_never_inherits_demo_policy(tmp_path, environment):
+    service = _service(
+        tmp_path, account_adapter=AccountAdapter(environment=environment)
+    )
+
+    with pytest.raises(RuntimeError, match="REAL_ACCOUNT_AUTHORITY_FORBIDDEN"):
+        service.build_mandate_setup(_strategy(), order_family="MARKET", now=NOW)
 
 
 def test_user_edits_build_typed_command_and_revalidate_broker_volume(tmp_path):
@@ -100,6 +175,10 @@ def test_user_edits_build_typed_command_and_revalidate_broker_volume(tmp_path):
     assert command.permitted_symbols == ("XAUUSD",)
     assert command.permitted_broker_symbols == ("XAUUSDm",)
     assert command.maximum_volume == "0.02"
+    assert command.maximum_risk_per_trade == "10"
+    assert command.maximum_concurrent_positions == 1
+    assert command.maximum_trades_per_day == 1
+    assert command.maximum_loss_per_day == "20"
     assert command.kill_switch_engaged is True
     with pytest.raises(
         ValueError, match="MANDATE_MAXIMUM_VOLUME_OUTSIDE_BROKER_CONSTRAINTS"
@@ -185,7 +264,8 @@ def test_streamlit_review_uses_structured_controls_and_clear_money_units():
     assert "Autonomous Strategy & Mandate Setup" in dashboard
     assert "Max risk / trade (account currency)" in dashboard
     assert "Max loss / day (account currency)" in dashboard
-    assert "REQUIRES_USER_CONFIRMATION" in dashboard
+    assert "value=setup.suggested_maximum_risk_per_trade" in dashboard
+    assert "disabled=command is None or not grant_mandate" in dashboard
     assert "Mandate duration" in dashboard
     assert "Active from (UTC ISO-8601)" not in dashboard
     assert "Confirm Standing Mandate" in dashboard

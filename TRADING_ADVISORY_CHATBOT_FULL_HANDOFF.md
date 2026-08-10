@@ -2885,3 +2885,15 @@ The existing review controls and protected confirmation journal now form the exp
 - Runtime verification restarted the app without rebuild; the container became healthy and Streamlit returned `200 ok`. Browser acceptance displayed the authoritative prefilled setup with editable controls, an unchecked confirmation box, and `supervisor_running=false`.
 - Provider calls, Candidate generation, mandate activation, pre-submit, controlled-submit, management mutation, runtime `order_send`, broker mutation, and MT5 writes remained zero. Human-confirmed mode retains exact per-trade confirmation and does not render autonomous mandate controls.
 - Verification level: `FULL_REGRESSION_PASS`. The historical `v2.0.1-software-complete` tag remains unchanged.
+
+# 91. BOUNDED DEMO MANDATE POLICY AND CONTROL-PLANE ACCEPTANCE
+
+- The existing setup projection now fills all five required limits without creating mandate authority. Maximum volume comes from the current broker symbol's minimum/maximum/step metadata; maximum positions, trades per day, risk per trade, and daily loss come from explicit DEMO-only configuration.
+- Monetary limits remain account-currency amounts, never percentages or LLM-derived values. Missing or invalid DEMO policy configuration fails closed. REAL and UNKNOWN account environments cannot inherit these suggestions.
+- Streamlit keeps every suggestion editable, labels monetary units, validates the typed `MandateGrantCommand`, leaves confirmation unchecked, and disables grant until the complete form and explicit confirmation are valid. The existing Standing Mandate validator/store remains authoritative.
+- Browser acceptance used one narrow XAUUSD/XAUUSDm MARKET mandate with `OBSERVE` and `NO_ACTION`, broker-minimum volume, configured bounded limits, and an engaged mandate kill switch. The protected journal recorded one grant and one revocation; strict reload, integrity validation, account binding, and public redaction passed.
+- Reload recovered the same active mandate. Supervisor start required its exact active mandate ID, produced a running process with the expected XAUUSD/M1 profile, then stopped cleanly. After revocation and reload, no active mandate remained and Start Supervisor was disabled.
+- Deterministic signal/re-arm behavior remained covered by the focused neighboring coordinator/monitor tests; no live signal was forced and no provider call or Candidate was created during browser acceptance.
+- Verification: focused policy/mandate/supervisor neighbors passed with `112 passed`; canonical acceptance passed with `67 passed` including all 60 canonical cases; full regression passed with `3,649 passed`, `156 subtests passed`, and three unchanged warnings.
+- The app restarted without rebuild, remained healthy, and Streamlit returned `200 ok`. Controlled-submit, controlled-management writes, runtime `order_send`, broker mutation, and MT5 writes remained zero; execution and management kill switches stayed engaged.
+- Verification level: `FULL_REGRESSION_PASS`. Verdict: `AUTONOMOUS_DEMO_POLICY_AND_CONTROL_PLANE_COMPLETE`.

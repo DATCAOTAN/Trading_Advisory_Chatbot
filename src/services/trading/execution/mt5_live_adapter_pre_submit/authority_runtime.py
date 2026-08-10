@@ -69,6 +69,11 @@ class MandateSetupProjection:
     volume_min: str
     volume_max: str
     volume_step: str
+    suggested_maximum_volume: str
+    suggested_maximum_risk_per_trade: str
+    suggested_maximum_concurrent_positions: int
+    suggested_maximum_trades_per_day: int
+    suggested_maximum_loss_per_day: str
     active_from: str
     active_until: str
     expires_at: str
@@ -141,6 +146,22 @@ class TradingAuthorityOperatorService:
         volume_step = _positive_decimal_text(tick.volume_step, "BROKER_VOLUME_STEP_INVALID")
         if Decimal(volume_min) > Decimal(volume_max):
             raise ValueError("BROKER_VOLUME_RANGE_INVALID")
+        maximum_risk = _positive_decimal_text(
+            Config.TRADING_AUTONOMOUS_DEMO_MANDATE_MAX_RISK_PER_TRADE,
+            "DEMO_MANDATE_POLICY_CONFIGURATION_REQUIRED",
+        )
+        maximum_loss = _positive_decimal_text(
+            Config.TRADING_AUTONOMOUS_DEMO_MANDATE_MAX_LOSS_PER_DAY,
+            "DEMO_MANDATE_POLICY_CONFIGURATION_REQUIRED",
+        )
+        maximum_positions = int(
+            Config.TRADING_AUTONOMOUS_DEMO_MANDATE_MAX_CONCURRENT_POSITIONS
+        )
+        maximum_trades = int(
+            Config.TRADING_AUTONOMOUS_DEMO_MANDATE_MAX_TRADES_PER_DAY
+        )
+        if maximum_positions < 1 or maximum_trades < 1:
+            raise ValueError("DEMO_MANDATE_POLICY_CONFIGURATION_REQUIRED")
 
         active_until = generated_at + timedelta(minutes=duration_minutes)
         mandate_id = "mandate_" + hashlib.sha256(
@@ -166,22 +187,26 @@ class TradingAuthorityOperatorService:
             volume_min=volume_min,
             volume_max=volume_max,
             volume_step=volume_step,
+            suggested_maximum_volume=volume_min,
+            suggested_maximum_risk_per_trade=maximum_risk,
+            suggested_maximum_concurrent_positions=maximum_positions,
+            suggested_maximum_trades_per_day=maximum_trades,
+            suggested_maximum_loss_per_day=maximum_loss,
             active_from=generated_at.isoformat(),
             active_until=active_until.isoformat(),
             expires_at=active_until.isoformat(),
-            unresolved_fields=(
-                "maximum_volume",
-                "maximum_risk_per_trade",
-                "maximum_concurrent_positions",
-                "maximum_trades_per_day",
-                "maximum_loss_per_day",
-            ),
+            unresolved_fields=(),
             field_sources=(
                 ("canonical_symbol", "STRATEGY_DERIVED"),
                 ("broker_symbol", "BROKER_MAPPING"),
                 ("account_environment", "ACCOUNT_CONTEXT"),
                 ("operating_mode", "MODE_AUTHORITY"),
                 ("volume_constraints", "BROKER_METADATA"),
+                ("maximum_volume", "BROKER_METADATA"),
+                ("maximum_risk_per_trade", "CONFIGURED_POLICY"),
+                ("maximum_concurrent_positions", "CONFIGURED_POLICY"),
+                ("maximum_trades_per_day", "CONFIGURED_POLICY"),
+                ("maximum_loss_per_day", "CONFIGURED_POLICY"),
                 ("mandate_id", "SYSTEM_CALCULATED"),
                 ("mandate_version", "AUTHORITY_STORE"),
                 ("validity_window", "SYSTEM_CALCULATED"),

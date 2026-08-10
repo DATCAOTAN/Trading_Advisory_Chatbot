@@ -2157,3 +2157,30 @@ Commit: this commit
 - Maximum volume, positions, trades/day, monetary risk, and monetary daily loss require explicit operator values because no deterministic product policy defines those limits.
 
 ---
+
+### Post-release UX - Bounded DEMO Mandate Policy and Control Plane
+
+Date: 2026-08-10
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Prefilled maximum volume from current broker metadata and the four remaining limits from explicit DEMO-only configuration.
+- Kept all suggestions editable and non-authoritative until typed validation plus exact operator confirmation.
+- Failed closed for missing/invalid DEMO policy and for REAL or UNKNOWN account environments.
+
+#### Verification
+
+- Focused policy/mandate/supervisor neighbors: 112 passed.
+- Canonical product acceptance: 67 passed, including all 60 canonical cases.
+- Full regression: 3,649 passed and 156 subtests passed with 3 unchanged warnings.
+- Browser acceptance: one protected grant, strict reload/integrity/redaction pass, supervisor start/stop, one revoke, and revoked mandate blocked after reload.
+
+#### Current state / limitations
+
+- Execution and management kill switches remained engaged; controlled-submit, management writes, runtime `order_send`, broker mutation, and MT5 writes were zero.
+- The acceptance did not force a live market signal or create a Candidate; deterministic signal/re-arm neighbors remained green.
+- Verdict: `AUTONOMOUS_DEMO_POLICY_AND_CONTROL_PLANE_COMPLETE`.
+
+---
