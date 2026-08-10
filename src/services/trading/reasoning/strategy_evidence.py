@@ -69,6 +69,7 @@ INDICATOR_REGISTRY: dict[str, IndicatorDefinition] = {
     "MACD": IndicatorDefinition("MACD", ("macd",), ("fast_period", "slow_period", "signal_period"), ("close",), ("line", "signal", "histogram"), "macd/v1", 27, (("fast_period", 12), ("slow_period", 26), ("signal_period", 9)), (("fast_period", 2, 500, True), ("slow_period", 2, 500, True), ("signal_period", 2, 500, True))),
     "BOLLINGER_BANDS": IndicatorDefinition("BOLLINGER_BANDS", ("bollinger", "bollinger bands", "bbands"), ("period", "deviation"), ("close",), ("middle", "upper", "lower"), "bollinger/v1", 3, (("period", 20), ("deviation", 2)), (("period", 2, 500, True), ("deviation", 0.1, 10, False))),
 }
+EDGE_RULE_OPERATORS = {"CROSSES_ABOVE", "CROSSES_BELOW"}
 
 INDICATOR_PARAMETER_SUGGESTIONS: dict[str, dict[str, float]] = {
     "EMA": {"period": 20},
@@ -745,28 +746,31 @@ def build_reasoning_evidence(
     failed_rules = [rule for rule, passed in zip(strategy.entry_rules, rule_results) if not passed]
     if failed_rules:
         reasons.append(ReasonEvidence("STRUCTURE_CONFIRMATION_MISSING", "WARN", "One or more configured entry rules are not confirmed.", len(failed_rules), 0, feature="entry_rules"))
-    if strategy.requested_mode == "autonomous_live" and strategy.entry_rules:
-        level_rules = tuple(
-            rule
-            for rule in strategy.entry_rules
-            if rule.operator in {"GREATER_THAN", "LESS_THAN", "BETWEEN"}
+    if strategy.requested_mode == "autonomous_live" and failed_rules:
+        evaluations = [
+            evaluate_strategy_rule(rule, indicator_values)
+            for rule in failed_rules
+        ]
+        waiting_for_rearm = any(
+            item["signal_state"] == "WAITING_FOR_REARM"
+            for item in evaluations
         )
-        if len(level_rules) == len(strategy.entry_rules):
-            if not all(rule_results):
-                reasons.append(ReasonEvidence(
-                    "ENTRY_CONDITION_ARMED", "ERROR",
-                    "The autonomous entry condition is false and armed for its next transition.",
-                    False, True, feature="entry_rules",
-                ))
-            elif all(
-                _evaluate_level_rule_previous(rule, indicator_values)
-                for rule in level_rules
-            ):
-                reasons.append(ReasonEvidence(
-                    "ENTRY_CONDITION_WAITING_FOR_REARM", "ERROR",
-                    "The autonomous level condition remains true and must become false before another entry.",
-                    True, False, feature="entry_rules",
-                ))
+        reasons.append(ReasonEvidence(
+            (
+                "ENTRY_CONDITION_WAITING_FOR_REARM"
+                if waiting_for_rearm
+                else "ENTRY_CONDITION_FALSE"
+            ),
+            "ERROR",
+            (
+                "The explicit edge condition remains true and must re-arm before another trigger."
+                if waiting_for_rearm
+                else "The entry condition is false on the current completed bar."
+            ),
+            False,
+            True,
+            feature="entry_rules",
+        ))
     directions = [item.get("direction") for item in per_tf_features.values() if item.get("direction") in {"UP", "DOWN"}]
     alignment_score = abs(directions.count("UP") - directions.count("DOWN")) / max(1, len(per_tf_features))
     conflict = bool("UP" in directions and "DOWN" in directions)
@@ -935,20 +939,67 @@ def _timeframe_features(bars: Sequence[Any], indicator_values: Mapping[str, Mapp
 
 
 def _evaluate_rule(rule: StrategyRule, values: Mapping[str, Mapping[str, Any]]) -> bool:
+    return bool(evaluate_strategy_rule(rule, values)["triggered"])
+
+
+def strategy_rule_trigger_mode(rule: StrategyRule) -> str:
+    return "EDGE" if rule.operator in EDGE_RULE_OPERATORS else "LEVEL"
+
+
+def evaluate_strategy_rule(
+    rule: StrategyRule,
+    values: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    trigger_mode = strategy_rule_trigger_mode(rule)
+    current_condition = _evaluate_rule_condition(rule, values, previous=False)
+    previous_condition = _evaluate_rule_condition(rule, values, previous=True)
+    if trigger_mode == "LEVEL":
+        triggered = current_condition is True
+        signal_state = "CONDITION_TRUE" if triggered else "CONDITION_FALSE"
+    elif previous_condition is False and current_condition is True:
+        triggered, signal_state = True, "TRIGGERED"
+    elif previous_condition is True and current_condition is True:
+        triggered, signal_state = False, "WAITING_FOR_REARM"
+    elif previous_condition is True and current_condition is False:
+        triggered, signal_state = False, "REARMED"
+    else:
+        triggered, signal_state = False, "ARMED"
+    return {
+        "trigger_mode": trigger_mode,
+        "previous_condition": previous_condition,
+        "current_condition": current_condition,
+        "triggered": triggered,
+        "signal_state": signal_state,
+        "opening_eligibility": (
+            "ENTRY_ELIGIBLE"
+            if triggered
+            else "WAITING_FOR_REARM"
+            if signal_state == "WAITING_FOR_REARM"
+            else "CONDITION_FALSE"
+        ),
+    }
+
+
+def _evaluate_rule_condition(
+    rule: StrategyRule,
+    values: Mapping[str, Mapping[str, Any]],
+    *,
+    previous: bool,
+) -> bool | None:
     left = values.get(rule.left, {})
-    current, previous = left.get("current"), left.get("previous")
+    current = left.get("previous" if previous else "current")
     if current is None:
-        return False
+        return None
     if rule.right:
         right = values.get(rule.right, {})
-        right_current, right_previous = right.get("current"), right.get("previous")
-        if right_current is None:
-            return False
-        if rule.operator == "CROSSES_ABOVE":
-            return previous is not None and right_previous is not None and previous <= right_previous and current > right_current
-        if rule.operator == "CROSSES_BELOW":
-            return previous is not None and right_previous is not None and previous >= right_previous and current < right_current
-        return current > right_current if rule.operator == "GREATER_THAN" else current < right_current
+        right_value = right.get("previous" if previous else "current")
+        if right_value is None:
+            return None
+        if rule.operator in {"GREATER_THAN", "CROSSES_ABOVE"}:
+            return current > right_value
+        if rule.operator in {"LESS_THAN", "CROSSES_BELOW"}:
+            return current < right_value
+        return False
     if rule.operator == "GREATER_THAN":
         return current > rule.constants[0]
     if rule.operator == "LESS_THAN":
@@ -956,9 +1007,15 @@ def _evaluate_rule(rule: StrategyRule, values: Mapping[str, Mapping[str, Any]]) 
     if rule.operator == "BETWEEN":
         return rule.constants[0] <= current <= rule.constants[1]
     if rule.operator == "RISING":
-        return previous is not None and current > previous
+        if previous:
+            return None
+        prior = left.get("previous")
+        return None if prior is None else left.get("current") > prior
     if rule.operator == "FALLING":
-        return previous is not None and current < previous
+        if previous:
+            return None
+        prior = left.get("previous")
+        return None if prior is None else left.get("current") < prior
     return False
 
 
@@ -966,26 +1023,7 @@ def _evaluate_level_rule_previous(
     rule: StrategyRule,
     values: Mapping[str, Mapping[str, Any]],
 ) -> bool:
-    left = values.get(rule.left, {})
-    previous = left.get("previous")
-    if previous is None:
-        return False
-    if rule.right:
-        right_previous = values.get(rule.right, {}).get("previous")
-        if right_previous is None:
-            return False
-        return (
-            previous > right_previous
-            if rule.operator == "GREATER_THAN"
-            else previous < right_previous
-        )
-    if rule.operator == "GREATER_THAN":
-        return previous > rule.constants[0]
-    if rule.operator == "LESS_THAN":
-        return previous < rule.constants[0]
-    if rule.operator == "BETWEEN":
-        return rule.constants[0] <= previous <= rule.constants[1]
-    return False
+    return _evaluate_rule_condition(rule, values, previous=True) is True
 
 
 def _leaf_unresolved_fields(fields: Sequence[str]) -> tuple[str, ...]:

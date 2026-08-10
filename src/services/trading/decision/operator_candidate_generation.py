@@ -42,8 +42,7 @@ from src.services.trading.market.regime_detector import MarketRegimeDetector
 from src.services.trading.reasoning import MethodSelectorService
 from src.services.trading.reasoning.strategy_evidence import (
     ConversationalStrategyRequest,
-    _evaluate_level_rule_previous,
-    _evaluate_rule,
+    evaluate_strategy_rule,
     plan_strategy_data,
     validate_strategy,
 )
@@ -352,17 +351,7 @@ def strategy_monitor_projection(
     observed = values.get(rule.left)
     if indicator is None or not isinstance(observed, dict):
         return {}
-    current_condition = _evaluate_rule(rule, values)
-    level_rule = rule.operator in {"GREATER_THAN", "LESS_THAN", "BETWEEN"}
-    previous_condition = (
-        _evaluate_level_rule_previous(rule, values) if level_rule else None
-    )
-    if level_rule and current_condition and previous_condition:
-        signal_state = "WAITING_FOR_REARM"
-    elif current_condition:
-        signal_state = "TRIGGERED"
-    else:
-        signal_state = "ARMED"
+    evaluation = evaluate_strategy_rule(rule, values)
     parameters = indicator.parameter_map()
     threshold: Any = list(rule.constants)
     if len(rule.constants) == 1:
@@ -380,9 +369,11 @@ def strategy_monitor_projection(
         "current_indicator_value": observed.get("current"),
         "operator": rule.operator,
         "threshold": threshold,
-        "previous_condition": previous_condition,
-        "current_condition": current_condition,
-        "rearm_state": signal_state,
+        "trigger_mode": evaluation["trigger_mode"],
+        "previous_condition": evaluation["previous_condition"],
+        "current_condition": evaluation["current_condition"],
+        "rearm_state": evaluation["signal_state"],
+        "opening_eligibility": evaluation["opening_eligibility"],
         "hard_blockers": list(evidence.get("hard_blockers") or ()),
     }
 

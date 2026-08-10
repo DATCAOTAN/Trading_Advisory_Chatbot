@@ -822,7 +822,7 @@ def _render_trading_runtime_controls(
                     st.markdown("**Autonomous Runtime**")
                     runtime = st.columns(4)
                     runtime[0].metric(
-                        "Signal state", evaluation.get("rearm_state") or "UNAVAILABLE"
+                        "Trigger", evaluation.get("trigger_mode") or "UNAVAILABLE"
                     )
                     runtime[1].metric(
                         "Last decision", evaluation.get("decision") or monitor_row["status"]
@@ -846,6 +846,8 @@ def _render_trading_runtime_controls(
                         f"current={evaluation.get('current_indicator_value')} | "
                         f"previous_condition={evaluation.get('previous_condition')} | "
                         f"current_condition={evaluation.get('current_condition')} | "
+                        f"signal_state={evaluation.get('rearm_state') or 'UNAVAILABLE'} | "
+                        f"opening_eligibility={evaluation.get('opening_eligibility') or 'UNAVAILABLE'} | "
                         f"firewall={evaluation.get('execution_firewall') or 'BLOCKED'}"
                     )
         return status["mode"], runtime_blockers

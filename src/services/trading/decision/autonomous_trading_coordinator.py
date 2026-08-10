@@ -243,6 +243,17 @@ class AutonomousTradingCoordinator:
                 "BLOCKED", symbol, broker_symbol, timeframes, closed_bar_time,
                 account_scope, blocker="COORDINATOR_RUNTIME_STATE_UNSAFE",
             )
+        opening_blocker = self._opening_lifecycle_blocker(inputs)
+        if opening_blocker:
+            projection = self._strategy_projection(
+                getattr(inputs, "reasoning_evidence_summary", "")
+            )
+            projection["opening_eligibility"] = "ENTRY_ALREADY_ACTIVE"
+            return self._result(
+                "NO_ACTION", symbol, broker_symbol, timeframes, closed_bar_time,
+                account_scope, intent="NO_ACTION", blocker=opening_blocker,
+                strategy_evaluation=projection,
+            )
         management_result = self._handle_post_entry_management(
             inputs=inputs,
             symbol=symbol,
@@ -768,6 +779,42 @@ class AutonomousTradingCoordinator:
         )
         return projection
 
+    def _opening_lifecycle_blocker(self, inputs: Any) -> str:
+        if (
+            self.strategy is None
+            or self.strategy.requested_mode != "autonomous_live"
+        ):
+            return ""
+        lifecycle = inputs.lifecycle_status
+        active_states = (
+            "SUBMISSION_PENDING",
+            "ORDER_ACTIVE",
+            "POSITION_OPEN",
+            "POSITION_PARTIALLY_REDUCED",
+        )
+        if getattr(lifecycle, "active_position_count", 0) or any(
+            lifecycle.lifecycle_state_counts.get(state, 0) for state in active_states
+        ):
+            return "ENTRY_ALREADY_ACTIVE"
+        journal = getattr(self.decision_orchestrator, "journal", None)
+        if journal is None or self.strategy is None:
+            return ""
+        try:
+            for row in reversed(journal.records()):
+                candidate = journal.load_candidate(row["candidate_reference"])
+                if (
+                    candidate is not None
+                    and candidate.strategy_id == self.strategy.identity.strategy_id
+                    and candidate.intent == "OPEN_POSITION"
+                    and candidate.deterministic_eligibility_result
+                    == "ELIGIBLE_CANDIDATE"
+                    and _future(candidate.expires_at, self.clock())
+                ):
+                    return "ENTRY_ALREADY_ACTIVE"
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            return "COORDINATOR_CANDIDATE_STATE_UNAVAILABLE"
+        return ""
+
     @staticmethod
     def _execution_firewall_state() -> str:
         if (
@@ -799,6 +846,16 @@ def _runtime_safe(inputs: Any) -> bool:
         not in {"AMBIGUOUS_MATCH", "QUERY_FAILED", "RESULT_UNKNOWN"}
         and reconciliation.retry_decision == "RETRY_PROHIBITED"
     )
+
+
+def _future(value: str, now: datetime) -> bool:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc) > now.astimezone(timezone.utc)
 
 
 def coordinator_account_context(

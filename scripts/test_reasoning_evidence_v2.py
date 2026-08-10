@@ -17,6 +17,7 @@ from src.services.trading.reasoning.strategy_evidence import (
     INDICATOR_REGISTRY,
     IndicatorSpec,
     StrategyRule,
+    evaluate_strategy_rule,
     build_reasoning_evidence,
     parse_conversational_strategy,
     plan_strategy_data,
@@ -208,15 +209,11 @@ def test_all_bounded_rule_operators_are_deterministic():
 
 
 @pytest.mark.parametrize(
-    ("previous", "current", "expected_blocker"),
-    (
-        (5.0, 11.0, ""),
-        (11.0, 12.0, "ENTRY_CONDITION_WAITING_FOR_REARM"),
-        (11.0, 5.0, "ENTRY_CONDITION_ARMED"),
-    ),
+    ("previous", "current", "eligible"),
+    ((5.0, 11.0, True), (11.0, 12.0, True), (5.0, 5.0, False), (11.0, 5.0, False)),
 )
-def test_autonomous_level_condition_requires_false_to_true_rearm(
-    monkeypatch, previous, current, expected_blocker
+def test_autonomous_level_condition_uses_current_completed_bar(
+    monkeypatch, previous, current, eligible
 ):
     strategy = replace(
         _request("Use RSI 14 on H1 and buy when RSI is above 10."),
@@ -235,13 +232,13 @@ def test_autonomous_level_condition_requires_false_to_true_rearm(
 
     evidence = build_reasoning_evidence(strategy, bundle, quality, plan)
 
-    if expected_blocker:
-        assert expected_blocker in evidence.setup.hard_blockers
-    else:
+    if eligible:
         assert not any(
             item.startswith("ENTRY_CONDITION_")
             for item in evidence.setup.hard_blockers
         )
+    else:
+        assert "ENTRY_CONDITION_FALSE" in evidence.setup.hard_blockers
 
 
 def test_human_mode_does_not_use_autonomous_rearm_gate(monkeypatch):
@@ -264,35 +261,39 @@ def test_human_mode_does_not_use_autonomous_rearm_gate(monkeypatch):
     )
 
 
-def test_autonomous_level_condition_rearm_sequence_is_restart_safe(monkeypatch):
-    strategy = replace(
-        _request("Use RSI 14 on H1 and buy when RSI is above 10."),
-        requested_mode="autonomous_live",
-    )
-    strategy = replace(strategy, identity=strategy_identity(strategy))
-    plan = plan_strategy_data(strategy)
-    bundle, quality = _bundle(
-        ReplayScenario("autonomous_rearm_sequence", bars=180),
-        plan.candle_counts(),
-    )
+def test_explicit_crossing_retains_edge_rearm_semantics():
+    rule = StrategyRule("CROSSES_ABOVE", "left", "right")
 
-    def blockers(previous, current):
-        monkeypatch.setattr(
-            strategy_evidence_module,
-            "_compute_indicator",
-            lambda _spec, _bars: {"previous": previous, "current": current},
+    def state(left_previous, left_current):
+        return evaluate_strategy_rule(
+            rule,
+            {
+                "left": {"previous": left_previous, "current": left_current},
+                "right": {"previous": 10.0, "current": 10.0},
+            },
         )
-        return build_reasoning_evidence(
-            strategy, bundle, quality, plan
-        ).setup.hard_blockers
 
-    assert "ENTRY_CONDITION_ARMED" in blockers(5.0, 5.0)
-    assert not any(code.startswith("ENTRY_CONDITION_") for code in blockers(5.0, 11.0))
-    assert "ENTRY_CONDITION_WAITING_FOR_REARM" in blockers(11.0, 12.0)
-    assert "ENTRY_CONDITION_WAITING_FOR_REARM" in blockers(11.0, 12.0)
-    assert "ENTRY_CONDITION_ARMED" in blockers(11.0, 5.0)
-    assert not any(code.startswith("ENTRY_CONDITION_") for code in blockers(5.0, 11.0))
-    assert "ENTRY_CONDITION_WAITING_FOR_REARM" in blockers(11.0, 12.0)
+    assert state(5.0, 7.0)["signal_state"] == "ARMED"
+    assert state(5.0, 11.0)["signal_state"] == "TRIGGERED"
+    assert state(11.0, 12.0)["signal_state"] == "WAITING_FOR_REARM"
+    assert state(11.0, 5.0)["signal_state"] == "REARMED"
+    assert state(5.0, 11.0)["trigger_mode"] == "EDGE"
+
+
+def test_plain_comparison_is_level_not_edge():
+    result = evaluate_strategy_rule(
+        StrategyRule("GREATER_THAN", "left", constants=(10.0,)),
+        {"left": {"previous": 11.0, "current": 12.0}},
+    )
+
+    assert result == {
+        "trigger_mode": "LEVEL",
+        "previous_condition": True,
+        "current_condition": True,
+        "triggered": True,
+        "signal_state": "CONDITION_TRUE",
+        "opening_eligibility": "ENTRY_ELIGIBLE",
+    }
 
 
 def test_replay_evaluation_covers_required_states_and_is_compact():

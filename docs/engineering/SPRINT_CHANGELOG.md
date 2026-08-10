@@ -2216,3 +2216,31 @@ Commit: this commit
 - Verdict: `REALTIME_AUTONOMOUS_TYPED_STRATEGY_OBSERVATION_COMPLETE`.
 
 ---
+
+### Post-release fix - Level and Edge Trigger Semantics
+
+Date: 2026-08-10
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Made plain comparison rules current-bar `LEVEL` triggers and retained explicit crossing rules as re-arming `EDGE` triggers.
+- Kept duplicate suppression in completed-bar identity, Candidate state, lifecycle, and idempotency instead of using false-to-true re-arm for level rules.
+- Added trigger mode and opening eligibility to the existing monitor projection and read-only Dashboard status.
+
+#### Verification
+
+- Final focused trigger/evidence/supervisor/coordinator/UI group: 79 passed.
+- Broader neighboring strategy/monitor/lifecycle/mandate/idempotency group: 204 passed.
+- Canonical product acceptance: 67 passed, including all 60 canonical cases.
+- Full regression: 3,684 passed and 156 subtests passed with 3 unchanged warnings.
+- Live DEMO completed bars showed true-to-true RSI14 as `LEVEL`, `CONDITION_TRUE`, and `ENTRY_ELIGIBLE`; the first downstream blocker was `STRUCTURED_PROPOSAL_NOT_AVAILABLE`.
+
+#### Current state / limitations
+
+- No natural Candidate was created during the bounded observation; execution remained blocked by the kill switch.
+- Controlled-submit, management writes, runtime `order_send`, MT5 writes, and broker mutations remained zero.
+- Verdict: `LEVEL_AND_EDGE_TRIGGER_SEMANTICS_COMPLETE`.
+
+---

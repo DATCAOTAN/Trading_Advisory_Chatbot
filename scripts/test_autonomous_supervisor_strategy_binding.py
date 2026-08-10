@@ -205,10 +205,16 @@ def test_supervisor_reload_rejects_account_revocation_and_expiry(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("previous", "current", "state"),
-    ((5.0, 7.0, "ARMED"), (5.0, 11.0, "TRIGGERED"), (11.0, 12.0, "WAITING_FOR_REARM")),
+    ("previous", "current", "state", "eligibility"),
+    (
+        (5.0, 7.0, "CONDITION_FALSE", "CONDITION_FALSE"),
+        (5.0, 11.0, "CONDITION_TRUE", "ENTRY_ELIGIBLE"),
+        (11.0, 12.0, "CONDITION_TRUE", "ENTRY_ELIGIBLE"),
+    ),
 )
-def test_level_rule_projection_uses_existing_rearm_semantics(previous, current, state):
+def test_level_rule_projection_uses_current_condition(
+    previous, current, state, eligibility
+):
     summary = json.dumps(
         {
             "indicator_values": {
@@ -222,10 +228,12 @@ def test_level_rule_projection_uses_existing_rearm_semantics(previous, current, 
 
     assert projection["previous_indicator_value"] == previous
     assert projection["current_indicator_value"] == current
+    assert projection["trigger_mode"] == "LEVEL"
     assert projection["rearm_state"] == state
+    assert projection["opening_eligibility"] == eligibility
 
 
-def test_coordinator_passes_exact_strategy_and_projects_waiting_for_rearm(tmp_path):
+def test_coordinator_passes_exact_strategy_and_projects_level_condition(tmp_path):
     strategy = _strategy()
     calls = []
     summary = json.dumps(
@@ -233,7 +241,7 @@ def test_coordinator_passes_exact_strategy_and_projects_waiting_for_rearm(tmp_pa
             "indicator_values": {
                 "rsi_14_m1": {"previous": 30.3172, "current": 27.8983}
             },
-            "hard_blockers": ["ENTRY_CONDITION_WAITING_FOR_REARM"],
+            "hard_blockers": [],
         }
     )
 
@@ -242,7 +250,7 @@ def test_coordinator_passes_exact_strategy_and_projects_waiting_for_rearm(tmp_pa
             calls.append(kwargs)
             raise OperatorCandidateInputError(
                 "STRUCTURED_PROPOSAL_NOT_AVAILABLE",
-                "ENTRY_CONDITION_WAITING_FOR_REARM",
+                "STRUCTURED_PROPOSAL_NOT_AVAILABLE",
                 evidence_summary=summary,
             )
 
@@ -268,7 +276,9 @@ def test_coordinator_passes_exact_strategy_and_projects_waiting_for_rearm(tmp_pa
 
     assert calls == [{"symbol": "XAUUSD", "timeframes": ("M1",), "strategy": strategy}]
     assert result.status == "NO_ACTION"
-    assert result.strategy_evaluation["rearm_state"] == "WAITING_FOR_REARM"
+    assert result.strategy_evaluation["trigger_mode"] == "LEVEL"
+    assert result.strategy_evaluation["rearm_state"] == "CONDITION_TRUE"
+    assert result.strategy_evaluation["opening_eligibility"] == "ENTRY_ELIGIBLE"
     assert result.strategy_evaluation["direction"] == "BUY"
 
 
