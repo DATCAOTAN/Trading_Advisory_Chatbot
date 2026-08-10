@@ -28,7 +28,9 @@ from src.services.trading.proposal.editable_trade_draft import (
 from src.ui import tab_chatbot
 
 
-def _semantic(*, parameters=None, timeframe="", unresolved=(), direction="BUY"):
+def _semantic(
+    *, parameters=None, timeframe="", unresolved=(), direction="BUY", requested_mode=""
+):
     indicator = {"indicator_id": "RSI"}
     if parameters is not None:
         indicator["parameters"] = parameters
@@ -50,7 +52,7 @@ def _semantic(*, parameters=None, timeframe="", unresolved=(), direction="BUY"):
                 {"subject": "RSI", "operator": "GREATER_THAN", "value": 10}
             ],
             "context_references": [],
-            "requested_mode": "",
+            "requested_mode": requested_mode,
             "account_scope": "DEMO",
             "explicit_fields": [
                 "action",
@@ -58,6 +60,7 @@ def _semantic(*, parameters=None, timeframe="", unresolved=(), direction="BUY"):
                 "symbols[0]",
                 "indicators[0].indicator_id",
                 "conditions[0]",
+                *(("requested_mode",) if requested_mode else ()),
             ],
             "unresolved_fields": list(unresolved),
             "negated": False,
@@ -104,6 +107,40 @@ def test_partial_indicator_children_preserve_known_strategy_siblings(
     assert request.requested_mode == "human_confirmed_live"
     assert completion.executable is False
     assert completion.execution_allowed is False
+
+
+def test_parent_unresolved_container_is_removed_when_concrete_children_exist():
+    state, request, completion = _artifacts(
+        _semantic(
+            unresolved=(
+                "indicators[0].parameters",
+                "indicators[0].parameters.period",
+                "indicators[0].timeframe",
+            )
+        )
+    )
+
+    assert completion is not None
+    assert completion.unresolved_fields == (
+        "indicators[0].parameters.period",
+        "indicators[0].timeframe",
+    )
+    completed, completed_state = apply_strategy_completion(
+        request,
+        state,
+        SemanticCompletionPatch(
+            tuple(
+                SemanticFieldUpdate(
+                    item.field_path,
+                    item.value,
+                    "USER_CONFIRMED_SUGGESTION",
+                )
+                for item in completion.suggestions
+            )
+        ),
+    )
+    assert completed.strategy.semantic_unresolved_fields == ()
+    assert completed_state.semantic.unresolved_fields == ()
 
 
 def test_complete_strategy_skips_completion_state_and_is_valid():
@@ -167,6 +204,81 @@ def test_accepting_both_suggestions_completes_without_reparsing_or_authority():
     assert updated.to_public_dict()["execution_authority"] is False
     assert updated.to_public_dict()["executable"] is False
     assert updated_state.semantic.unresolved_fields == ()
+
+
+def test_autonomous_completion_transitions_to_standing_mandate_review():
+    state, request, completion = _artifacts(
+        _semantic(requested_mode="autonomous_live")
+    )
+    patch = SemanticCompletionPatch(
+        tuple(
+            SemanticFieldUpdate(
+                item.field_path,
+                item.value,
+                "USER_CONFIRMED_SUGGESTION",
+            )
+            for item in completion.suggestions
+        )
+    )
+
+    updated, _updated_state = apply_strategy_completion(request, state, patch)
+
+    assert updated.requested_mode == "autonomous_live"
+    assert updated.response_format == "STANDING_MANDATE_CARD"
+    assert updated.allowed_next_action == "REVIEW_STANDING_MANDATE"
+    public = updated.to_public_dict()
+    assert public["execution_authority"] is public["executable"] is False
+
+
+def test_completed_autonomous_strategy_routes_to_mandate_controls_not_human_draft(
+    monkeypatch,
+):
+    state, request, completion = _artifacts(
+        _semantic(requested_mode="autonomous_live")
+    )
+    completed, _completed_state = apply_strategy_completion(
+        request,
+        state,
+        SemanticCompletionPatch(
+            tuple(
+                SemanticFieldUpdate(
+                    item.field_path,
+                    item.value,
+                    "USER_CONFIRMED_SUGGESTION",
+                )
+                for item in completion.suggestions
+            )
+        ),
+    )
+    completed = replace(
+        completed,
+        account_scope="UNKNOWN",
+        blockers=("DEMO_ACCOUNT_SCOPE_REQUIRED",),
+        allowed_next_action="BLOCKED",
+        response_format="STRATEGY_COMPLETION_REQUIRED_CARD",
+    )
+    rendered = []
+    monkeypatch.setattr(
+        tab_chatbot.st,
+        "session_state",
+        {"current_session_id": "completion-family"},
+    )
+    monkeypatch.setattr(
+        tab_chatbot,
+        "_render_editable_trade_draft",
+        lambda *_args, **_kwargs: pytest.fail("Autonomous mode must not render a human draft"),
+    )
+    monkeypatch.setattr(
+        tab_chatbot,
+        "_render_autonomous_decision_review_card",
+        lambda *_args, **kwargs: rendered.append(kwargs),
+    )
+
+    tab_chatbot._render_conversational_trading_authorization(None, completed)
+
+    assert len(rendered) == 1
+    assert rendered[0]["requested_mode"] == "autonomous_live"
+    assert rendered[0]["strategy"] == completed.strategy
 
 
 def test_manual_edit_overrides_suggestion_and_keeps_explicit_provenance():

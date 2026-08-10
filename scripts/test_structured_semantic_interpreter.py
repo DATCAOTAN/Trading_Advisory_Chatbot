@@ -252,6 +252,11 @@ def test_prompt_separates_direct_trade_instructions_from_advisory_questions():
     assert "direct instruction to open, buy, sell" in prompt
     assert "action OPEN_POSITION" in prompt
     assert "question asking whether the user should buy or sell remains ANALYSIS" in prompt
+    assert "trade autonomously or continue trading without per-trade confirmation" in prompt
+    assert "requested_mode to autonomous_live" in prompt
+    assert "requested_mode to human_confirmed_live" in prompt
+    assert "requested_mode to advisory_only" in prompt
+    assert "grants no execution authority" in prompt
 
 
 def test_missing_direction_is_valid_incomplete_semantics_not_structural_failure():

@@ -469,7 +469,7 @@ def project_resolved_semantic_strategy(
             for name in definition.parameters
             if name not in values
         )
-    unresolved = tuple(dict.fromkeys(unresolved))
+    unresolved = _leaf_unresolved_fields(unresolved)
     field_sources_payload = semantic_context.get("field_sources") or {}
     if not isinstance(field_sources_payload, Mapping):
         return None
@@ -745,6 +745,28 @@ def build_reasoning_evidence(
     failed_rules = [rule for rule, passed in zip(strategy.entry_rules, rule_results) if not passed]
     if failed_rules:
         reasons.append(ReasonEvidence("STRUCTURE_CONFIRMATION_MISSING", "WARN", "One or more configured entry rules are not confirmed.", len(failed_rules), 0, feature="entry_rules"))
+    if strategy.requested_mode == "autonomous_live" and strategy.entry_rules:
+        level_rules = tuple(
+            rule
+            for rule in strategy.entry_rules
+            if rule.operator in {"GREATER_THAN", "LESS_THAN", "BETWEEN"}
+        )
+        if len(level_rules) == len(strategy.entry_rules):
+            if not all(rule_results):
+                reasons.append(ReasonEvidence(
+                    "ENTRY_CONDITION_ARMED", "ERROR",
+                    "The autonomous entry condition is false and armed for its next transition.",
+                    False, True, feature="entry_rules",
+                ))
+            elif all(
+                _evaluate_level_rule_previous(rule, indicator_values)
+                for rule in level_rules
+            ):
+                reasons.append(ReasonEvidence(
+                    "ENTRY_CONDITION_WAITING_FOR_REARM", "ERROR",
+                    "The autonomous level condition remains true and must become false before another entry.",
+                    True, False, feature="entry_rules",
+                ))
     directions = [item.get("direction") for item in per_tf_features.values() if item.get("direction") in {"UP", "DOWN"}]
     alignment_score = abs(directions.count("UP") - directions.count("DOWN")) / max(1, len(per_tf_features))
     conflict = bool("UP" in directions and "DOWN" in directions)
@@ -938,6 +960,44 @@ def _evaluate_rule(rule: StrategyRule, values: Mapping[str, Mapping[str, Any]]) 
     if rule.operator == "FALLING":
         return previous is not None and current < previous
     return False
+
+
+def _evaluate_level_rule_previous(
+    rule: StrategyRule,
+    values: Mapping[str, Mapping[str, Any]],
+) -> bool:
+    left = values.get(rule.left, {})
+    previous = left.get("previous")
+    if previous is None:
+        return False
+    if rule.right:
+        right_previous = values.get(rule.right, {}).get("previous")
+        if right_previous is None:
+            return False
+        return (
+            previous > right_previous
+            if rule.operator == "GREATER_THAN"
+            else previous < right_previous
+        )
+    if rule.operator == "GREATER_THAN":
+        return previous > rule.constants[0]
+    if rule.operator == "LESS_THAN":
+        return previous < rule.constants[0]
+    if rule.operator == "BETWEEN":
+        return rule.constants[0] <= previous <= rule.constants[1]
+    return False
+
+
+def _leaf_unresolved_fields(fields: Sequence[str]) -> tuple[str, ...]:
+    unique = tuple(dict.fromkeys(str(field) for field in fields if str(field).strip()))
+    return tuple(
+        field
+        for field in unique
+        if not any(
+            other != field and other.startswith(field + ".")
+            for other in unique
+        )
+    )
 
 
 def _regime(

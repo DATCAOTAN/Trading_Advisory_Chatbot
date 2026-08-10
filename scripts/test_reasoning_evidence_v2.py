@@ -4,6 +4,7 @@ import json
 from dataclasses import replace
 
 import pytest
+import src.services.trading.reasoning.strategy_evidence as strategy_evidence_module
 
 from scripts.evaluate_reasoning_v2_replay import evaluate_replays
 from scripts.evaluate_reasoning_v2_replay import ReplayScenario, _bundle
@@ -204,6 +205,94 @@ def test_all_bounded_rule_operators_are_deterministic():
         StrategyRule("FALLING", "right"),
     )
     assert [_evaluate_rule(rule, values) for rule in rules] == [True, True, True, True, True, True, False]
+
+
+@pytest.mark.parametrize(
+    ("previous", "current", "expected_blocker"),
+    (
+        (5.0, 11.0, ""),
+        (11.0, 12.0, "ENTRY_CONDITION_WAITING_FOR_REARM"),
+        (11.0, 5.0, "ENTRY_CONDITION_ARMED"),
+    ),
+)
+def test_autonomous_level_condition_requires_false_to_true_rearm(
+    monkeypatch, previous, current, expected_blocker
+):
+    strategy = replace(
+        _request("Use RSI 14 on H1 and buy when RSI is above 10."),
+        requested_mode="autonomous_live",
+    )
+    strategy = replace(strategy, identity=strategy_identity(strategy))
+    plan = plan_strategy_data(strategy)
+    bundle, quality = _bundle(
+        ReplayScenario("autonomous_rearm", bars=180), plan.candle_counts()
+    )
+    monkeypatch.setattr(
+        strategy_evidence_module,
+        "_compute_indicator",
+        lambda _spec, _bars: {"previous": previous, "current": current},
+    )
+
+    evidence = build_reasoning_evidence(strategy, bundle, quality, plan)
+
+    if expected_blocker:
+        assert expected_blocker in evidence.setup.hard_blockers
+    else:
+        assert not any(
+            item.startswith("ENTRY_CONDITION_")
+            for item in evidence.setup.hard_blockers
+        )
+
+
+def test_human_mode_does_not_use_autonomous_rearm_gate(monkeypatch):
+    strategy = _request("Use RSI 14 on H1 and buy when RSI is above 10.")
+    plan = plan_strategy_data(strategy)
+    bundle, quality = _bundle(
+        ReplayScenario("human_level_condition", bars=180), plan.candle_counts()
+    )
+    monkeypatch.setattr(
+        strategy_evidence_module,
+        "_compute_indicator",
+        lambda _spec, _bars: {"previous": 11.0, "current": 12.0},
+    )
+
+    evidence = build_reasoning_evidence(strategy, bundle, quality, plan)
+
+    assert not any(
+        item.startswith("ENTRY_CONDITION_")
+        for item in evidence.setup.hard_blockers
+    )
+
+
+def test_autonomous_level_condition_rearm_sequence_is_restart_safe(monkeypatch):
+    strategy = replace(
+        _request("Use RSI 14 on H1 and buy when RSI is above 10."),
+        requested_mode="autonomous_live",
+    )
+    strategy = replace(strategy, identity=strategy_identity(strategy))
+    plan = plan_strategy_data(strategy)
+    bundle, quality = _bundle(
+        ReplayScenario("autonomous_rearm_sequence", bars=180),
+        plan.candle_counts(),
+    )
+
+    def blockers(previous, current):
+        monkeypatch.setattr(
+            strategy_evidence_module,
+            "_compute_indicator",
+            lambda _spec, _bars: {"previous": previous, "current": current},
+        )
+        return build_reasoning_evidence(
+            strategy, bundle, quality, plan
+        ).setup.hard_blockers
+
+    assert "ENTRY_CONDITION_ARMED" in blockers(5.0, 5.0)
+    assert not any(code.startswith("ENTRY_CONDITION_") for code in blockers(5.0, 11.0))
+    assert "ENTRY_CONDITION_WAITING_FOR_REARM" in blockers(11.0, 12.0)
+    assert "ENTRY_CONDITION_WAITING_FOR_REARM" in blockers(11.0, 12.0)
+    assert "ENTRY_CONDITION_ARMED" in blockers(11.0, 5.0)
+    assert not any(code.startswith("ENTRY_CONDITION_") for code in blockers(5.0, 11.0))
+    assert "ENTRY_CONDITION_WAITING_FOR_REARM" in blockers(11.0, 12.0)
 
 
 def test_replay_evaluation_covers_required_states_and_is_compact():

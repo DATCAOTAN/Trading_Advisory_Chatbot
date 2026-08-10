@@ -197,7 +197,7 @@ class AutonomousTradingCoordinator:
         try:
             inputs = self.input_assembler.build(symbol=symbol, timeframes=timeframes)
         except OperatorCandidateInputError as exc:
-            no_action = exc.blockers == ("STRUCTURED_PROPOSAL_NOT_AVAILABLE",)
+            no_action = bool(exc.blockers) and exc.blockers[0] == "STRUCTURED_PROPOSAL_NOT_AVAILABLE"
             return self._result(
                 "NO_ACTION" if no_action else "BLOCKED",
                 symbol,

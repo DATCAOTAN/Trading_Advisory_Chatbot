@@ -82,6 +82,7 @@ def market_result(**changes):
         symbol=changes.pop("feature_symbol", Config.MARKET_DEFAULT_SYMBOL),
         broker_symbol=broker_symbol,
         source_snapshot_ids=changes.pop("source_snapshot_ids", ["snapshot-safe-ref"]),
+        blockers=changes.pop("feature_blockers", []),
     )
     bundle = SimpleNamespace(
         bundle_id="market-bundle-fixture",
@@ -119,6 +120,25 @@ def test_explicit_generation_calls_assembler_and_orchestrator_once(tmp_path):
     outcome = value.generate({}, "request-1")
     assert outcome.status == "GENERATED"
     assert assembler.calls == orchestrator.calls == 1
+
+
+@pytest.mark.parametrize(
+    "blocker",
+    ("ENTRY_CONDITION_ARMED", "ENTRY_CONDITION_WAITING_FOR_REARM"),
+)
+def test_autonomous_entry_condition_blocks_before_proposal_provider(blocker):
+    with pytest.raises(OperatorCandidateInputError) as exc_info:
+        _validate_market_sources(
+            market_result(feature_blockers=[blocker]),
+            symbol=Config.MARKET_DEFAULT_SYMBOL,
+            now=NOW,
+            max_age_seconds=300,
+        )
+
+    assert exc_info.value.blockers == (
+        "STRUCTURED_PROPOSAL_NOT_AVAILABLE",
+        blocker,
+    )
 
 
 def test_typed_result_is_stored_through_existing_owner(tmp_path):

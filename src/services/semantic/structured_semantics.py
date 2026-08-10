@@ -500,7 +500,7 @@ def _normalize_declared_missing_indicator_children(payload: dict[str, Any]) -> d
             normalized["parameters"] = normalized_parameters
         timeframe_path = f"indicators[{index}].timeframe"
         if normalized.get("timeframe") is None and timeframe_path in unresolved_paths:
-            normalized.pop("timeframe")
+            normalized.pop("timeframe", None)
             changed = True
         normalized_indicators.append(normalized)
     return {**payload, "indicators": normalized_indicators} if changed else payload

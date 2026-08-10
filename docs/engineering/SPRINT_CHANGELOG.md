@@ -2101,3 +2101,32 @@ Commit: this commit
 - Provider calls, controlled-submit, runtime `order_send`, broker mutations, reconciliation mutations, and MT5 writes remained zero during closure.
 
 ---
+
+### Post-release fix - Autonomous and Strategy Completion Alignment
+
+Date: 2026-08-10
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Corrected generic structured autonomous-mode guidance without raw-text keyword routing or execution authority.
+- Projected only concrete unresolved strategy leaves and preserved typed completion provenance without a second provider call.
+- Kept human mode trade-centric and routed autonomous completion to the existing Standing Mandate controls.
+- Added a generic completed-bar false-to-true re-arm gate using existing prior/current evidence; no new state store or execution boundary was added.
+
+#### Verification
+
+- Focused semantic/completion/autonomous/UI group: 175 passed.
+- Canonical product acceptance: 67 passed, including all 60 canonical cases.
+- Full regression: 3,632 passed and 156 subtests passed with 3 unchanged warnings.
+- One browser/provider call, zero retries: `autonomous_live`, leaf-only completion, no completion error, and non-executable Standing Mandate setup rendered.
+- Compileall, app restart without rebuild, container/Streamlit health, diff, and static safety checks passed.
+
+#### Current state / limitations
+
+- Authoritative demo-account binding remains required and fail-closed; the browser did not grant a mandate or create a Candidate.
+- Candidate, confirmation, mandate activation, pre-submit, controlled-submit, management write, runtime `order_send`, broker mutation, and MT5 write counts remained zero.
+- Historical `v2.0.0-software-complete` remains unchanged; a patch tag is recommended only after explicit release authorization.
+
+---

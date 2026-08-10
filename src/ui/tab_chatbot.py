@@ -808,8 +808,13 @@ def _render_conversational_trading_authorization(
     if completion is not None:
         _render_strategy_completion_form(request, semantic_state, completion)
         return
+    mandate_setup_with_account_binding_pending = (
+        request.requested_mode == "autonomous_live"
+        and set(request.blockers) == {"DEMO_ACCOUNT_SCOPE_REQUIRED"}
+    )
     if (
         request.trade_action in {"OPEN_POSITION", "GENERIC_TRADE"}
+        and request.requested_mode == "human_confirmed_live"
         and st.session_state.get("current_session_id")
         and request.strategy is not None
     ):
@@ -819,6 +824,7 @@ def _render_conversational_trading_authorization(
     heading = (
         "#### Strategy Completion Required"
         if request.response_format == "STRATEGY_COMPLETION_REQUIRED_CARD"
+        and not mandate_setup_with_account_binding_pending
         else "#### MT5 Trading Authorization"
     )
     st.markdown(heading)
@@ -850,8 +856,12 @@ def _render_conversational_trading_authorization(
             )
     if request.blockers:
         st.warning("Completion blockers: " + ", ".join(request.blockers))
-        st.info("Provide the missing strategy fields in the next message. This specification remains NON_EXECUTABLE.")
-        return
+        if not mandate_setup_with_account_binding_pending:
+            st.info("Provide the missing strategy fields in the next message. This specification remains NON_EXECUTABLE.")
+            return
+        st.info(
+            "Standing Mandate setup remains NON_EXECUTABLE until authoritative demo-account binding succeeds."
+        )
     if request.requested_mode == "advisory_only":
         st.info(
             "Advisory-only request: analysis is available, but Confirm, mandate, "

@@ -17,6 +17,9 @@ from src.services.trading.decision.autonomous_candidate_monitor import (
 from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionRunResult,
 )
+from src.services.trading.decision.operator_candidate_generation import (
+    OperatorCandidateInputError,
+)
 from src.services.trading.decision.autonomous_trading_coordinator import (
     AutonomousTradingCoordinator,
 )
@@ -126,6 +129,32 @@ def test_unknown_or_conflicting_lifecycle_blocks_before_orchestrator(tmp_path):
     result = coordinator.run_once(symbol="XAUUSD", timeframes=("M15", "H1", "H4"))
 
     assert result.blocker == "COORDINATOR_RUNTIME_STATE_UNSAFE"
+    assert orchestrator.calls == 0
+
+
+def test_rearm_reason_is_terminal_no_action_before_orchestrator(tmp_path):
+    state = _prepared(tmp_path / "candidate", "fresh_market", confirm=False)
+    candidate = replace(state["candidate"], operating_mode="autonomous_live")
+    authority = _authority(tmp_path / "authority", "autonomous_live")
+    coordinator, orchestrator = _coordinator(tmp_path, candidate, authority)
+
+    class RearmAssembler:
+        def build(self, **_kwargs):
+            raise OperatorCandidateInputError(
+                "STRUCTURED_PROPOSAL_NOT_AVAILABLE",
+                "ENTRY_CONDITION_WAITING_FOR_REARM",
+            )
+
+    coordinator.input_assembler = RearmAssembler()
+    result = coordinator.run_once(
+        symbol="XAUUSD", timeframes=("M15", "H1", "H4")
+    )
+
+    assert result.status == result.intent == "NO_ACTION"
+    assert result.blocker == (
+        "STRUCTURED_PROPOSAL_NOT_AVAILABLE,"
+        "ENTRY_CONDITION_WAITING_FOR_REARM"
+    )
     assert orchestrator.calls == 0
 
 

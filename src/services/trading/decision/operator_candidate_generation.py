@@ -652,6 +652,15 @@ def _validate_market_sources(
         raise OperatorCandidateInputError("MARKET_SNAPSHOT_MISSING")
     if not _fresh(getattr(feature, "created_at", ""), now, max_age_seconds):
         raise OperatorCandidateInputError("MARKET_SNAPSHOT_STALE")
+    entry_blockers = tuple(
+        str(blocker)
+        for blocker in getattr(feature, "blockers", ())
+        if str(blocker).startswith("ENTRY_CONDITION_")
+    )
+    if entry_blockers:
+        raise OperatorCandidateInputError(
+            "STRUCTURED_PROPOSAL_NOT_AVAILABLE", *entry_blockers
+        )
 
 
 def _validate_structured_inputs(
