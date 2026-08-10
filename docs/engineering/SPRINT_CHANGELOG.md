@@ -2075,3 +2075,29 @@ Commit: this commit
 - Next: `READY_FOR_FINAL_RELEASE_CLOSURE`.
 
 ---
+
+### Sprint 11 - Final Release Closure
+
+Date: 2026-08-10
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Closed the software release from the completed Sprint 1-10 implementation without changing production, tests, dependencies, configuration, or broker behavior.
+- Recorded one authoritative release closure in the existing handoff and selected the new annotated tag `v2.0.0-software-complete` without moving earlier release tags.
+
+#### Verification
+
+- Retained Sprint 10 evidence: 60/60 canonical cases, 150 focused tests, 3,621 full-regression tests, and 156 subtests passed.
+- Documentation integrity, compileall, diff, and release static-safety checks passed.
+- Runtime host/container semantic hashes matched; Pydantic 2.13.4 loaded from the mounted `/app` semantic boundary; app, Streamlit, terminal bridge, and read-only Dashboard smoke were healthy.
+- Static invariants remained one production `order_send` call-site and zero `MetaTrader5` imports under `src/`.
+
+#### Current state / limitations
+
+- Software implementation and the locked target architecture are complete; real-money approval remains excluded.
+- Positive broker mutation acceptance was not performed and is not claimed. Demo-state-dependent positive lifecycle checks remain operational acceptance, not a software release blocker.
+- Provider calls, controlled-submit, runtime `order_send`, broker mutations, reconciliation mutations, and MT5 writes remained zero during closure.
+
+---
