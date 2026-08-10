@@ -723,7 +723,11 @@ def _render_trading_runtime_controls(
                         except Exception as exc:
                             st.warning(f"Mandate grant blocked: {str(exc)}")
 
-        mandate_ids = tuple(item["mandate_id"] for item in status["mandates"])
+        mandate_ids = tuple(
+            item["mandate_id"]
+            for item in status["mandates"]
+            if not item["revoked"]
+        )
         command_columns = st.columns(2)
         with command_columns[0]:
             revoke_id = st.selectbox(
@@ -757,7 +761,7 @@ def _render_trading_runtime_controls(
             start, stop = st.columns(2)
             if start.button(
                 "Start Supervisor",
-                disabled=process_status["running"],
+                disabled=process_status["running"] or monitor_mandate is None,
                 key=f"{key_prefix}start_supervisor",
             ):
                 process_status = process.start(

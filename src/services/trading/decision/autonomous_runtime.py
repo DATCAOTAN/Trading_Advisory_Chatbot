@@ -19,6 +19,8 @@ class AutonomousMonitorProcess:
     def start(
         self, *, symbol: str, timeframes: tuple[str, ...], mandate_id: str = ""
     ) -> dict[str, Any]:
+        if not str(mandate_id).strip():
+            raise ValueError("SUPERVISOR_MANDATE_REQUIRED")
         with self._lock:
             if self._running():
                 return self.status()
@@ -29,8 +31,7 @@ class AutonomousMonitorProcess:
                 "--timeframes", ",".join(timeframes),
                 "--watch",
             ]
-            if mandate_id:
-                command.extend(("--mandate-id", mandate_id))
+            command.extend(("--mandate-id", mandate_id))
             self._process = subprocess.Popen(
                 command,
                 cwd=self.project_root,

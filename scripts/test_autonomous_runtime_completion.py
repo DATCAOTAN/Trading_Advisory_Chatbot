@@ -219,6 +219,18 @@ def test_monitor_process_starts_once_and_stops(monkeypatch, tmp_path):
     assert controller.stop()["running"] is False
 
 
+def test_monitor_process_requires_mandate_before_start(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "subprocess.Popen",
+        lambda *_args, **_kwargs: pytest.fail("supervisor process must not start"),
+    )
+
+    with pytest.raises(ValueError, match="SUPERVISOR_MANDATE_REQUIRED"):
+        AutonomousMonitorProcess(tmp_path).start(
+            symbol="XAUUSD", timeframes=("M1",), mandate_id=""
+        )
+
+
 def test_dashboard_controls_delegate_without_broker_mutation():
     source = Path("src/ui/tab_dashboard.py").read_text(encoding="utf-8")
     assert "Trading Authority and Runtime Supervisor" in source
@@ -226,6 +238,7 @@ def test_dashboard_controls_delegate_without_broker_mutation():
     assert "Revoke Mandate" in source
     assert "Start Supervisor" in source
     assert "Stop Supervisor" in source
+    assert 'disabled=process_status["running"] or monitor_mandate is None' in source
     assert ".order_send(" not in source
     assert "controlled-submit" not in source
 
