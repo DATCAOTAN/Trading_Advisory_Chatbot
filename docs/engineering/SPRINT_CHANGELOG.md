@@ -2272,3 +2272,30 @@ Commit: this commit
 - Verdict: `REALTIME_AUTONOMOUS_STRUCTURED_PROPOSAL_INCOMPLETE` pending an explicit fresh bounded DEMO mandate.
 
 ---
+
+### Post-release fix - Deterministic Autonomous Strategy Authority
+
+Date: 2026-08-10
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Bypassed provider proposal authority only for complete explicit deterministic autonomous strategies after deterministic entry eligibility.
+- Reused the existing Draft calculator for Entry, SL, TP, risk, and volume, and preserved authoritative DEMO account evidence through the MT5 market account projection.
+- Retained provider-owned `NO_PROPOSAL` for advisory/open-ended flows and all downstream safety boundaries.
+
+#### Verification
+
+- Focused calculator/account tests: 78 passed; autonomous/mandate/EDGE neighbors: 200 passed.
+- Canonical acceptance: 67 passed, including all 60 canonical cases.
+- Full regression: 3,691 passed and 156 subtests passed with 3 unchanged warnings.
+- One natural XAUUSDm M1 bar created one integrity-valid, non-executable deterministic Candidate with provider invocations 0.
+
+#### Current state / limitations
+
+- The post-Candidate policy boundary remained blocked by account-reference validation and the engaged execution kill switch; no execution authority was widened.
+- Controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero.
+- Verdict: `DETERMINISTIC_AUTONOMOUS_STRATEGY_AUTHORITY_COMPLETE`.
+
+---

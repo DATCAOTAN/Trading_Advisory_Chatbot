@@ -48,8 +48,10 @@ from src.services.trading.reasoning.strategy_evidence import (
 )
 from src.services.trading.scoring import SignalScoringEngine
 from src.services.trading.proposal.editable_trade_draft import (
+    build_deterministic_strategy_draft,
     EditableTradeDraft,
     EditableTradeDraftStore,
+    market_evidence_from_live_result,
     TradeDraftError,
 )
 
@@ -134,6 +136,8 @@ class AuthoritativeAutonomousInputAssembler:
         now: datetime | None = None,
         operator_proposal: ManualOperatorProposalInput | None = None,
         strategy: ConversationalStrategyRequest | None = None,
+        strategy_direction: str = "",
+        strategy_action: str = "",
     ) -> AutonomousDecisionInputs:
         market_evaluated_at = _utc(now)
         symbol = str(symbol or Config.MARKET_DEFAULT_SYMBOL).strip().upper()
@@ -210,7 +214,14 @@ class AuthoritativeAutonomousInputAssembler:
             method = self.method_selector.select(
                 context,
                 mode=self.mode,
-                use_llm=False if operator_proposal is not None else None,
+                use_llm=(
+                    False
+                    if operator_proposal is not None
+                    or _is_deterministic_autonomous_strategy(
+                        strategy, strategy_direction, strategy_action, self.mode
+                    )
+                    else None
+                ),
             )
             score = self.scoring_engine.score(
                 feature, calendar, regime, context, method, mode=self.mode
@@ -268,6 +279,18 @@ class AuthoritativeAutonomousInputAssembler:
                 inputs,
             )
 
+        if _is_deterministic_autonomous_strategy(
+            strategy, strategy_direction, strategy_action, self.mode
+        ):
+            assert strategy is not None
+            return self._deterministic_strategy_inputs(
+                strategy=strategy,
+                strategy_direction=strategy_direction,
+                strategy_action=strategy_action,
+                feature_result=feature_result,
+                inputs=inputs,
+            )
+
         proposal_result = self.proposal_provider.produce(
             AutonomousOrderProposalRequest(
                 feature_result=feature_result,
@@ -313,6 +336,72 @@ class AuthoritativeAutonomousInputAssembler:
             reasoning_evidence_summary=evidence_summary,
         )
 
+    def _deterministic_strategy_inputs(
+        self,
+        *,
+        strategy: ConversationalStrategyRequest,
+        strategy_direction: str,
+        strategy_action: str,
+        feature_result: Any,
+        inputs: AutonomousDecisionInputs,
+    ) -> AutonomousDecisionInputs:
+        try:
+            account = self.live_service.provider.get_account()
+        except Exception as exc:
+            raise OperatorCandidateInputError("ACCOUNT_CONTEXT_UNAVAILABLE") from exc
+        if (
+            not getattr(account, "redacted", False)
+            or not getattr(account, "account_id_hash", "")
+            or account.account_id_hash != feature_result.bundle.account_id_hash
+        ):
+            raise OperatorCandidateInputError("ACCOUNT_CONTEXT_MISMATCH")
+        if str(getattr(account, "account_environment", "UNKNOWN")).upper() != "DEMO":
+            raise OperatorCandidateInputError("DEMO_ACCOUNT_SCOPE_REQUIRED")
+        evidence = market_evidence_from_live_result(
+            feature_result,
+            account,
+            primary_timeframe=strategy.timeframes[0],
+            account_environment=getattr(account, "account_environment", "UNKNOWN"),
+        )
+        try:
+            draft = build_deterministic_strategy_draft(
+                strategy,
+                direction=strategy_direction,
+                action=strategy_action,
+                broker_symbol=feature_result.feature_snapshot.broker_symbol,
+                evidence=evidence,
+            )
+        except TradeDraftError as exc:
+            raise OperatorCandidateInputError(str(exc)) from exc
+        if draft.blockers:
+            raise OperatorCandidateInputError(*draft.blockers)
+        entry = dict(draft.entry.value or {})
+        stop = dict(draft.stop.value or {})
+        target = dict(draft.target.value or {})
+        sizing = dict(draft.sizing.value or {})
+        values = (
+            entry.get("reference_price"),
+            stop.get("price"),
+            target.get("price"),
+            sizing.get("proposed_volume"),
+        )
+        if any(value is None for value in values):
+            raise OperatorCandidateInputError("DETERMINISTIC_PROPOSAL_INCOMPLETE")
+        return _manual_inputs(
+            ManualOperatorProposalInput(
+                order_type=str(strategy_direction).upper(),
+                stop_loss=_canonical_manual_decimal(values[1]),
+                take_profit=_canonical_manual_decimal(values[2]),
+                proposed_volume=_canonical_manual_decimal(values[3]),
+                proposal_source=EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE,
+                proposal_source_reference=(
+                    f"{draft.draft_id}:{draft.revision}:{draft.market_evidence_reference}"
+                ),
+            ),
+            feature_result,
+            inputs,
+        )
+
 
 def _reasoning_evidence_summary(feature_result: Any) -> str:
     evidence = getattr(feature_result.feature_snapshot, "reasoning_evidence_v2", None)
@@ -331,6 +420,23 @@ def _reasoning_evidence_summary(feature_result: Any) -> str:
         "history": [item.as_dict() for item in evidence.history],
     }
     return json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+def _is_deterministic_autonomous_strategy(
+    strategy: ConversationalStrategyRequest | None,
+    direction: str,
+    action: str,
+    mode: str,
+) -> bool:
+    return bool(
+        strategy is not None
+        and mode == AUTONOMOUS_RUNTIME_MODE
+        and strategy.requested_mode == AUTONOMOUS_RUNTIME_MODE
+        and not strategy.semantic_unresolved_fields
+        and strategy.entry_rules
+        and str(direction).upper() in {"BUY", "SELL"}
+        and str(action).upper() == "OPEN_POSITION"
+    )
 
 
 def strategy_monitor_projection(

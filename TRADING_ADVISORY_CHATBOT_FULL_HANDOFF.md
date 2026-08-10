@@ -2934,3 +2934,15 @@ The existing review controls and protected confirmation journal now form the exp
 - The bounded live provider observation was not run after restart because the only persisted Standing Trading Mandate expired at `2026-08-10T10:19:26.140980+00:00`. The protected store, mode, and mandate integrity remained valid, but `load_supervisor_strategy` correctly returned `SUPERVISOR_MANDATE_INACTIVE`.
 - Controlled-submit, controlled-management writes, runtime `order_send`, MT5 writes, and broker mutations remained zero. Execution and management kill switches remained engaged.
 - Verification level: `FULL_REGRESSION_PASS`. Implementation is complete; runtime acceptance remains blocked until the operator explicitly grants a fresh bounded DEMO mandate. Verdict: `REALTIME_AUTONOMOUS_STRUCTURED_PROPOSAL_INCOMPLETE`.
+
+# 95. DETERMINISTIC AUTONOMOUS STRATEGY AUTHORITY
+
+- A complete explicit autonomous strategy no longer asks the structured-reasoning provider to decide whether an already-satisfied deterministic rule may produce a Candidate. Advisory and open-ended requests retain provider-owned `VALID_NO_PROPOSAL` behavior.
+- The existing editable-trade Draft calculator now supplies deterministic Entry, SL, TP, risk, and broker-normalized volume from current market, account, and symbol evidence without persisting an intermediate Draft or adding another proposal architecture.
+- The MT5 bridge account projection now preserves its authoritative `account_environment`; deterministic strategy assembly requires that value to be exactly `DEMO` and still verifies the redacted account hash against the market bundle before calculation.
+- Existing false-condition, EDGE trigger, active-opening, lifecycle, reconciliation, mandate, risk, broker-constraint, idempotency, and execution-firewall checks remain authoritative. Candidates remain non-executable and contain no execution permission.
+- Focused calculator/account tests passed with `78 passed`; autonomous/mandate/EDGE neighbors passed with `200 passed`; canonical acceptance passed with `67 passed`, including all 60 canonical cases.
+- Final full regression passed with `3,691 passed`, `156 subtests passed`, and three unchanged warnings. Compileall, diff, documentation, static safety, app health, and Streamlit `200 ok` checks passed.
+- One natural completed XAUUSDm M1 bar produced `LEVEL`, `CONDITION_TRUE`, `ENTRY_ELIGIBLE`, one deterministic proposal, and one integrity-valid persisted `OPEN_POSITION` Candidate with provider invocations `0`. The later policy boundary remained blocked by account-reference validation and the engaged execution kill switch.
+- Controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero. Exactly one production `.order_send(` call-site remains and `src/` retains zero `MetaTrader5` imports.
+- Verification level: `FULL_REGRESSION_PASS`. Verdict: `DETERMINISTIC_AUTONOMOUS_STRATEGY_AUTHORITY_COMPLETE`.

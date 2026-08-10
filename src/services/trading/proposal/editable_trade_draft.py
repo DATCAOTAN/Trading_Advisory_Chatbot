@@ -468,6 +468,56 @@ class EditableTradeDraftService:
         return _calculate_draft(base, values, evidence, self.policy, set())
 
 
+def build_deterministic_strategy_draft(
+    strategy: Any,
+    *,
+    direction: str,
+    action: str,
+    broker_symbol: str,
+    evidence: TradeDraftMarketEvidence,
+    policy: TradeDraftPolicy | None = None,
+) -> EditableTradeDraft:
+    """Calculate one non-persistent proposal from an authoritative typed strategy."""
+    request = _DeterministicStrategyDraftRequest(
+        request_id=str(strategy.request_id),
+        requested_mode=str(strategy.requested_mode),
+        confirmation_policy=str(strategy.confirmation_policy),
+        canonical_symbol=str(strategy.canonical_symbol),
+        broker_symbol=str(broker_symbol),
+        timeframe_profile=tuple(strategy.timeframes),
+        strategy_description=str(strategy.strategy_description),
+        account_scope=str(strategy.account_scope),
+        trade_action=str(action).upper(),
+        trade_direction=str(direction).upper(),
+        trade_instruction_text=str(strategy.strategy_description),
+        strategy=strategy,
+    )
+    blockers = semantic_prerequisite_blockers(request)
+    if blockers:
+        raise TradeDraftError("STRATEGY_COMPLETION_REQUIRED")
+    conversation_id = f"{strategy.identity.strategy_id}:{evidence.reference}"
+    return EditableTradeDraftService(policy=policy)._build(
+        request, conversation_id, evidence, None
+    )
+
+
+@dataclass(frozen=True)
+class _DeterministicStrategyDraftRequest:
+    request_id: str
+    requested_mode: str
+    confirmation_policy: str
+    canonical_symbol: str
+    broker_symbol: str
+    timeframe_profile: tuple[str, ...]
+    strategy_description: str
+    account_scope: str
+    trade_action: str
+    trade_direction: str
+    trade_instruction_text: str
+    strategy: Any
+    blockers: tuple[str, ...] = ()
+
+
 def extract_trade_fields(text: str) -> dict[str, Any]:
     normalized = _normalized(text)
     result: dict[str, Any] = {}

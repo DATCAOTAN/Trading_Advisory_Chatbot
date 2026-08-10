@@ -126,6 +126,9 @@ class MT5BridgeMarketDataProvider:
                 margin=_safe_float(data.get("margin")),
                 free_margin=_safe_float(data.get("free_margin")),
                 leverage=_safe_int(data.get("leverage")),
+                account_environment=str(
+                    data.get("account_environment") or "UNKNOWN"
+                ).upper(),
                 provider_name=self.provider_name,
                 redacted=True,
             )

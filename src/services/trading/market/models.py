@@ -104,6 +104,7 @@ class AccountSnapshot:
     margin: float | None = None
     free_margin: float | None = None
     leverage: int | None = None
+    account_environment: str = "UNKNOWN"
     provider_name: str = "mt5_bridge"
     redacted: bool = True
 
@@ -121,4 +122,3 @@ class ProviderHealth:
 
     def as_dict(self) -> Dict[str, Any]:
         return dict(self.__dict__)
-

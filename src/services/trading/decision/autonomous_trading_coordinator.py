@@ -223,6 +223,8 @@ class AutonomousTradingCoordinator:
                 symbol=symbol,
                 timeframes=timeframes,
                 strategy=self.strategy,
+                strategy_direction=self.strategy_direction,
+                strategy_action=self.strategy_action,
             )
         except OperatorCandidateInputError as exc:
             no_action = bool(exc.blockers) and (

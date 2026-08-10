@@ -213,6 +213,7 @@ class MT5BridgeMarketDataBoundaryTests(unittest.TestCase):
                     "margin": 0,
                     "free_margin": 1001,
                     "leverage": 100,
+                    "account_environment": "DEMO",
                     "redacted": True,
                 }
             if path == "/positions":
@@ -240,6 +241,7 @@ class MT5BridgeMarketDataBoundaryTests(unittest.TestCase):
 
         self.assertIsInstance(account, AccountSnapshot)
         self.assertEqual(account.account_id_hash, "abc123hash")
+        self.assertEqual(account.account_environment, "DEMO")
         self.assertTrue(account.redacted)
         self.assertEqual(positions[0].position_id_hash, "poshash")
         self.assertTrue(positions[0].redacted)

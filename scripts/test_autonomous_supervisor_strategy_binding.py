@@ -285,7 +285,13 @@ def test_coordinator_passes_exact_strategy_and_projects_level_condition(tmp_path
         account_scope="scope",
     )
 
-    assert calls == [{"symbol": "XAUUSD", "timeframes": ("M1",), "strategy": strategy}]
+    assert calls == [{
+        "symbol": "XAUUSD",
+        "timeframes": ("M1",),
+        "strategy": strategy,
+        "strategy_direction": "BUY",
+        "strategy_action": "OPEN_POSITION",
+    }]
     assert result.status == "NO_ACTION"
     assert result.strategy_evaluation["trigger_mode"] == "LEVEL"
     assert result.strategy_evaluation["rearm_state"] == "CONDITION_TRUE"
