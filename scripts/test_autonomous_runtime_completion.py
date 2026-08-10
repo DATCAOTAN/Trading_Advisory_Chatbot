@@ -222,7 +222,7 @@ def test_monitor_process_starts_once_and_stops(monkeypatch, tmp_path):
 def test_dashboard_controls_delegate_without_broker_mutation():
     source = Path("src/ui/tab_dashboard.py").read_text(encoding="utf-8")
     assert "Trading Authority and Runtime Supervisor" in source
-    assert "Grant Standing Mandate" in source
+    assert "Confirm Standing Mandate" in source
     assert "Revoke Mandate" in source
     assert "Start Supervisor" in source
     assert "Stop Supervisor" in source

@@ -887,6 +887,7 @@ def _render_conversational_trading_authorization(
         show_manual_proposal=False,
         key_prefix=f"chat_trade_{request.request_id}_",
         strategy=request.strategy,
+        order_family="MARKET" if request.trade_action == "OPEN_POSITION" else "",
     )
 
 

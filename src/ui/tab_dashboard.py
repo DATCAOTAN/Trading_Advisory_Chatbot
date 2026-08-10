@@ -85,7 +85,6 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.adapter import (
     MT5LiveAdapterDisabled,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.authority_runtime import (
-    MandateGrantCommand,
     TradingAuthorityOperatorService,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.approval_pre_submit import (
@@ -304,6 +303,7 @@ def _render_autonomous_decision_review_card(
     show_manual_proposal=True,
     key_prefix="",
     strategy=None,
+    order_family="",
 ):
     monitor_row = _latest_monitor_row(selected_symbol, selected_timeframes)
     active_mode, runtime_blockers = _render_trading_runtime_controls(
@@ -313,6 +313,8 @@ def _render_autonomous_decision_review_card(
         requested_mode=requested_mode,
         mode_idempotency_key=generation_request_id,
         key_prefix=key_prefix,
+        strategy=strategy,
+        order_family=order_family,
     )
     mode_ui = _mode_ui_capabilities(requested_mode or active_mode)
     actions = st.columns(2)
@@ -466,6 +468,8 @@ def _render_trading_runtime_controls(
     requested_mode=None,
     mode_idempotency_key=None,
     key_prefix="",
+    strategy=None,
+    order_family="",
 ) -> tuple[str, tuple[str, ...]]:
     with st.expander("Trading Authority and Runtime Supervisor", expanded=True):
         st.caption(
@@ -585,106 +589,139 @@ def _render_trading_runtime_controls(
         if not mode_ui["mandate_controls"]:
             return status["mode"], runtime_blockers
 
-        with st.form(f"{key_prefix}standing_mandate_form"):
-            st.markdown("**Standing Trading Mandate**")
-            mandate_id = st.text_input("Mandate ID", key=f"{key_prefix}mandate_id")
-            mandate_version = st.number_input(
-                "Mandate version", min_value=1, step=1, key=f"{key_prefix}mandate_version"
+        if strategy is None:
+            st.info("Complete an autonomous strategy before reviewing a Standing Mandate.")
+        else:
+            duration_minutes = st.selectbox(
+                "Mandate duration",
+                (30, 60, 240),
+                index=1,
+                format_func=lambda value: {
+                    30: "30 minutes",
+                    60: "1 hour",
+                    240: "4 hours",
+                }[value],
+                key=f"{key_prefix}mandate_duration_minutes",
             )
-            symbols = tuple(
-                st.multiselect(
-                    "Canonical symbols",
-                    ("XAUUSD", "BTCUSD"),
-                    key=f"{key_prefix}mandate_symbols",
+            try:
+                setup = service.build_mandate_setup(
+                    strategy,
+                    order_family=order_family,
+                    duration_minutes=int(duration_minutes),
                 )
-            )
-            broker_symbols = tuple(
-                st.multiselect(
-                    "Broker symbols",
-                    ("XAUUSDm", "BTCUSDm"),
-                    key=f"{key_prefix}mandate_broker_symbols",
+            except Exception as exc:
+                setup = None
+                st.warning(f"Standing Mandate setup unavailable: {str(exc)}")
+
+            if setup is not None:
+                st.markdown("#### Autonomous Strategy & Mandate Setup")
+                st.caption(
+                    f"Strategy: {setup.strategy_description} | "
+                    f"id={setup.strategy_id} | version={setup.strategy_version}"
                 )
-            )
-            order_families = tuple(
-                st.multiselect(
-                    "Order families",
-                    ("MARKET", "PENDING"),
-                    key=f"{key_prefix}mandate_order_families",
+                facts = st.columns(4)
+                facts[0].metric("Mode", setup.operating_mode)
+                facts[1].metric("Environment", setup.account_environment)
+                facts[2].metric("Canonical symbol", setup.canonical_symbol)
+                facts[3].metric("Broker symbol", setup.broker_symbol)
+                st.caption(
+                    f"account_binding={setup.account_binding_status} | "
+                    f"order_family={','.join(setup.permitted_order_families)} | "
+                    f"mandate={setup.mandate_id}:v{setup.mandate_version}"
                 )
-            )
-            management_actions = tuple(
-                st.multiselect(
-                    "Management actions",
-                    (
-                        "OBSERVE",
-                        "NO_ACTION",
-                        "CANCEL_PENDING_ORDER",
-                        "MODIFY_POSITION_PROTECTION",
-                        "PARTIAL_CLOSE",
-                        "CLOSE_POSITION",
-                    ),
-                    key=f"{key_prefix}mandate_management_actions",
+                st.caption(
+                    f"Broker volume range: min {setup.volume_min} | "
+                    f"max {setup.volume_max} | step {setup.volume_step}"
                 )
-            )
-            limit_columns = st.columns(5)
-            maximum_volume = limit_columns[0].text_input(
-                "Max volume", key=f"{key_prefix}mandate_max_volume"
-            )
-            maximum_risk = limit_columns[1].text_input(
-                "Max risk/trade", key=f"{key_prefix}mandate_max_risk"
-            )
-            maximum_positions = limit_columns[2].number_input(
-                "Max positions", min_value=1, step=1, key=f"{key_prefix}mandate_max_positions"
-            )
-            maximum_trades = limit_columns[3].number_input(
-                "Max trades/day", min_value=1, step=1, key=f"{key_prefix}mandate_max_trades"
-            )
-            maximum_loss = limit_columns[4].text_input(
-                "Max loss/day", key=f"{key_prefix}mandate_max_loss"
-            )
-            active_from = st.text_input(
-                "Active from (UTC ISO-8601)", key=f"{key_prefix}mandate_active_from"
-            )
-            active_until = st.text_input(
-                "Active until (UTC ISO-8601)", key=f"{key_prefix}mandate_active_until"
-            )
-            expires_at = st.text_input(
-                "Expires at (UTC ISO-8601)", key=f"{key_prefix}mandate_expires_at"
-            )
-            mandate_kill_switch = st.checkbox(
-                "Mandate kill switch engaged",
-                value=True,
-                key=f"{key_prefix}mandate_kill_switch",
-            )
-            grant_mandate = st.checkbox(
-                "I explicitly grant this bounded demo-account mandate",
-                key=f"{key_prefix}grant_mandate",
-            )
-            if st.form_submit_button("Grant Standing Mandate"):
-                try:
-                    service.grant_mandate(
-                        MandateGrantCommand(
-                            mandate_id=mandate_id,
-                            mandate_version=int(mandate_version),
-                            permitted_symbols=symbols,
-                            permitted_broker_symbols=broker_symbols,
-                            permitted_order_families=order_families,
-                            permitted_management_actions=management_actions,
-                            maximum_volume=maximum_volume,
-                            maximum_risk_per_trade=maximum_risk,
-                            maximum_concurrent_positions=int(maximum_positions),
-                            maximum_trades_per_day=int(maximum_trades),
-                            maximum_loss_per_day=maximum_loss,
-                            active_from=active_from,
-                            active_until=active_until,
-                            expires_at=expires_at,
-                            kill_switch_engaged=mandate_kill_switch,
-                        ),
-                        operator_grant=grant_mandate,
+                st.caption(
+                    f"Start: {setup.active_from} | Until: {setup.active_until} | "
+                    f"Expires: {setup.expires_at}"
+                )
+                st.caption(
+                    "Prefill sources: "
+                    + ", ".join(
+                        f"{field}={source}" for field, source in setup.field_sources
                     )
-                    st.success("Standing mandate stored with protected integrity.")
-                except Exception as exc:
-                    st.warning(f"Mandate grant blocked: {str(exc)}")
+                )
+
+                with st.form(f"{key_prefix}standing_mandate_form"):
+                    st.markdown("**Review / Edit bounded limits**")
+                    management_actions = tuple(
+                        st.multiselect(
+                            "Management actions",
+                            (
+                                "OBSERVE",
+                                "NO_ACTION",
+                                "CANCEL_PENDING_ORDER",
+                                "MODIFY_POSITION_PROTECTION",
+                                "PARTIAL_CLOSE",
+                                "CLOSE_POSITION",
+                            ),
+                            default=setup.suggested_management_actions,
+                            key=f"{key_prefix}mandate_management_actions",
+                        )
+                    )
+                    limit_columns = st.columns(5)
+                    maximum_volume = limit_columns[0].text_input(
+                        "Max volume (broker units)",
+                        placeholder="REQUIRES_USER_CONFIRMATION",
+                        key=f"{key_prefix}mandate_max_volume",
+                    )
+                    maximum_risk = limit_columns[1].text_input(
+                        "Max risk / trade (account currency)",
+                        placeholder="REQUIRES_USER_CONFIRMATION",
+                        key=f"{key_prefix}mandate_max_risk",
+                    )
+                    maximum_positions = limit_columns[2].number_input(
+                        "Max positions",
+                        min_value=1,
+                        step=1,
+                        value=None,
+                        placeholder="Required",
+                        key=f"{key_prefix}mandate_max_positions",
+                    )
+                    maximum_trades = limit_columns[3].number_input(
+                        "Max trades / day",
+                        min_value=1,
+                        step=1,
+                        value=None,
+                        placeholder="Required",
+                        key=f"{key_prefix}mandate_max_trades",
+                    )
+                    maximum_loss = limit_columns[4].text_input(
+                        "Max loss / day (account currency)",
+                        placeholder="REQUIRES_USER_CONFIRMATION",
+                        key=f"{key_prefix}mandate_max_loss",
+                    )
+                    mandate_kill_switch = st.checkbox(
+                        "Mandate kill switch engaged",
+                        value=True,
+                        key=f"{key_prefix}mandate_kill_switch",
+                    )
+                    grant_mandate = st.checkbox(
+                        "I explicitly confirm this bounded demo-account Standing Mandate",
+                        key=f"{key_prefix}grant_mandate",
+                    )
+                    if st.form_submit_button("Confirm Standing Mandate"):
+                        try:
+                            command = service.command_from_mandate_setup(
+                                setup,
+                                maximum_volume=maximum_volume,
+                                maximum_risk_per_trade=maximum_risk,
+                                maximum_concurrent_positions=maximum_positions,
+                                maximum_trades_per_day=maximum_trades,
+                                maximum_loss_per_day=maximum_loss,
+                                permitted_management_actions=management_actions,
+                                kill_switch_engaged=mandate_kill_switch,
+                            )
+                            service.grant_mandate(
+                                command, operator_grant=grant_mandate
+                            )
+                            st.success(
+                                "Standing mandate stored with protected integrity."
+                            )
+                        except Exception as exc:
+                            st.warning(f"Mandate grant blocked: {str(exc)}")
 
         mandate_ids = tuple(item["mandate_id"] for item in status["mandates"])
         command_columns = st.columns(2)

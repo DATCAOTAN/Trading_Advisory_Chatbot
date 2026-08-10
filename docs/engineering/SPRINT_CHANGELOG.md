@@ -2130,3 +2130,30 @@ Commit: this commit
 - Historical `v2.0.0-software-complete` remains unchanged; a patch tag is recommended only after explicit release authorization.
 
 ---
+
+### Post-release UX - Autonomous Mandate Prefill and Review
+
+Date: 2026-08-10
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Reused the existing strategy, protected account, bridge metadata, mode authority, mandate store, validator, and grant command to build one non-authoritative setup projection.
+- Replaced backend-centric symbol, version, and raw timestamp entry with read-only facts and bounded duration presets.
+- Added editable broker-constrained volume and bounded management controls; monetary risk/loss remain unresolved when no configured policy exists.
+- Preserved explicit operator grant, engaged kill switch, human per-trade confirmation, and all execution boundaries.
+
+#### Verification
+
+- Focused and neighboring mandate/strategy/UI group: 123 passed.
+- Canonical product acceptance: 67 passed, including all 60 canonical cases.
+- Full regression: 3,640 passed and 156 subtests passed with 3 unchanged warnings.
+- App restart without rebuild, healthy container, Streamlit `200 ok`, and browser-visible prefill acceptance passed.
+
+#### Current state / limitations
+
+- Browser acceptance left confirmation unchecked and supervisor stopped; no mandate, Candidate, submission, or broker mutation was created.
+- Maximum volume, positions, trades/day, monetary risk, and monetary daily loss require explicit operator values because no deterministic product policy defines those limits.
+
+---

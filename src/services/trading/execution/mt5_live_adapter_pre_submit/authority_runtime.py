@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import secrets
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from src.config import Config
@@ -26,6 +29,8 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.trading_authorit
     TradingAuthorityService,
     TradingAuthorityStore,
 )
+from src.services.trading.market.mt5_bridge_provider import MT5BridgeMarketDataProvider
+from src.services.trading.market.timeframes import broker_symbol_for
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,30 @@ class MandateGrantCommand:
     kill_switch_engaged: bool
 
 
+@dataclass(frozen=True)
+class MandateSetupProjection:
+    mandate_id: str
+    mandate_version: int
+    strategy_id: str
+    strategy_version: str
+    strategy_description: str
+    operating_mode: str
+    account_environment: str
+    account_binding_status: str
+    canonical_symbol: str
+    broker_symbol: str
+    permitted_order_families: tuple[str, ...]
+    suggested_management_actions: tuple[str, ...]
+    volume_min: str
+    volume_max: str
+    volume_step: str
+    active_from: str
+    active_until: str
+    expires_at: str
+    unresolved_fields: tuple[str, ...]
+    field_sources: tuple[tuple[str, str], ...]
+
+
 class TradingAuthorityOperatorService:
     """Operator commands; protected stores and current account remain authoritative."""
 
@@ -57,11 +86,162 @@ class TradingAuthorityOperatorService:
         account_adapter: Any | None = None,
         lifecycle_supervisor: Any | None = None,
         pre_submit_store: Any | None = None,
+        market_provider: Any | None = None,
     ) -> None:
         self.authority = authority_service or TradingAuthorityService(TradingAuthorityStore())
         self.account_adapter = account_adapter or MT5LiveAdapterDisabled()
         self.lifecycle_supervisor = lifecycle_supervisor or MT5PositionLifecycleSupervisor()
         self.pre_submit_store = pre_submit_store or MT5PreSubmitJournalStore()
+        self.market_provider = market_provider or MT5BridgeMarketDataProvider()
+
+    def build_mandate_setup(
+        self,
+        strategy: Any,
+        *,
+        order_family: str,
+        duration_minutes: int = 60,
+        now: datetime | None = None,
+    ) -> MandateSetupProjection:
+        """Project authoritative facts into an editable, non-authoritative setup."""
+        if duration_minutes not in {30, 60, 240}:
+            raise ValueError("MANDATE_DURATION_PRESET_INVALID")
+        if (
+            strategy is None
+            or strategy.requested_mode != "autonomous_live"
+            or strategy.semantic_unresolved_fields
+            or not strategy.canonical_symbol
+            or not strategy.identity.strategy_id
+            or order_family not in {"MARKET", "PENDING"}
+        ):
+            raise ValueError("MANDATE_STRATEGY_NOT_READY")
+
+        generated_at = _utc(now)
+        account = self._demo_account()
+        account_capture = ProtectedAccountContextCapture.from_read_only_payload(
+            account, generated_at
+        )
+        mode = self.authority.store.latest_mode()
+        if (
+            mode is None
+            or mode.operating_mode != "autonomous_live"
+            or not mode.integrity_valid()
+        ):
+            raise ValueError("MANDATE_MODE_NOT_READY")
+        fingerprint_hash = hashlib.sha256(
+            account_capture.account_context_fingerprint.encode("utf-8")
+        ).hexdigest()
+        if not hmac.compare_digest(mode.account_fingerprint_hash, fingerprint_hash):
+            raise ValueError("MANDATE_ACCOUNT_MISMATCH")
+
+        canonical_symbol = str(strategy.canonical_symbol).upper()
+        broker_symbol = broker_symbol_for(canonical_symbol)
+        tick = self.market_provider.get_latest_tick(canonical_symbol)
+        volume_min = _positive_decimal_text(tick.volume_min, "BROKER_VOLUME_MIN_INVALID")
+        volume_max = _positive_decimal_text(tick.volume_max, "BROKER_VOLUME_MAX_INVALID")
+        volume_step = _positive_decimal_text(tick.volume_step, "BROKER_VOLUME_STEP_INVALID")
+        if Decimal(volume_min) > Decimal(volume_max):
+            raise ValueError("BROKER_VOLUME_RANGE_INVALID")
+
+        active_until = generated_at + timedelta(minutes=duration_minutes)
+        mandate_id = "mandate_" + hashlib.sha256(
+            f"{strategy.identity.strategy_id}|{canonical_symbol}|{broker_symbol}".encode(
+                "utf-8"
+            )
+        ).hexdigest()[:24]
+        previous = self.authority.store.latest_mandate(mandate_id)
+        mandate_version = 1 if previous is None else previous.mandate_version + 1
+        return MandateSetupProjection(
+            mandate_id=mandate_id,
+            mandate_version=mandate_version,
+            strategy_id=strategy.identity.strategy_id,
+            strategy_version=strategy.identity.strategy_version,
+            strategy_description=strategy.strategy_description,
+            operating_mode="autonomous_live",
+            account_environment=str(account["account_environment"]),
+            account_binding_status="DEMO_ACCOUNT_MATCHED",
+            canonical_symbol=canonical_symbol,
+            broker_symbol=broker_symbol,
+            permitted_order_families=(order_family,),
+            suggested_management_actions=("OBSERVE", "NO_ACTION"),
+            volume_min=volume_min,
+            volume_max=volume_max,
+            volume_step=volume_step,
+            active_from=generated_at.isoformat(),
+            active_until=active_until.isoformat(),
+            expires_at=active_until.isoformat(),
+            unresolved_fields=(
+                "maximum_volume",
+                "maximum_risk_per_trade",
+                "maximum_concurrent_positions",
+                "maximum_trades_per_day",
+                "maximum_loss_per_day",
+            ),
+            field_sources=(
+                ("canonical_symbol", "STRATEGY_DERIVED"),
+                ("broker_symbol", "BROKER_MAPPING"),
+                ("account_environment", "ACCOUNT_CONTEXT"),
+                ("operating_mode", "MODE_AUTHORITY"),
+                ("volume_constraints", "BROKER_METADATA"),
+                ("mandate_id", "SYSTEM_CALCULATED"),
+                ("mandate_version", "AUTHORITY_STORE"),
+                ("validity_window", "SYSTEM_CALCULATED"),
+                ("management_actions", "POLICY_SUGGESTION"),
+            ),
+        )
+
+    def command_from_mandate_setup(
+        self,
+        setup: MandateSetupProjection,
+        *,
+        maximum_volume: str,
+        maximum_risk_per_trade: str,
+        maximum_concurrent_positions: int | None,
+        maximum_trades_per_day: int | None,
+        maximum_loss_per_day: str,
+        permitted_management_actions: tuple[str, ...],
+        kill_switch_engaged: bool,
+    ) -> MandateGrantCommand:
+        volume = Decimal(_positive_decimal_text(maximum_volume, "MANDATE_MAXIMUM_VOLUME_INVALID"))
+        minimum = Decimal(setup.volume_min)
+        maximum = Decimal(setup.volume_max)
+        step = Decimal(setup.volume_step)
+        if volume < minimum or volume > maximum or (volume - minimum) % step != 0:
+            raise ValueError("MANDATE_MAXIMUM_VOLUME_OUTSIDE_BROKER_CONSTRAINTS")
+        risk = _positive_decimal_text(
+            maximum_risk_per_trade, "MANDATE_MAXIMUM_RISK_INVALID"
+        )
+        loss = _positive_decimal_text(
+            maximum_loss_per_day, "MANDATE_MAXIMUM_LOSS_INVALID"
+        )
+        if not maximum_concurrent_positions or not maximum_trades_per_day:
+            raise ValueError("MANDATE_COUNT_LIMIT_REQUIRED")
+        allowed_management = {
+            "OBSERVE",
+            "NO_ACTION",
+            "CANCEL_PENDING_ORDER",
+            "MODIFY_POSITION_PROTECTION",
+            "PARTIAL_CLOSE",
+            "CLOSE_POSITION",
+        }
+        if any(item not in allowed_management for item in permitted_management_actions):
+            raise ValueError("MANDATE_MANAGEMENT_ACTION_INVALID")
+        return MandateGrantCommand(
+            mandate_id=setup.mandate_id,
+            mandate_version=setup.mandate_version,
+            permitted_symbols=(setup.canonical_symbol,),
+            permitted_broker_symbols=(setup.broker_symbol,),
+            permitted_order_families=setup.permitted_order_families,
+            permitted_management_actions=permitted_management_actions,
+            maximum_volume=str(volume),
+            maximum_risk_per_trade=risk,
+            maximum_concurrent_positions=int(maximum_concurrent_positions),
+            maximum_trades_per_day=int(maximum_trades_per_day),
+            maximum_loss_per_day=loss,
+            active_from=setup.active_from,
+            active_until=setup.active_until,
+            expires_at=setup.expires_at,
+            kill_switch_engaged=bool(kill_switch_engaged),
+        )
 
     def status(self, *, refresh_runtime: bool = False) -> dict[str, Any]:
         account = self.account_adapter.capture_account_context()
@@ -186,9 +366,29 @@ class TradingAuthorityOperatorService:
 
     def close(self) -> None:
         self.account_adapter.close()
+        close_market_provider = getattr(self.market_provider, "close", None)
+        if close_market_provider is not None:
+            close_market_provider()
 
     def _demo_account(self) -> dict[str, Any]:
         account = self.account_adapter.capture_account_context()
         if account.get("account_environment") != "DEMO":
             raise RuntimeError("REAL_ACCOUNT_AUTHORITY_FORBIDDEN")
         return account
+
+
+def _positive_decimal_text(value: Any, error: str) -> str:
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(error) from exc
+    if not result.is_finite() or result <= 0:
+        raise ValueError(error)
+    return format(result.normalize(), "f")
+
+
+def _utc(value: datetime | None) -> datetime:
+    result = value or datetime.now(timezone.utc)
+    if result.tzinfo is None:
+        result = result.replace(tzinfo=timezone.utc)
+    return result.astimezone(timezone.utc)
