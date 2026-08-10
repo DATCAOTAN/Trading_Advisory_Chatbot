@@ -89,16 +89,16 @@ Verification: `FULL_REGRESSION_PASS`
 - Mixed advisory/current query remained advisory and failed closed at missing evidence.
 - Three partial direct-strategy calls exposed shared prompt-contract gaps: optional scalar shape, missing indicator child shape, and direct-trade versus advisory classification.
 - The three gaps were repaired at the single structured-provider prompt boundary; strict schema validation was not loosened.
-- The final direct-trade prompt repair was not called again because the Sprint quota of six calls was reached.
+- Final closure used one additional Groq call with zero retries and returned `VALID_PARTIAL`. The canonical result preserved `OPEN_POSITION`, `BUY`, `BTCUSD` / `BTCUSDm`, `RSI GREATER_THAN 10`, `human_confirmed_live`, and `CONFIRM_EVERY_TRADE` while leaving RSI period and semantic timeframe unresolved.
+- Host and container source hashes matched after an app restart without rebuild. Streamlit returned `200 ok` and rendered exactly one `Strategy Completion Required` workflow with no competing advisory answer, Draft, Candidate, confirmation, or submission control.
 - Browser/runtime mutation counts: Candidate 0, confirmation 0, pre-submit 0, controlled-submit 0, management write 0, runtime `order_send` 0, broker mutation 0, MT5 write 0.
 
 ## Not Verified
 
-- Final live-provider revalidation of the direct partial-strategy classification after the last prompt repair.
 - Positive broker position/history/management paths against real broker state; deterministic fixtures cover them.
 
 ## Verdict
 
-`60_CASE_PRODUCT_ACCEPTANCE_INCOMPLETE`
+`60_CASE_PRODUCT_ACCEPTANCE_COMPLETE`
 
-The deterministic product contract is 60/60 and the full regression passes. Final release closure remains blocked only by one bounded provider/browser revalidation on the final prompt code.
+The deterministic product contract is 60/60, the retained full regression passes, and the bounded final provider/browser verification is contract-correct. Sprint 10 has no remaining release-blocking product gap.

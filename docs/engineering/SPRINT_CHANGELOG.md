@@ -2065,12 +2065,13 @@ Commit: this commit
 - Canonical matrix: 60/60 contract-correct; final focused semantic/product group: 150 passed.
 - Full regression: 3,621 passed and 156 subtests passed with 3 unchanged warnings.
 - Provider/browser sample used 6 calls and zero retries; knowledge and mixed advisory/current results were contract-correct.
+- Final closure used one additional Groq call with zero retries and classified the natural direct request as `VALID_PARTIAL`; Streamlit rendered the non-executable Strategy Completion workflow with period and semantic timeframe unresolved.
 - Candidate, confirmation, pre-submit, controlled-submit, management write, runtime `order_send`, broker mutation, and MT5 write counts remained zero.
 
 #### Current state / next step
 
-- The final direct-strategy prompt repair was not live-provider revalidated after the six-call quota was reached.
-- Verdict: `60_CASE_PRODUCT_ACCEPTANCE_INCOMPLETE`.
-- Next: one bounded final-provider/browser direct partial-strategy revalidation; no new implementation or broad regression unless it reveals a defect.
+- Host/container source hashes matched after restart without rebuild; Streamlit health was `200 ok` and no competing advisory, Draft, Candidate, confirmation, or submission artifact appeared.
+- Verdict: `60_CASE_PRODUCT_ACCEPTANCE_COMPLETE`.
+- Next: `READY_FOR_FINAL_RELEASE_CLOSURE`.
 
 ---
