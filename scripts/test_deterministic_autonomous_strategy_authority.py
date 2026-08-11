@@ -10,6 +10,12 @@ from scripts.test_autonomous_supervisor_strategy_binding import _strategy
 from src.services.trading.decision.autonomous_proposal_provider import (
     AutonomousOrderProposalResult,
 )
+from src.services.trading.decision.autonomous_execution_policy import (
+    AutonomousExecutionPolicyConfig,
+    AutonomousExecutionPolicyGate,
+    AutonomousPolicyInputs,
+)
+from src.services.trading.decision.models import DecisionBlocker
 from src.services.trading.decision.operator_candidate_generation import (
     AuthoritativeAutonomousInputAssembler,
     OperatorCandidateInputError,
@@ -86,6 +92,99 @@ def test_explicit_deterministic_strategy_builds_candidate_inputs_without_llm_vet
     assert candidate.order_send_allowed is False
 
 
+@pytest.mark.parametrize("readiness_action", ("WAIT", "NO_TRADE"))
+def test_valid_deterministic_draft_preserves_open_eligibility_until_policy(
+    tmp_path, readiness_action
+):
+    assembler, provider, _method_selector = _assembler(
+        risk_action=readiness_action
+    )
+    inputs = assembler.build(
+        now=NOW,
+        symbol="XAUUSD",
+        strategy=_strategy(),
+        strategy_direction="BUY",
+        strategy_action="OPEN_POSITION",
+    )
+    orchestrator = service(tmp_path / "candidate")
+
+    first = orchestrator.run_once(inputs, now=NOW)
+    loaded = orchestrator.journal.load_candidate(first.candidate.candidate_reference)
+    duplicate = orchestrator.run_once(inputs, now=NOW)
+
+    assert provider.calls == 0
+    assert first.candidate.intent == "OPEN_POSITION"
+    assert first.candidate.deterministic_eligibility_result == "ELIGIBLE_CANDIDATE"
+    assert loaded is not None
+    assert (loaded.intent, loaded.deterministic_eligibility_result) == (
+        "OPEN_POSITION",
+        "ELIGIBLE_CANDIDATE",
+    )
+    assert duplicate.candidate.candidate_reference == first.candidate.candidate_reference
+    assert duplicate.journal_appended is False
+
+    policy = AutonomousExecutionPolicyGate(
+        config=AutonomousExecutionPolicyConfig(
+            enabled=True,
+            open_eligibility_enabled=True,
+            hard_block=False,
+            allowed_operating_modes=(first.candidate.operating_mode,),
+            journal_path=str(tmp_path / "policy.jsonl"),
+        )
+    ).run_once(
+        AutonomousPolicyInputs(
+            candidate=loaded,
+            risk_result=inputs.risk_result,
+            account_context_reference="b" * 64,
+            account_context_created_at=NOW.isoformat(),
+            account_context_matches=True,
+            semantic_proposal_complete=True,
+        ),
+        now=NOW,
+    )
+    assert policy.policy_result.decision == "BLOCK"
+    assert policy.policy_result.deterministic_reason_codes == (
+        "OPEN_POLICY_NOT_READY",
+    )
+
+
+def test_deterministic_hard_risk_blocker_is_preserved_before_policy(tmp_path):
+    assembler, _provider, _method_selector = _assembler(
+        risk_action="BLOCKED",
+        risk_blockers=(DecisionBlocker(code="RISK_LIMIT"),),
+    )
+    inputs = assembler.build(
+        now=NOW,
+        symbol="XAUUSD",
+        strategy=_strategy(),
+        strategy_direction="BUY",
+        strategy_action="OPEN_POSITION",
+    )
+    candidate = service(tmp_path).run_once(inputs, now=NOW).candidate
+
+    assert candidate.intent == "NO_ACTION"
+    assert candidate.deterministic_eligibility_result == "NOT_ELIGIBLE"
+    assert "RISK_RESULT_BLOCKED" in candidate.blocked_reason_codes
+
+
+def test_false_entry_condition_stops_before_deterministic_draft():
+    assembler, provider, _method_selector = _assembler(
+        feature_blockers=("ENTRY_CONDITION_FALSE",)
+    )
+
+    with pytest.raises(OperatorCandidateInputError) as exc_info:
+        assembler.build(
+            now=NOW,
+            symbol="XAUUSD",
+            strategy=_strategy(),
+            strategy_direction="BUY",
+            strategy_action="OPEN_POSITION",
+        )
+
+    assert exc_info.value.blockers == ("ENTRY_CONDITION_FALSE",)
+    assert provider.calls == 0
+
+
 def test_advisory_provider_no_proposal_remains_no_action_authority():
     assembler, provider, _method_selector = _assembler()
 
@@ -155,7 +254,14 @@ def test_unknown_runtime_account_environment_fails_closed():
     assert provider.calls == 0
 
 
-def _assembler(*, tick_change=None, account_environment="DEMO"):
+def _assembler(
+    *,
+    tick_change=None,
+    account_environment="DEMO",
+    risk_action="REVIEW_READY",
+    risk_blockers=(),
+    feature_blockers=(),
+):
     inputs = make_inputs()
     inputs.runtime_context.symbol = "XAUUSD"
     inputs.runtime_context.broker_symbol = "XAUUSDm"
@@ -164,6 +270,8 @@ def _assembler(*, tick_change=None, account_environment="DEMO"):
     inputs.score_report.broker_symbol = "XAUUSDm"
     inputs.risk_result.symbol = "XAUUSD"
     inputs.risk_result.broker_symbol = "XAUUSDm"
+    inputs.risk_result.action = risk_action
+    inputs.risk_result.blockers = list(risk_blockers)
     strategy = _strategy()
     tick_values = {
         "timestamp": NOW.isoformat(),
@@ -198,7 +306,7 @@ def _assembler(*, tick_change=None, account_environment="DEMO"):
         symbol="XAUUSD",
         broker_symbol="XAUUSDm",
         source_snapshot_ids=("snapshot-deterministic",),
-        blockers=(),
+        blockers=tuple(feature_blockers),
         timeframes=("M1",),
         reasoning_evidence_v2=evidence,
         indicator_snapshots={

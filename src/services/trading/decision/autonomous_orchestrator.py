@@ -35,6 +35,11 @@ AUTONOMOUS_LLM_PROPOSAL_SOURCE = "AUTONOMOUS_LLM"
 OFFLINE_FIXTURE_PROPOSAL_SOURCE = "OFFLINE_FIXTURE"
 MANUAL_OPERATOR_PROPOSAL_SOURCE = "MANUAL_OPERATOR"
 EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE = "EDITABLE_TRADE_DRAFT"
+DETERMINISTIC_DRAFT_NON_BLOCKING_READINESS_ACTIONS = {
+    "REVIEW_READY",
+    "WAIT",
+    "NO_TRADE",
+}
 OPERATOR_PROPOSAL_SOURCES = {
     MANUAL_OPERATOR_PROPOSAL_SOURCE,
     EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE,
@@ -1790,7 +1795,11 @@ def _classify(
             AutonomousDecisionEligibility.HUMAN_REVIEW_REQUIRED,
         )
     if requested in {"AUTO", AutonomousDecisionIntent.OPEN_POSITION.value}:
-        if risk_action == "REVIEW_READY":
+        deterministic_draft_ready = (
+            _proposal_source(inputs) == EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE
+            and risk_action in DETERMINISTIC_DRAFT_NON_BLOCKING_READINESS_ACTIONS
+        )
+        if risk_action == "REVIEW_READY" or deterministic_draft_ready:
             if not inputs.semantic_parameter_references or not inputs.direction:
                 return (
                     AutonomousDecisionIntent.REQUIRE_HUMAN_REVIEW,

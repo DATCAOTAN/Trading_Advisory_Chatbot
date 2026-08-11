@@ -2980,3 +2980,14 @@ The existing review controls and protected confirmation journal now form the exp
 - Controlled-submit, runtime `order_send`, MT5 writes, broker mutations, and provider calls remained zero. One production `.order_send(` call-site and zero `MetaTrader5` imports under `src/` remain.
 - Verification level: `FULL_REGRESSION_PASS`. Verdict: `AUTONOMOUS_MONITOR_EXECUTION_CONTRACT_COMPLETE`.
 - Verification level: `FULL_REGRESSION_PASS`. Verdict: `AUTONOMOUS_EXECUTION_PERMISSION_CONTRACT_COMPLETE`.
+
+# 99. DETERMINISTIC AUTONOMOUS CANDIDATE ELIGIBILITY
+
+- Root cause: Candidate classification reused advisory readiness as its intent authority. A valid deterministic `EDITABLE_TRADE_DRAFT` was therefore downgraded to `NO_ACTION / NOT_ELIGIBLE` when readiness returned `WAIT` or `NO_TRADE`, before the autonomous policy could report its own deterministic blocker.
+- A valid deterministic opening Draft now produces `OPEN_POSITION / ELIGIBLE_CANDIDATE`; strict persistence, reload, and completed-bar duplicate protection preserve that result.
+- Candidate classification and execution policy remain separate. `WAIT` or `NO_TRADE` still blocks later at policy with `OPEN_POLICY_NOT_READY`, while hard risk blockers remain `RISK_RESULT_BLOCKED`.
+- False conditions, advisory `NO_PROPOSAL`, active-entry protection, account binding, mandate authorization, execution permissions, and broker boundaries remain unchanged.
+- Focused and neighboring autonomous/policy tests passed with `137 passed`. Canonical acceptance passed with `67 passed`, including all 60 canonical cases.
+- Full regression passed with `3,717 passed`, `156 subtests passed`, and three unchanged warnings. Documentation integrity, compileall, diff, and static safety checks passed.
+- Controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero. Exactly one production `.order_send(` call-site remains and `src/` retains zero `MetaTrader5` imports.
+- Verification level: `FULL_REGRESSION_PASS`. Verdict: `DETERMINISTIC_AUTONOMOUS_CANDIDATE_ELIGIBILITY_COMPLETE`.

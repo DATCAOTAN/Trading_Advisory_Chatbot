@@ -2379,3 +2379,29 @@ Commit: this commit
 - Verdict: `AUTONOMOUS_MONITOR_EXECUTION_CONTRACT_COMPLETE`.
 
 ---
+
+### Post-release fix - Deterministic Autonomous Candidate Eligibility
+
+Date: 2026-08-11
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Preserved `OPEN_POSITION / ELIGIBLE_CANDIDATE` when an explicit deterministic strategy has already produced a valid `EDITABLE_TRADE_DRAFT`.
+- Kept policy authority independent: advisory readiness may still block execution with `OPEN_POLICY_NOT_READY`, and hard risk failures remain `RISK_RESULT_BLOCKED`.
+- Preserved false-condition, advisory no-proposal, active-entry, persistence, reload, and duplicate-bar behavior.
+
+#### Verification
+
+- Focused and neighboring autonomous/policy group: 137 passed.
+- Canonical acceptance: 67 passed, including all 60 canonical cases.
+- Full regression: 3,717 passed and 156 subtests passed with 3 unchanged warnings.
+- Documentation integrity, compileall, diff, and static safety checks passed.
+
+#### Safety
+
+- Controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero.
+- Verdict: `DETERMINISTIC_AUTONOMOUS_CANDIDATE_ELIGIBILITY_COMPLETE`.
+
+---
