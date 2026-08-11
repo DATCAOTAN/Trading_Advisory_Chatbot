@@ -2353,3 +2353,29 @@ Commit: this commit
 - Verdict: `AUTONOMOUS_EXECUTION_PERMISSION_CONTRACT_COMPLETE`.
 
 ---
+
+### Post-release fix - Autonomous Monitor Execution Permission Contract
+
+Date: 2026-08-11
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Replaced the monitor's acceptance-era enabled-flag prohibition with the shared permission projection.
+- Allowed coherent observation-only and execution-ready states while blocking mixed permission states before market acquisition.
+- Preserved downstream policy, mandate, account, pre-submit, adapter, bridge, idempotency, deduplication, and restart protections.
+
+#### Verification
+
+- Focused monitor/permission/coordinator group: 41 passed.
+- Autonomous/authority/lifecycle/bridge neighbors: 182 passed.
+- Canonical acceptance: 67 passed, including all 60 canonical cases.
+- Full regression: 3,713 passed and 156 subtests passed with 3 unchanged warnings.
+
+#### Safety
+
+- Provider calls, controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero.
+- Verdict: `AUTONOMOUS_MONITOR_EXECUTION_CONTRACT_COMPLETE`.
+
+---

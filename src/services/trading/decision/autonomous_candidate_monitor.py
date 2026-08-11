@@ -10,30 +10,12 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from src.config import Config
+from src.services.trading.execution.mt5_live_adapter_pre_submit.policy import (
+    MT5LiveAdapterPreSubmitConfig,
+    autonomous_monitor_permissions_coherent,
+)
 DEFAULT_MONITOR_JOURNAL_PATH = (
     "data/trading/execution_journal/autonomous_candidate_monitor.jsonl"
-)
-
-_FORBIDDEN_FLAGS = (
-    "TRADING_AUTONOMOUS_POLICY_GATE_ENABLED",
-    "TRADING_AUTONOMOUS_OPEN_ELIGIBILITY_ENABLED",
-    "TRADING_AUTONOMOUS_MANAGEMENT_ELIGIBILITY_ENABLED",
-    "TRADING_EXECUTION_LIVE_ENABLED",
-    "TRADING_EXECUTION_AUTONOMOUS_ENABLED",
-    "TRADING_MT5_LIVE_EXECUTION_ENABLED",
-    "TRADING_MT5_ORDER_SEND_ENABLED",
-    "TRADING_MT5_PRE_SUBMIT_ALLOW_LIVE_SUBMISSION",
-    "TRADING_MT5_PRE_SUBMIT_ALLOW_ORDER_SEND",
-    "TRADING_MT5_LIVE_ADAPTER_ENABLED",
-    "TRADING_MT5_CONTROLLED_EXECUTION_ENABLED",
-    "TRADING_MT5_PENDING_SUBMISSION_ENABLED",
-    "TRADING_MT5_PENDING_LIMIT_ENABLED",
-    "TRADING_MT5_PENDING_STOP_ENABLED",
-    "TRADING_MT5_PENDING_STOP_LIMIT_ENABLED",
-    "TRADING_MT5_CONTROLLED_MANAGEMENT_ENABLED",
-    "TRADING_MT5_MANAGEMENT_CANCEL_ALLOWED",
-    "TRADING_MT5_MANAGEMENT_PROTECTION_MODIFICATION_ALLOWED",
-    "TRADING_MT5_MANAGEMENT_POSITION_CLOSE_ALLOWED",
 )
 
 
@@ -331,11 +313,11 @@ class AutonomousCandidateMonitor:
                 "BLOCKED", normalized_symbol, timeframes=normalized_timeframes,
                 blocker="MONITOR_PROFILE_INVALID", account_scope=normalized_account_scope,
             )
-        enabled = [name for name in _FORBIDDEN_FLAGS if bool(getattr(Config, name, False))]
-        if enabled:
+        permission_config = MT5LiveAdapterPreSubmitConfig.from_config(Config)
+        if not autonomous_monitor_permissions_coherent(permission_config, Config):
             return AutonomousCandidateMonitorResult(
                 "BLOCKED", normalized_symbol, timeframes=normalized_timeframes,
-                blocker="MONITOR_EXECUTION_PERMISSION_ENABLED", account_scope=normalized_account_scope,
+                blocker="MONITOR_PERMISSION_STATE_INCOHERENT", account_scope=normalized_account_scope,
             )
         try:
             feature_result = self.feature_service.build_features(

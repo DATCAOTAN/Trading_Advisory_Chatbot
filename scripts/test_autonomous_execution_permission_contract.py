@@ -13,6 +13,7 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.adapter import (
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.policy import (
     MT5LiveAdapterPreSubmitConfig,
+    autonomous_monitor_permissions_coherent,
     execution_permission_state,
     mandate_permissions_execution_ready,
 )
@@ -63,6 +64,24 @@ def _enable_global_policy(monkeypatch) -> None:
     monkeypatch.setattr(Config, "TRADING_MT5_LIVE_EXECUTION_ENABLED", True)
     monkeypatch.setattr(Config, "TRADING_MT5_ORDER_SEND_ENABLED", True)
     monkeypatch.setattr(Config, "TRADING_AUTONOMOUS_POLICY_GATE_ENABLED", True)
+
+
+def _enable_execution_ready_config(monkeypatch) -> None:
+    _enable_global_policy(monkeypatch)
+    for name, value in {
+        "TRADING_AUTONOMOUS_OPEN_ELIGIBILITY_ENABLED": True,
+        "TRADING_AUTONOMOUS_POLICY_HARD_BLOCK": False,
+        "TRADING_EXECUTION_LIVE_ENABLED": True,
+        "TRADING_EXECUTION_AUTONOMOUS_ENABLED": True,
+        "TRADING_EXECUTION_KILL_SWITCH": False,
+        "TRADING_MT5_LIVE_ADAPTER_ENABLED": True,
+        "TRADING_MT5_LIVE_ADAPTER_HARD_BLOCK": False,
+        "TRADING_MT5_PRE_SUBMIT_ALLOW_LIVE_SUBMISSION": True,
+        "TRADING_MT5_PRE_SUBMIT_ALLOW_ORDER_SEND": True,
+        "TRADING_MT5_CONTROLLED_EXECUTION_ENABLED": True,
+        "TRADING_MT5_KILL_SWITCH_ENGAGED": False,
+    }.items():
+        monkeypatch.setattr(Config, name, value)
 
 
 def test_one_permission_snapshot_passes_pre_submit_and_adapter_admission(
@@ -148,4 +167,38 @@ def test_execution_ready_predicate_fails_closed_for_each_required_permission(
 
     assert not mandate_permissions_execution_ready(
         state, action="MARKET", order_type="BUY"
+    )
+
+
+def test_monitor_permission_contract_accepts_observation_and_execution_ready_states(
+    monkeypatch,
+):
+    assert autonomous_monitor_permissions_coherent(
+        MT5LiveAdapterPreSubmitConfig.from_config(Config), Config
+    )
+
+    _enable_execution_ready_config(monkeypatch)
+
+    assert autonomous_monitor_permissions_coherent(
+        MT5LiveAdapterPreSubmitConfig.from_config(Config), Config
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("TRADING_MT5_LIVE_ADAPTER_HARD_BLOCK", True),
+        ("TRADING_MT5_PRE_SUBMIT_ALLOW_ORDER_SEND", False),
+        ("TRADING_EXECUTION_LIVE_ENABLED", False),
+        ("TRADING_EXECUTION_KILL_SWITCH", True),
+    ],
+)
+def test_monitor_permission_contract_rejects_mixed_execution_states(
+    monkeypatch, field, value
+):
+    _enable_execution_ready_config(monkeypatch)
+    monkeypatch.setattr(Config, field, value)
+
+    assert not autonomous_monitor_permissions_coherent(
+        MT5LiveAdapterPreSubmitConfig.from_config(Config), Config
     )

@@ -2969,4 +2969,14 @@ The existing review controls and protected confirmation journal now form the exp
 - Bridge authentication, DEMO/account revalidation, mandate integrity, mode validation, idempotency, unknown-result handling, bridge permissions, bridge kill switch, and the isolated `order_send` boundary remain independently enforced.
 - Focused permission/pre-submit/adapter/authority/coordinator tests passed with `134 passed`. Canonical acceptance passed with `67 passed`, including all 60 canonical cases. Full regression passed with `3,707 passed`, `156 subtests passed`, and three unchanged warnings.
 - No runtime permission or kill switch was changed. Controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero; one production `.order_send(` call-site and zero `MetaTrader5` imports under `src/` remain.
+
+# 98. AUTONOMOUS MONITOR EXECUTION PERMISSION CONTRACT
+
+- Root cause: the completed-bar monitor retained an acceptance-era list that rejected every enabled execution flag. After the monitor became the scheduler for the production autonomous coordinator, that stale guard made the execution-ready path unsatisfiable and returned `MONITOR_EXECUTION_PERMISSION_ENABLED` before market acquisition.
+- The monitor now consumes the shared execution permission projection and accepts exactly two coherent states: fail-closed observation-only and fully execution-ready autonomous opening. Mixed states return `MONITOR_PERMISSION_STATE_INCOHERENT` before market acquisition.
+- Observation-only monitoring retains hard blocks and engaged kill switches. Execution-ready monitoring does not grant authority; policy, Standing Mandate, account binding, final validation, pre-submit, protected permission snapshot, adapter, bridge, and idempotency checks remain independent.
+- A deterministic production-path test now reaches completed-bar handling, Candidate creation, policy, mandate, pre-submit, and adapter admission under coherent execution-ready permissions without broker mutation. Existing completed-bar deduplication and restart no-replay behavior remain unchanged.
+- Focused monitor/permission/coordinator tests passed with `41 passed`; neighboring autonomous/authority/lifecycle/bridge tests passed with `182 passed`. Canonical acceptance passed with `67 passed`, including all 60 canonical cases. Full regression passed with `3,713 passed`, `156 subtests passed`, and three unchanged warnings.
+- Controlled-submit, runtime `order_send`, MT5 writes, broker mutations, and provider calls remained zero. One production `.order_send(` call-site and zero `MetaTrader5` imports under `src/` remain.
+- Verification level: `FULL_REGRESSION_PASS`. Verdict: `AUTONOMOUS_MONITOR_EXECUTION_CONTRACT_COMPLETE`.
 - Verification level: `FULL_REGRESSION_PASS`. Verdict: `AUTONOMOUS_EXECUTION_PERMISSION_CONTRACT_COMPLETE`.

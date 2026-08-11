@@ -11,6 +11,10 @@ from scripts.test_approval_final_validation_pre_submit import (
     _prepared,
 )
 from scripts.test_autonomous_candidate_monitor import FeatureService
+from scripts.test_autonomous_execution_permission_contract import (
+    _enable_execution_ready_config,
+    _ready_config,
+)
 from scripts.test_operator_review_confirmation_lifecycle import NOW
 from src.services.trading.decision.autonomous_candidate_monitor import (
     AutonomousCandidateMonitorJournal,
@@ -197,8 +201,11 @@ def test_one_coordinator_operation_is_active_at_a_time(tmp_path):
     assert orchestrator.calls == 0
 
 
-def test_pre_submit_ready_mandate_uses_existing_execution_adapter_once(tmp_path):
+def test_execution_ready_monitor_reaches_existing_adapter_admission_once(
+    tmp_path, monkeypatch
+):
     state = _prepared(tmp_path / "candidate", "fresh_market", confirm=False)
+    _enable_execution_ready_config(monkeypatch)
     candidate = replace(state["candidate"], operating_mode="autonomous_live")
     state["candidate_journal"] = _CandidateJournalView(
         state["candidate_journal"], candidate
@@ -209,7 +216,7 @@ def test_pre_submit_ready_mandate_uses_existing_execution_adapter_once(tmp_path)
         candidate_journal=state["candidate_journal"],
         confirmation_store=state["review_store"],
         pre_submit_store=state["pre_submit_store"],
-        config=MT5LiveAdapterPreSubmitConfig(kill_switch_engaged=False),
+        config=_ready_config(),
         authority_service=authority,
     )
     adapter = _ExecutionAdapter()

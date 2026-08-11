@@ -5,6 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.test_autonomous_execution_permission_contract import (
+    _enable_execution_ready_config,
+)
 from src.config import Config
 from src.services.trading.decision.autonomous_candidate_monitor import (
     AutonomousCandidateMonitor,
@@ -177,15 +180,33 @@ def test_stale_market_blocks_before_claim_and_generation(tmp_path):
     assert subject.journal.records() == []
 
 
-def test_execution_permission_blocks_before_market_or_generation(tmp_path, monkeypatch):
+def test_mixed_execution_permission_blocks_before_market_or_generation(
+    tmp_path, monkeypatch
+):
     feature, assembler = FeatureService(), Assembler()
     monkeypatch.setattr(Config, "TRADING_EXECUTION_LIVE_ENABLED", True)
     subject = monitor(tmp_path, feature=feature, assembler=assembler)
 
     result = _run(subject)
 
-    assert result.blocker == "MONITOR_EXECUTION_PERMISSION_ENABLED"
+    assert result.blocker == "MONITOR_PERMISSION_STATE_INCOHERENT"
     assert feature.calls == assembler.calls == 0
+
+
+def test_execution_ready_permissions_reach_completed_bar_and_candidate(
+    tmp_path, monkeypatch
+):
+    _enable_execution_ready_config(monkeypatch)
+    feature, assembler, orchestrator = FeatureService(), Assembler(), Orchestrator()
+    subject = monitor(
+        tmp_path, feature=feature, assembler=assembler, orchestrator=orchestrator
+    )
+
+    result = _run(subject)
+
+    assert result.status == "GENERATED"
+    assert result.candidate_reference == "candidate-1"
+    assert feature.calls == assembler.calls == orchestrator.calls == 1
 
 
 def test_corrupt_monitor_journal_fails_closed(tmp_path):

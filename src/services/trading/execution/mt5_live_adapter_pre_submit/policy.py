@@ -209,3 +209,69 @@ def mandate_permissions_execution_ready(
         and state.get("pending_submission_hard_block") is False
         and family_enabled
     )
+
+
+def autonomous_monitor_permissions_coherent(
+    config: MT5LiveAdapterPreSubmitConfig, global_config=None
+) -> bool:
+    """Allow observation-only or fully execution-ready autonomous monitoring."""
+    if global_config is None:
+        from src.config import Config
+
+        global_config = Config
+    state = execution_permission_state(config, global_config)
+    pending_disabled = (
+        state["pending_submission_enabled"] is False
+        and state["pending_submission_hard_block"] is True
+        and state["pending_limit_enabled"] is False
+        and state["pending_stop_enabled"] is False
+        and state["pending_stop_limit_enabled"] is False
+    )
+    pending_ready = (
+        state["pending_submission_enabled"] is True
+        and state["pending_submission_hard_block"] is False
+        and any(
+            state[name] is True
+            for name in (
+                "pending_limit_enabled",
+                "pending_stop_enabled",
+                "pending_stop_limit_enabled",
+            )
+        )
+    )
+    observation_only = (
+        state["live_adapter_hard_block"] is True
+        and state["kill_switch_engaged"] is True
+        and pending_disabled
+        and all(
+            state[name] is False
+            for name in (
+                "live_adapter_enabled",
+                "allow_live_submission",
+                "allow_order_send",
+                "controlled_execution_enabled",
+                "autonomous_execution_enabled",
+                "global_live_execution_enabled",
+                "global_order_send_enabled",
+                "autonomous_policy_gate_enabled",
+            )
+        )
+        and getattr(global_config, "TRADING_AUTONOMOUS_OPEN_ELIGIBILITY_ENABLED", False)
+        is False
+        and getattr(global_config, "TRADING_AUTONOMOUS_POLICY_HARD_BLOCK", True) is True
+        and getattr(global_config, "TRADING_EXECUTION_LIVE_ENABLED", False) is False
+        and getattr(global_config, "TRADING_EXECUTION_AUTONOMOUS_ENABLED", False)
+        is False
+        and getattr(global_config, "TRADING_EXECUTION_KILL_SWITCH", True) is True
+    )
+    execution_ready = (
+        mandate_permissions_execution_ready(state, action="MARKET", order_type="BUY")
+        and (pending_disabled or pending_ready)
+        and getattr(global_config, "TRADING_AUTONOMOUS_OPEN_ELIGIBILITY_ENABLED", False)
+        is True
+        and getattr(global_config, "TRADING_AUTONOMOUS_POLICY_HARD_BLOCK", True) is False
+        and getattr(global_config, "TRADING_EXECUTION_LIVE_ENABLED", False) is True
+        and getattr(global_config, "TRADING_EXECUTION_AUTONOMOUS_ENABLED", False) is True
+        and getattr(global_config, "TRADING_EXECUTION_KILL_SWITCH", True) is False
+    )
+    return observation_only or execution_ready
