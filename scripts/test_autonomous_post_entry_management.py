@@ -634,7 +634,7 @@ def _coordinator(
         account_context_provider=lambda: {
             "status": "OK",
             "account_context_fingerprint": ACCOUNT,
-            "account_id_hash": "redacted-account",
+            "account_id_hash": "c" * 64,
             "captured_at": NOW.isoformat(),
             "account_is_demo": True,
             "redacted": True,

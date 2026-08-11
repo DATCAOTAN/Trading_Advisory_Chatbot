@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from src.services.trading.decision.autonomous_candidate_monitor import (
 )
 from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionRunResult,
+    autonomous_account_context_reference,
 )
 from src.services.trading.decision.operator_candidate_generation import (
     OperatorCandidateInputError,
@@ -165,7 +167,7 @@ def test_missing_or_mismatched_account_authority_fails_closed(tmp_path):
         account_context={
             "status": "OK",
             "account_context_fingerprint": "b" * 64,
-            "account_id_hash": "account-b",
+            "account_id_hash": "b" * 64,
             "captured_at": NOW.isoformat(),
             "account_is_demo": True,
             "redacted": True,
@@ -269,6 +271,81 @@ def test_autonomous_policy_block_stops_before_mandate_authorization(tmp_path):
     assert context_calls == []
 
 
+def test_autonomous_policy_receives_current_fingerprint_and_matching_candidate_binding(
+    tmp_path,
+):
+    state = _prepared(tmp_path / "candidate", "fresh_market", confirm=False)
+    candidate = replace(state["candidate"], operating_mode="autonomous_live")
+    authority = _authority(tmp_path / "authority", "autonomous_live")
+    policy_gate = _RecordingPolicyGate()
+    coordinator, _ = _coordinator(
+        tmp_path, candidate, authority, policy_gate=policy_gate
+    )
+
+    result = coordinator.run_once(symbol="XAUUSD", timeframes=("M15", "H1", "H4"))
+
+    assert result.blocker == "LATER_POLICY_BLOCKER"
+    assert policy_gate.inputs.account_context_reference == hashlib.sha256(
+        ("a" * 64).encode("utf-8")
+    ).hexdigest()
+    assert policy_gate.inputs.account_context_matches is True
+    assert candidate.account_context_reference == autonomous_account_context_reference(
+        "c" * 64
+    )
+    reloaded = state["candidate_journal"].load_candidate(
+        candidate.candidate_reference
+    )
+    assert reloaded.account_context_reference == candidate.account_context_reference
+
+
+def test_tampered_candidate_account_binding_is_reported_to_policy(tmp_path):
+    state = _prepared(tmp_path / "candidate", "fresh_market", confirm=False)
+    candidate = replace(
+        state["candidate"],
+        operating_mode="autonomous_live",
+        account_context_reference="account_context_tampered",
+    )
+    authority = _authority(tmp_path / "authority", "autonomous_live")
+    policy_gate = _RecordingPolicyGate()
+    coordinator, _ = _coordinator(
+        tmp_path, candidate, authority, policy_gate=policy_gate
+    )
+
+    coordinator.run_once(symbol="XAUUSD", timeframes=("M15", "H1", "H4"))
+
+    assert policy_gate.inputs.account_context_matches is False
+
+
+def test_matching_account_binding_proceeds_to_mandate_kill_switch(tmp_path):
+    state = _prepared(tmp_path / "candidate", "fresh_market", confirm=False)
+    candidate = replace(state["candidate"], operating_mode="autonomous_live")
+    authority = _authority(tmp_path / "authority", "autonomous_live")
+    mandate = _mandate(authority)
+    coordinator, _ = _coordinator(
+        tmp_path,
+        candidate,
+        authority,
+        mandate_context_provider=lambda _candidate, _inputs: {
+            "mandate_id": mandate.mandate_id,
+            "evaluated_risk_per_trade": "0.5",
+            "concurrent_positions": 0,
+            "trades_today": 0,
+            "loss_today": "0",
+            "kill_switch_engaged": True,
+            "authorization_nonce": "coordinator-kill-switch-1",
+        },
+    )
+
+    result = coordinator.run_once(symbol="XAUUSD", timeframes=("M15", "H1", "H4"))
+
+    assert result.blocker == "KILL_SWITCH_ENGAGED"
+    assert result.authorization_source == "STANDING_MANDATE"
+    assert all(
+        row["event_type"] != "CANDIDATE_AUTHORIZED"
+        for row in authority.store.read_strict()
+    )
+
+
 class _ExecutionAdapter:
     def __init__(self):
         self.calls = 0
@@ -335,7 +412,7 @@ def _coordinator(
     account_context = account_context or {
         "status": "OK",
         "account_context_fingerprint": "a" * 64,
-        "account_id_hash": "account-a",
+        "account_id_hash": "c" * 64,
         "captured_at": NOW.isoformat(),
         "account_is_demo": True,
         "redacted": True,
@@ -408,6 +485,24 @@ class _EligiblePolicyGate:
                 decision="ELIGIBLE_FOR_CONTROLLED_BOUNDARY",
                 target_controlled_boundary="CONTROLLED_OPEN_POSITION",
                 deterministic_reason_codes=(),
+            ),
+            journal_warning="",
+        )
+
+
+class _RecordingPolicyGate:
+    def __init__(self):
+        self.inputs = None
+
+    def run_once(self, inputs, now=None):
+        self.inputs = inputs
+        return SimpleNamespace(
+            persistence_safe=True,
+            validation=SimpleNamespace(valid=True),
+            policy_result=SimpleNamespace(
+                decision="BLOCK",
+                target_controlled_boundary="NONE",
+                deterministic_reason_codes=("LATER_POLICY_BLOCKER",),
             ),
             journal_warning="",
         )

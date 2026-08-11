@@ -17,6 +17,7 @@ from src.services.trading.decision.autonomous_candidate_monitor import (
 from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionOrchestrator,
     AutonomousDecisionRunResult,
+    autonomous_account_context_reference,
 )
 from src.services.trading.decision.autonomous_execution_policy import (
     AutonomousExecutionPolicyGate,
@@ -189,7 +190,7 @@ class AutonomousTradingCoordinator:
             account.status != "OK"
             or not account.redacted
             or not _valid_hash(account.account_context_fingerprint)
-            or not account.account_id_hash
+            or not _valid_hash(account.account_id_hash)
         ):
             return AutonomousCandidateMonitorResult(
                 "BLOCKED", symbol, timeframes=timeframes,
@@ -341,13 +342,17 @@ class AutonomousTradingCoordinator:
                 account_scope, "AWAITING_HUMAN_CONFIRMATION", "",
                 authorization_source="HUMAN_CONFIRMATION",
             )
+        account_context_matches = hmac.compare_digest(
+            candidate.account_context_reference,
+            autonomous_account_context_reference(account.account_id_hash),
+        )
         policy_run = self.policy_gate.run_once(
             AutonomousPolicyInputs(
                 candidate=candidate,
                 risk_result=getattr(inputs, "risk_result", None),
-                account_context_reference=candidate.account_context_reference,
+                account_context_reference=fingerprint_hash,
                 account_context_created_at=account.captured_at,
-                account_context_matches=True,
+                account_context_matches=account_context_matches,
                 semantic_proposal_complete=bool(
                     candidate.proposed_semantic_parameter_references
                 ),

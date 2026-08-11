@@ -2299,3 +2299,30 @@ Commit: this commit
 - Verdict: `DETERMINISTIC_AUTONOMOUS_STRATEGY_AUTHORITY_COMPLETE`.
 
 ---
+
+### Post-release fix - Autonomous Account-Context Binding
+
+Date: 2026-08-11
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Preserved the Candidate's existing protected `account_context_...` reference through strict journal reload.
+- Compared that reference with one rebuilt from the current authoritative `account_id_hash`, then passed the separate current fingerprint hash to autonomous policy and Standing Mandate validation.
+- Removed the coordinator's hardcoded account-match result without adding a store, reference type, adapter, or execution boundary.
+
+#### Verification
+
+- Focused account/Candidate/policy/mandate/approval/supervisor group: 171 passed; management and multi-symbol neighbors: 41 passed.
+- Canonical acceptance: 67 passed, including all 60 canonical cases.
+- Full regression: 3,694 passed and 156 subtests passed with 3 unchanged warnings.
+- Matching account binding reached the later engaged kill switch; changed and tampered account bindings remained fail-closed.
+
+#### Current state / limitations
+
+- App, Streamlit, and bridge health passed. Live Candidate observation was not repeated because the persisted DEMO mandate had expired; no replacement mandate was granted automatically.
+- Controlled-submit, management writes, runtime `order_send`, MT5 writes, and broker mutations remained zero.
+- Verdict: `AUTONOMOUS_ACCOUNT_CONTEXT_BINDING_COMPLETE`.
+
+---

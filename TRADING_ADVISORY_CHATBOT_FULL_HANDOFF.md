@@ -2946,3 +2946,16 @@ The existing review controls and protected confirmation journal now form the exp
 - One natural completed XAUUSDm M1 bar produced `LEVEL`, `CONDITION_TRUE`, `ENTRY_ELIGIBLE`, one deterministic proposal, and one integrity-valid persisted `OPEN_POSITION` Candidate with provider invocations `0`. The later policy boundary remained blocked by account-reference validation and the engaged execution kill switch.
 - Controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero. Exactly one production `.order_send(` call-site remains and `src/` retains zero `MetaTrader5` imports.
 - Verification level: `FULL_REGRESSION_PASS`. Verdict: `DETERMINISTIC_AUTONOMOUS_STRATEGY_AUTHORITY_COMPLETE`.
+
+# 96. AUTONOMOUS ACCOUNT-CONTEXT BINDING
+
+- The first post-Candidate mismatch was in `AutonomousTradingCoordinator`: it passed the Candidate's typed `account_context_...` reference to an autonomous-policy input whose established contract requires the current 64-character account fingerprint hash, while also hardcoding the account-match result to true.
+- The Candidate contract remains unchanged. Its protected account reference is deterministically derived from the authoritative bridge `account_id_hash`, persisted in the protected Candidate journal, and preserved by strict reload.
+- Before autonomous policy evaluation, the coordinator now independently rebuilds that typed reference from the current protected account capture and compares it with the Candidate reference. It separately passes the current fingerprint hash to the policy and leaves the Standing Mandate bound to the same fingerprint hash.
+- Missing or invalid protected account hashes, changed fingerprints, mismatched Candidate references, stale context, unknown/non-DEMO context, revoked or expired mandates, and mandate/account mismatches remain fail-closed. Advisory and human-confirmed branches remain unchanged.
+- A matching Candidate now passes the account-reference gate and reaches the later Standing Mandate kill switch, which remains engaged and returns `KILL_SWITCH_ENGAGED` without creating Candidate authorization or execution authority.
+- Verification: focused Candidate/account/policy/mandate/approval/supervisor tests passed with `171 passed`; post-entry management and multi-symbol neighbors passed with `41 passed`; canonical acceptance passed with `67 passed`, including all 60 canonical cases.
+- Final full regression passed with `3,694 passed`, `156 subtests passed`, and three unchanged warnings.
+- App, Streamlit, and bridge health checks passed. A new live Candidate cycle was not run because the only persisted DEMO Standing Mandate had expired; no authority was created automatically.
+- Controlled-submit, controlled-management writes, runtime `order_send`, MT5 writes, and broker mutations remained zero. Execution and management kill switches remained engaged.
+- Verification level: `FULL_REGRESSION_PASS`. Verdict: `AUTONOMOUS_ACCOUNT_CONTEXT_BINDING_COMPLETE`.
