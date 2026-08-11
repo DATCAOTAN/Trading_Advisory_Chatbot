@@ -2959,3 +2959,14 @@ The existing review controls and protected confirmation journal now form the exp
 - App, Streamlit, and bridge health checks passed. A new live Candidate cycle was not run because the only persisted DEMO Standing Mandate had expired; no authority was created automatically.
 - Controlled-submit, controlled-management writes, runtime `order_send`, MT5 writes, and broker mutations remained zero. Execution and management kill switches remained engaged.
 - Verification level: `FULL_REGRESSION_PASS`. Verdict: `AUTONOMOUS_ACCOUNT_CONTEXT_BINDING_COMPLETE`.
+
+# 97. AUTONOMOUS EXECUTION PERMISSION CONTRACT
+
+- The app-side autonomous execution chain now uses one permission snapshot projection across mandate pre-submit validation and controlled-adapter admission. The snapshot includes app adapter, controlled execution, autonomous execution, pending-family, global execution, policy-gate, and kill-switch state.
+- Standing Mandate pre-submit preserves the historical non-executable acceptance state while also accepting a fully execution-ready state. It does not mutate configuration. Human-confirmed pre-submit behavior is unchanged.
+- Final validation continues to hash and protect the permission snapshot. Mandate request construction verifies that hash, and the adapter requires the current snapshot to exactly match the protected snapshot before any controlled client call.
+- The execution-ready predicate now matches adapter semantics instead of requiring the opposite values. Pending requests additionally require their existing pending family permission; MARKET requests do not widen pending permissions.
+- Bridge authentication, DEMO/account revalidation, mandate integrity, mode validation, idempotency, unknown-result handling, bridge permissions, bridge kill switch, and the isolated `order_send` boundary remain independently enforced.
+- Focused permission/pre-submit/adapter/authority/coordinator tests passed with `134 passed`. Canonical acceptance passed with `67 passed`, including all 60 canonical cases. Full regression passed with `3,707 passed`, `156 subtests passed`, and three unchanged warnings.
+- No runtime permission or kill switch was changed. Controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero; one production `.order_send(` call-site and zero `MetaTrader5` imports under `src/` remain.
+- Verification level: `FULL_REGRESSION_PASS`. Verdict: `AUTONOMOUS_EXECUTION_PERMISSION_CONTRACT_COMPLETE`.

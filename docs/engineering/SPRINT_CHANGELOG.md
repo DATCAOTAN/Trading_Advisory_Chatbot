@@ -2326,3 +2326,30 @@ Commit: this commit
 - Verdict: `AUTONOMOUS_ACCOUNT_CONTEXT_BINDING_COMPLETE`.
 
 ---
+
+### Post-release fix - Autonomous Execution Permission Contract
+
+Date: 2026-08-11
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Replaced contradictory mandate pre-submit and adapter permission predicates with one shared authoritative permission snapshot contract.
+- Preserved non-executable acceptance, bound the snapshot hash into the protected request, and required exact adapter-time snapshot compatibility.
+- Kept bridge authorization and every broker-side safety boundary independent and unchanged.
+
+#### Verification
+
+- Focused permission/pre-submit/adapter/authority/coordinator group: 134 passed.
+- Canonical acceptance: 67 passed, including all 60 canonical cases.
+- Full regression: 3,707 passed and 156 subtests passed with 3 unchanged warnings.
+- Documentation integrity, compileall, diff, and static safety checks passed.
+
+#### Current state / limitations
+
+- No runtime permission or kill switch was changed; controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero.
+- Logical app-side satisfiability is proven with a deterministic fake boundary; no broker-mutation acceptance was performed.
+- Verdict: `AUTONOMOUS_EXECUTION_PERMISSION_CONTRACT_COMPLETE`.
+
+---

@@ -88,6 +88,23 @@ class MT5ControlledExecutionRequest:
         intent_hash = hash_text(
             json.dumps(protected_intent, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
         )
+        permission_state = protected_intent.get("permission_state")
+        permission_state_hash = (
+            hash_text(
+                json.dumps(
+                    permission_state,
+                    ensure_ascii=True,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            if isinstance(permission_state, Mapping)
+            else ""
+        )
+        if not hmac.compare_digest(
+            permission_state_hash, str(getattr(final_validation, "permission_state_hash", ""))
+        ):
+            raise ValueError("MANDATE_PERMISSION_SNAPSHOT_INVALID")
         if not hmac.compare_digest(intent_hash, str(getattr(pre_submit_report, "intent_hash", ""))):
             raise ValueError("MANDATE_PRE_SUBMIT_HASH_MISMATCH")
         return cls(

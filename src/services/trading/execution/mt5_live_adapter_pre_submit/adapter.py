@@ -25,7 +25,11 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.models import (
     hash_text,
     now_utc_iso,
 )
-from src.services.trading.execution.mt5_live_adapter_pre_submit.policy import MT5LiveAdapterPreSubmitConfig
+from src.services.trading.execution.mt5_live_adapter_pre_submit.policy import (
+    MT5LiveAdapterPreSubmitConfig,
+    execution_permission_state,
+    mandate_permissions_execution_ready,
+)
 
 
 class MT5LiveAdapterDisabled:
@@ -252,6 +256,21 @@ class MT5LiveAdapterDisabled:
                 return "AUTONOMOUS_EXECUTION_DISABLED"
             if typed_confirmation:
                 return "MANDATE_AUTHORIZATION_INVALID"
+            current_permissions = execution_permission_state(self.config)
+            protected_permissions = request.approved_semantic_parameters.get(
+                "permission_state"
+            )
+            if (
+                not isinstance(protected_permissions, dict)
+                or protected_permissions != current_permissions
+            ):
+                return "PERMISSION_SNAPSHOT_MISMATCH"
+            if not mandate_permissions_execution_ready(
+                current_permissions,
+                action=str(request.approved_semantic_parameters.get("action", "")),
+                order_type=str(request.approved_semantic_parameters.get("order_type", "")),
+            ):
+                return "AUTONOMOUS_EXECUTION_DISABLED"
         if request is not None and request.request_version == PENDING_EXECUTION_REQUEST_VERSION:
             order_type = str(
                 request.approved_semantic_parameters.get("order_type", "")

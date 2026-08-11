@@ -165,8 +165,16 @@ def test_mandate_result_states_are_monotonic(
     assert fake_mt5.calls == 1
 
 
-def _request(tmp_path, *, include_authority=False):
+def _request(
+    tmp_path,
+    *,
+    include_authority=False,
+    pre_submit_config=None,
+    permission_setup=None,
+):
     state = _prepared(tmp_path / "candidate", "fresh_market", confirm=False)
+    if permission_setup is not None:
+        permission_setup()
     candidate = _autonomous(state["candidate"])
     state["candidate_journal"] = _CandidateJournalView(
         state["candidate_journal"], candidate
@@ -177,7 +185,7 @@ def _request(tmp_path, *, include_authority=False):
         candidate_journal=state["candidate_journal"],
         confirmation_store=state["review_store"],
         pre_submit_store=state["pre_submit_store"],
-        config=MT5LiveAdapterPreSubmitConfig(kill_switch_engaged=False),
+        config=pre_submit_config or MT5LiveAdapterPreSubmitConfig(kill_switch_engaged=False),
         authority_service=authority,
     ).run(
         candidate.candidate_reference,

@@ -7,7 +7,6 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from src.config import Config
 from src.services.trading.decision.autonomous_orchestrator import (
     OFFLINE_FIXTURE_MODE,
     AutonomousDecisionConfig,
@@ -28,6 +27,9 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.models import (
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.policy import (
     MT5LiveAdapterPreSubmitConfig,
+    execution_permission_state,
+    mandate_permissions_execution_ready,
+    mandate_permissions_safely_disabled,
 )
 from src.services.trading.execution.mt5_live_adapter_pre_submit.reconciliation import (
     MT5ReconciliationReceipt,
@@ -638,9 +640,16 @@ class ApprovalPreSubmitLifecycleService:
                 self.decision_config.input_max_age_seconds,
             )
         )
-        permission_state = _permission_state(self.config)
+        permission_state = execution_permission_state(self.config)
         permission_valid = (
-            _permissions_disabled_for_mandate(permission_state)
+            (
+                mandate_permissions_safely_disabled(permission_state)
+                or mandate_permissions_execution_ready(
+                    permission_state,
+                    action=candidate.action,
+                    order_type=candidate.order_type,
+                )
+            )
             if approval.authorization_source == "STANDING_MANDATE"
             else _permissions_safely_disabled(permission_state)
         )
@@ -890,28 +899,6 @@ def _lifecycle_blockers(
     return list(_unique(blockers))
 
 
-def _permission_state(config: MT5LiveAdapterPreSubmitConfig) -> dict[str, bool]:
-    return {
-        "live_adapter_enabled": bool(config.live_adapter_enabled),
-        "live_adapter_hard_block": bool(config.live_adapter_hard_block),
-        "allow_live_submission": bool(config.allow_live_submission),
-        "allow_order_send": bool(config.allow_order_send),
-        "controlled_execution_enabled": bool(config.controlled_execution_enabled),
-        "pending_submission_enabled": bool(config.pending_submission_enabled),
-        "pending_submission_hard_block": bool(config.pending_submission_hard_block),
-        "kill_switch_engaged": bool(config.kill_switch_engaged),
-        "global_live_execution_enabled": bool(
-            getattr(Config, "TRADING_MT5_LIVE_EXECUTION_ENABLED", False)
-        ),
-        "global_order_send_enabled": bool(
-            getattr(Config, "TRADING_MT5_ORDER_SEND_ENABLED", False)
-        ),
-        "autonomous_policy_gate_enabled": bool(
-            getattr(Config, "TRADING_AUTONOMOUS_POLICY_GATE_ENABLED", False)
-        ),
-    }
-
-
 def _permissions_safely_disabled(state: Mapping[str, bool]) -> bool:
     return (
         state.get("live_adapter_hard_block") is True
@@ -931,29 +918,6 @@ def _permissions_safely_disabled(state: Mapping[str, bool]) -> bool:
             )
         )
     )
-
-
-def _permissions_disabled_for_mandate(state: Mapping[str, bool]) -> bool:
-    return (
-        state.get("live_adapter_hard_block") is True
-        and state.get("pending_submission_hard_block") is True
-        and state.get("kill_switch_engaged") is False
-        and all(
-            state.get(name) is False
-            for name in (
-                "live_adapter_enabled",
-                "allow_live_submission",
-                "allow_order_send",
-                "controlled_execution_enabled",
-                "pending_submission_enabled",
-                "global_live_execution_enabled",
-                "global_order_send_enabled",
-                "autonomous_policy_gate_enabled",
-            )
-        )
-    )
-
-
 def _blocked_final(final: FinalValidationResult, blocker: str) -> FinalValidationResult:
     return FinalValidationResult(
         final.final_validation_id,

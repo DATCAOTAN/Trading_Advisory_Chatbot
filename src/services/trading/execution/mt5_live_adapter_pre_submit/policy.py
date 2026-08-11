@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Mapping
 
 
 @dataclass
@@ -119,3 +120,92 @@ class MT5LiveAdapterPreSubmitConfig:
                 config, "TRADING_MT5_MANAGEMENT_MAX_REQUEST_AGE_SECONDS", 300
             ),
         )
+
+
+def execution_permission_state(
+    config: MT5LiveAdapterPreSubmitConfig, global_config=None
+) -> dict[str, bool]:
+    if global_config is None:
+        from src.config import Config
+
+        global_config = Config
+    return {
+        "live_adapter_enabled": bool(config.live_adapter_enabled),
+        "live_adapter_hard_block": bool(config.live_adapter_hard_block),
+        "allow_live_submission": bool(config.allow_live_submission),
+        "allow_order_send": bool(config.allow_order_send),
+        "controlled_execution_enabled": bool(config.controlled_execution_enabled),
+        "autonomous_execution_enabled": bool(config.autonomous_execution_enabled),
+        "pending_submission_enabled": bool(config.pending_submission_enabled),
+        "pending_submission_hard_block": bool(config.pending_submission_hard_block),
+        "pending_limit_enabled": bool(config.pending_limit_enabled),
+        "pending_stop_enabled": bool(config.pending_stop_enabled),
+        "pending_stop_limit_enabled": bool(config.pending_stop_limit_enabled),
+        "kill_switch_engaged": bool(config.kill_switch_engaged),
+        "global_live_execution_enabled": bool(
+            getattr(global_config, "TRADING_MT5_LIVE_EXECUTION_ENABLED", False)
+        ),
+        "global_order_send_enabled": bool(
+            getattr(global_config, "TRADING_MT5_ORDER_SEND_ENABLED", False)
+        ),
+        "autonomous_policy_gate_enabled": bool(
+            getattr(global_config, "TRADING_AUTONOMOUS_POLICY_GATE_ENABLED", False)
+        ),
+    }
+
+
+def mandate_permissions_safely_disabled(state: Mapping[str, bool]) -> bool:
+    return (
+        state.get("live_adapter_hard_block") is True
+        and state.get("pending_submission_hard_block") is True
+        and state.get("kill_switch_engaged") is False
+        and all(
+            state.get(name) is False
+            for name in (
+                "live_adapter_enabled",
+                "allow_live_submission",
+                "allow_order_send",
+                "controlled_execution_enabled",
+                "autonomous_execution_enabled",
+                "pending_submission_enabled",
+                "global_live_execution_enabled",
+                "global_order_send_enabled",
+                "autonomous_policy_gate_enabled",
+            )
+        )
+    )
+
+
+def mandate_permissions_execution_ready(
+    state: Mapping[str, bool], *, action: str, order_type: str
+) -> bool:
+    if not (
+        state.get("live_adapter_enabled") is True
+        and state.get("live_adapter_hard_block") is False
+        and state.get("allow_live_submission") is True
+        and state.get("allow_order_send") is True
+        and state.get("controlled_execution_enabled") is True
+        and state.get("autonomous_execution_enabled") is True
+        and state.get("kill_switch_engaged") is False
+        and state.get("global_live_execution_enabled") is True
+        and state.get("global_order_send_enabled") is True
+        and state.get("autonomous_policy_gate_enabled") is True
+    ):
+        return False
+    if str(action).upper() != "PENDING":
+        return True
+    order_type = str(order_type).upper()
+    family_enabled = (
+        state.get("pending_limit_enabled") is True
+        if order_type in {"BUY_LIMIT", "SELL_LIMIT"}
+        else state.get("pending_stop_enabled") is True
+        if order_type in {"BUY_STOP", "SELL_STOP"}
+        else state.get("pending_stop_limit_enabled") is True
+        if order_type in {"BUY_STOP_LIMIT", "SELL_STOP_LIMIT"}
+        else False
+    )
+    return (
+        state.get("pending_submission_enabled") is True
+        and state.get("pending_submission_hard_block") is False
+        and family_enabled
+    )
