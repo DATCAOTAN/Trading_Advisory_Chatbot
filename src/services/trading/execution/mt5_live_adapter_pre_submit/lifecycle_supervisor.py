@@ -515,19 +515,33 @@ def _classify_record(
     symbol = str(protected["symbol"])
     direction = str(protected["order_type"]).upper()
     tag = str(protected["correlation_tag"])
+    protected_result = record.get("protected_result", {})
+    broker_references = {
+        _sha256(str(protected_result[key]))
+        for key in ("order", "deal", "position")
+        if isinstance(protected_result, Mapping) and protected_result.get(key)
+    }
     try:
         expected_volume = Decimal(str(protected["volume"]))
     except InvalidOperation:
         return _inconsistent("EXECUTION_RECORD_INCOMPLETE")
 
-    active_orders = _matching_rows(snapshot.get("active_orders", []), symbol, direction, tag)
-    recent_orders = _matching_rows(snapshot.get("recent_orders", []), symbol, direction, tag)
+    active_orders = _matching_rows(
+        snapshot.get("active_orders", []), symbol, direction, tag, broker_references
+    )
+    recent_orders = _matching_rows(
+        snapshot.get("recent_orders", []), symbol, direction, tag, broker_references
+    )
     entry_deals = [
         row
-        for row in _matching_rows(snapshot.get("recent_deals", []), symbol, direction, tag)
+        for row in _matching_rows(
+            snapshot.get("recent_deals", []), symbol, direction, tag, broker_references
+        )
         if row.get("entry") in {"IN", "INOUT", "UNKNOWN"}
     ]
-    positions = _matching_rows(snapshot.get("positions", []), symbol, direction, tag)
+    positions = _matching_rows(
+        snapshot.get("positions", []), symbol, direction, tag, broker_references
+    )
     same_symbol = [row for row in snapshot.get("positions", []) if row.get("symbol") == symbol]
     if any(str(row.get("direction", "")).upper() != direction for row in same_symbol):
         return _inconsistent("CONFLICTING_VOLUME_OR_DIRECTION")
@@ -653,7 +667,13 @@ def _classify_record(
     return _inconsistent("CONFIRMED_BROKER_EVIDENCE_ABSENT")
 
 
-def _matching_rows(rows: Any, symbol: str, direction: str, tag: str) -> list[Mapping[str, Any]]:
+def _matching_rows(
+    rows: Any,
+    symbol: str,
+    direction: str,
+    tag: str,
+    broker_references: set[str],
+) -> list[Mapping[str, Any]]:
     candidates = [
         row
         for row in rows or []
@@ -662,7 +682,19 @@ def _matching_rows(rows: Any, symbol: str, direction: str, tag: str) -> list[Map
         and str(row.get("direction", "")).upper() == direction
     ]
     tagged = [row for row in candidates if tag in row.get("matched_correlation_tags", [])]
-    return tagged or candidates
+    if tagged:
+        return tagged
+    return [
+        row
+        for row in candidates
+        if broker_references.intersection(
+            {
+                str(row.get("broker_reference_hash", "")),
+                str(row.get("order_reference_hash", "")),
+                str(row.get("position_reference_hash", "")),
+            }
+        )
+    ]
 
 
 def _classification(

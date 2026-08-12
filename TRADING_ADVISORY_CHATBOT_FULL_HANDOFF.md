@@ -3000,3 +3000,12 @@ The existing review controls and protected confirmation journal now form the exp
 - Bounded DEMO rerun used an operator-approved mandate aligned with the repository's 1% DEMO sizing policy. The earlier volume/risk mismatch and `OPEN_POLICY_NOT_READY` contract defect were resolved without copying Candidate values or widening unrelated scope.
 - The final runtime rerun did not receive a new completed XAUUSDm M1 bar during the bounded observation window, so no new Candidate, pre-submit artifact, adapter call, bridge mutation, or `order_send` occurred. The supervisor was stopped, the temporary mandate was revoked, and app/bridge configuration was restored byte-for-byte to fail closed.
 - Verification level: `FULL_REGRESSION_PASS`. Runtime verdict remains `DEMO_AUTONOMOUS_ORDER_SEND_END_TO_END_BLOCKED` with first remaining blocker `NO_FRESH_COMPLETED_M1_BAR`.
+
+# 101. EXACT LIFECYCLE EVIDENCE BINDING
+
+- Root cause: lifecycle matching fell back from a missing broker correlation tag to every row with the same symbol and direction. Evidence from a later confirmed BUY execution was therefore assigned to an older rejected BUY execution and produced a false persistent `CONFLICTING_VOLUME_OR_DIRECTION` discrepancy.
+- Lifecycle evidence now binds only through the existing correlation tag or protected broker-result references. Same-symbol/direction rows without either binding are not attributed to that execution.
+- Strict journal reads, account matching, missing-evidence discrepancies, unmatched-position detection, reconciliation, idempotency, and fail-closed behavior remain unchanged.
+- Focused lifecycle/reconciliation tests passed with `46 passed`; lifecycle/reconciliation/coordinator/monitor neighbors passed with `69 passed`. Full regression passed with `3,719 passed`, `156 subtests passed`, and three unchanged warnings.
+- A read-only DEMO lifecycle cycle reported `HEALTHY`, account match true, zero discrepancies, one historical `BROKER_REJECTED` record, and one `POSITION_CLOSED` record. No execution permission, controlled-submit, runtime `order_send`, MT5 write, or broker mutation occurred during the repair.
+- Verification level: `FULL_REGRESSION_PASS`.

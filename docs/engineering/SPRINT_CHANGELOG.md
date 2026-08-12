@@ -2432,3 +2432,28 @@ Commit: this commit
 - Verdict: `DEMO_AUTONOMOUS_ORDER_SEND_END_TO_END_BLOCKED`; first remaining blocker: `NO_FRESH_COMPLETED_M1_BAR`.
 
 ---
+
+### Post-release fix - Exact Lifecycle Evidence Binding
+
+Date: 2026-08-12
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Removed the lifecycle fallback that assigned untagged broker rows to every execution with the same symbol and direction.
+- Broker evidence now binds by the existing correlation tag or protected broker-result references.
+- Unbound evidence remains fail-closed instead of contaminating another execution lifecycle.
+
+#### Verification
+
+- Focused lifecycle/reconciliation tests: 46 passed.
+- Lifecycle/reconciliation/coordinator/monitor neighbors: 69 passed.
+- Full regression: 3,719 passed and 156 subtests passed with 3 unchanged warnings.
+- A read-only DEMO lifecycle cycle reported `HEALTHY`, account match true, zero discrepancies, one broker-rejected historical record, and one closed-position record.
+
+#### Safety
+
+- No execution permission was enabled and no controlled-submit, runtime `order_send`, MT5 write, or broker mutation occurred during the repair.
+
+---

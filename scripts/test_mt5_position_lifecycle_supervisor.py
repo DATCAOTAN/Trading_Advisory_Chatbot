@@ -183,6 +183,51 @@ def test_accepted_execution_with_open_position(tmp_path):
     assert status.discrepancy_count == 0
 
 
+def test_untagged_broker_evidence_is_bound_by_protected_result_reference(tmp_path):
+    cfg = seed_execution(tmp_path, state="RESULT_REJECTED")
+    journal = ProtectedExecutionJournal(cfg.execution_journal_path)
+    journal.transition("fixture-idempotency", "RESULT_REJECTED", retcode=10016)
+    protected = {
+        "protected_execution_reference": "execution-confirmed",
+        "correlation_identity": h("correlation-confirmed"),
+        "correlation_tag": "mt5rconfirmed123",
+        "canonical_semantic_hash": h("semantic-confirmed"),
+        "approval_reference": "approval-confirmed",
+        "lock_reference": "lock-confirmed",
+        "source_artifact_reference": "source-confirmed",
+        "symbol": "TEST_SYMBOL",
+        "order_type": "BUY",
+        "volume": "1.00",
+        "submission_window_start": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+    }
+    assert journal.reserve("confirmed-idempotency", h("confirmed-request"), ACCOUNT_A, protected)
+    journal.transition("confirmed-idempotency", "SUBMISSION_STARTED")
+    journal.transition("confirmed-idempotency", "RESULT_CONFIRMED", order="101", deal="202")
+    snapshot = make_snapshot(
+        recent_orders=[broker_row(h("101"), tagged=False)],
+        recent_deals=[
+            broker_row(
+                h("202"), entry="IN", order_reference=h("101"),
+                position_reference=h("303"), tagged=False,
+            ),
+            broker_row(
+                h("204"), direction="SELL", entry="OUT", order_reference=h("101"),
+                position_reference=h("303"), tagged=False,
+            ),
+        ],
+    )
+
+    status = MT5PositionLifecycleSupervisor(
+        cfg, bridge_client=FakeLifecycleClient(snapshot)
+    ).run_once()
+
+    assert status.discrepancy_count == 0
+    assert status.lifecycle_state_counts == {
+        MT5LifecycleState.BROKER_REJECTED.value: 1,
+        MT5LifecycleState.POSITION_CLOSED.value: 1,
+    }
+
+
 def test_pending_order_is_order_active(tmp_path):
     status, _ = run(tmp_path, make_snapshot(active_orders=[broker_row(ORDER)]))
     assert state_of(status) == MT5LifecycleState.ORDER_ACTIVE.value
