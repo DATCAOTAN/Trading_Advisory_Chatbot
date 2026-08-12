@@ -2526,3 +2526,23 @@ Commit: this commit
 - Controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero.
 
 ---
+
+### Post-release UI - Professional Trading Workspace
+
+Date: 2026-08-12
+Verification: `FOCUSED_AND_LIVE_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added one shared Streamlit workspace theme and replaced the oversized banner with a compact operational shell.
+- Clarified Advisory, Operations, Evaluation, and Settings hierarchy while retaining every existing controller, widget key, and authoritative runtime projection.
+- Collapsed legacy execution diagnostics into progressive disclosure and added responsive desktop/mobile styling without introducing a frontend dependency.
+
+#### Verification and safety
+
+- Focused UI and neighboring tests: 68 passed with two unchanged dependency warnings.
+- Actual Streamlit checks covered all four tabs, desktop/mobile overflow, and rendered exception state.
+- Candidate generation, confirmation, controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero.
+
+---

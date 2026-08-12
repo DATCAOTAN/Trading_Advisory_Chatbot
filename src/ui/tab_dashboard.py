@@ -126,6 +126,7 @@ from src.ui.autonomous_candidate_review import (
 from src.ui.operator_candidate_generation import (
     OperatorCandidateGenerationController,
 )
+from src.ui.theme import render_section_heading
 
 
 @st.cache_data(ttl=5)
@@ -152,11 +153,13 @@ def render(orchestrator):
     Args:
         orchestrator: RAGOrchestrator instance (dependency injection)
     """
-    st.markdown("### 📊 Dashboard Tổng Quan")
-    st.markdown("---")
+    render_section_heading(
+        "Operations",
+        "Live market evidence, runtime authority, and execution-boundary diagnostics.",
+    )
 
     # ── Hàng 1: Trạng thái hệ thống AI ──────────────────────────────────
-    st.markdown("#### 🤖 Trạng Thái Hệ Thống AI")
+    st.markdown("#### AI services")
     col1, col2, col3, col4 = st.columns(4)
 
     embedding_model_name = "Cohere Embed (v3.0)" if Config.COHERE_API_KEY else "BGE-M3 (Local)"
@@ -170,15 +173,15 @@ def render(orchestrator):
     else:
         active_llm_name = Config.LLM_MODEL_NAME
 
-    col1.metric("🧠 LLM", active_llm_name, help="Mô hình ngôn ngữ chính")
-    col2.metric("📐 Embedding", embedding_model_name, help="Mô hình nhúng vector 1024d")
-    col3.metric("🎯 Reranker", "Cohere API" if Config.ENABLE_RERANKER else "Tắt", help="Chấm điểm lại top chunks")
-    col4.metric("💾 Vector DB", "Qdrant Local", help="Cơ sở dữ liệu vector")
+    col1.metric("LLM", active_llm_name, help="Mô hình ngôn ngữ chính")
+    col2.metric("Embedding", embedding_model_name, help="Mô hình nhúng vector 1024d")
+    col3.metric("Reranker", "Cohere API" if Config.ENABLE_RERANKER else "Tắt", help="Chấm điểm lại top chunks")
+    col4.metric("Vector DB", "Qdrant Local", help="Cơ sở dữ liệu vector")
 
     st.markdown("---")
 
     # ── Hàng 2: Thống kê kho tri thức ───────────────────────────────────
-    st.markdown("#### 📚 Kho Tri Thức")
+    st.markdown("#### Knowledge service")
 
     try:
         client = orchestrator.vector_service.client
@@ -191,9 +194,9 @@ def render(orchestrator):
             real_points_count = sum(info.get("chunk_count", 0) for info in state.values())
 
             col_a, col_b, col_c = st.columns(3)
-            col_a.metric("📦 Collection", Config.VECTOR_COLLECTION_NAME)
-            col_b.metric("🔢 Tổng Chunks", f"{real_points_count:,}")
-            col_c.metric("📏 Vector Dim", "1024d")
+            col_a.metric("Collection", Config.VECTOR_COLLECTION_NAME)
+            col_b.metric("Indexed chunks", f"{real_points_count:,}")
+            col_c.metric("Vector dimension", "1024d")
 
             # Hiển thị trạng thái ingestion
             _render_ingestion_state()
@@ -206,7 +209,7 @@ def render(orchestrator):
     st.markdown("---")
 
     # ── Hàng 3: Dữ liệu thời gian thực ─────────────────────────────────
-    st.markdown("#### 📡 Dữ Liệu Thời Gian Thực")
+    st.markdown("#### Market and trading runtime")
 
     selected_symbol, selected_timeframes = _render_runtime_profile_selector()
     _render_market_data_provider_status(orchestrator, selected_symbol, selected_timeframes)
@@ -217,56 +220,57 @@ def render(orchestrator):
     col_live1, col_live2 = st.columns(2)
 
     with col_live1:
-        st.markdown(f"**💰 Giá {selected_symbol} Live**")
-        if st.button("🔄 Cập nhật giá", use_container_width=True, key="dash_price"):
+        st.markdown(f"**Live {selected_symbol} price**")
+        if st.button("Refresh price", use_container_width=True, key="dash_price"):
             with st.spinner("Đang lấy giá..."):
                 price_info = orchestrator.live_service.get_live_price(selected_symbol)
                 st.info(price_info)
 
     with col_live2:
-        st.markdown("**📅 Lịch Kinh Tế**")
-        if st.button("🔄 Xem lịch tuần này", use_container_width=True, key="dash_calendar"):
+        st.markdown("**Economic calendar**")
+        if st.button("Load this week", use_container_width=True, key="dash_calendar"):
             with st.spinner("Đang tải lịch kinh tế..."):
                 calendar_info = orchestrator.live_service.get_economic_calendar()
                 st.info(calendar_info)
 
-    _render_dry_run_execution_gate_status()
-    _render_proposal_boundary_confirmation_status()
-    _render_non_executable_proposal_draft_status()
-    _render_simulated_execution_adapter_status()
-    _render_mt5_live_execution_hard_block_status()
-    _render_live_execution_design_spec_status()
-    _render_live_execution_preflight_status()
-    _render_live_permission_gate_status()
-    _render_live_order_intent_builder_status()
-    _render_live_order_contract_skeleton_status()
-    _render_live_order_parameter_policy_status()
-    _render_live_order_parameter_source_boundary_status()
-    _render_human_reviewed_live_parameter_draft_status()
-    _render_controlled_live_parameter_value_proposal_status()
-    _render_human_value_approval_lock_status()
-    _render_live_order_contract_parameterization_status()
-    _render_live_order_contract_final_review_status()
-    _render_pre_mt5_order_request_mapping_status()
-    _render_mt5_dry_run_payload_validator_status()
-    _render_mt5_request_draft_boundary_status()
-    _render_mt5_request_draft_final_approval_status()
-    _render_mt5_request_dict_dry_run_builder_status()
-    _render_mt5_request_dict_final_validation_and_bridge_skeleton_status()
-    _render_mt5_live_adapter_disabled_pre_submit_status()
+    with st.expander("Execution boundary diagnostics", expanded=False):
+        _render_dry_run_execution_gate_status()
+        _render_proposal_boundary_confirmation_status()
+        _render_non_executable_proposal_draft_status()
+        _render_simulated_execution_adapter_status()
+        _render_mt5_live_execution_hard_block_status()
+        _render_live_execution_design_spec_status()
+        _render_live_execution_preflight_status()
+        _render_live_permission_gate_status()
+        _render_live_order_intent_builder_status()
+        _render_live_order_contract_skeleton_status()
+        _render_live_order_parameter_policy_status()
+        _render_live_order_parameter_source_boundary_status()
+        _render_human_reviewed_live_parameter_draft_status()
+        _render_controlled_live_parameter_value_proposal_status()
+        _render_human_value_approval_lock_status()
+        _render_live_order_contract_parameterization_status()
+        _render_live_order_contract_final_review_status()
+        _render_pre_mt5_order_request_mapping_status()
+        _render_mt5_dry_run_payload_validator_status()
+        _render_mt5_request_draft_boundary_status()
+        _render_mt5_request_draft_final_approval_status()
+        _render_mt5_request_dict_dry_run_builder_status()
+        _render_mt5_request_dict_final_validation_and_bridge_skeleton_status()
+        _render_mt5_live_adapter_disabled_pre_submit_status()
 
     st.markdown("---")
 
     # ── Hàng 4: Cấu hình đường dẫn ─────────────────────────────────────
-    st.markdown("#### 📂 Đường Dẫn Hệ Thống")
-    st.code(
-        f"📁 Project Root:  {Config.BASE_DIR}\n"
-        f"📁 PDF Static:    {Config.STATIC_PDF_DIR}\n"
-        f"📁 PDF Dynamic:   {Config.DYNAMIC_PDF_DIR}\n"
-        f"📁 Qdrant DB:     {Config.QDRANT_DIR}\n"
-        f"📁 Logs:          {Config.LOGS_DIR}",
-        language="text",
-    )
+    with st.expander("System paths", expanded=False):
+        st.code(
+            f"Project Root:  {Config.BASE_DIR}\n"
+            f"PDF Static:    {Config.STATIC_PDF_DIR}\n"
+            f"PDF Dynamic:   {Config.DYNAMIC_PDF_DIR}\n"
+            f"Qdrant DB:     {Config.QDRANT_DIR}\n"
+            f"Logs:          {Config.LOGS_DIR}",
+            language="text",
+        )
 
 
 # =============================================================================

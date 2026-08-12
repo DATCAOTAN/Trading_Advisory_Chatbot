@@ -84,6 +84,7 @@ from src.ui.tab_dashboard import (
     _operator_candidate_review_controller,
     _render_autonomous_decision_review_card,
 )
+from src.ui.theme import render_section_heading
 
 
 LOGGER = logging.getLogger(__name__)
@@ -243,6 +244,10 @@ class _AnswerStreamLogger:
 
 def render(orchestrator, feature_flags: dict):
     """Render the chatbot tab."""
+    render_section_heading(
+        "Advisory",
+        "Conversation-led research with authoritative trading context and controls.",
+    )
     knowledge_v3_flags = get_knowledge_v3_flags(st.session_state)
     if knowledge_v3_flags["use_knowledge_v3"]:
         st.warning("Knowledge V3 experimental retrieval enabled")

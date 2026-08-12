@@ -16,11 +16,15 @@ from src.services.agents.evaluation_dashboard import (
     replay_view_from_result,
 )
 from src.services.agents.evaluation_persistence import EvaluationPersistenceStore
+from src.ui.theme import render_section_heading
 
 
 def render(orchestrator=None):
-    st.markdown("### Dashboard Đánh Giá")
-    st.caption("Review-only registry view. No provider, retrieval, MT5, broker, or account calls.")
+    render_section_heading(
+        "Evaluation",
+        "Read-only registry review, quality signals, and diagnostic evidence.",
+    )
+    st.caption("No provider, retrieval, MT5, broker, or account calls.")
 
     service = _dashboard_service_from_state()
     filters = _filters_from_ui()

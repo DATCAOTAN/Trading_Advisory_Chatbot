@@ -19,74 +19,18 @@ import streamlit as st
 # 1. CẤU HÌNH TRANG — Chạy đầu tiên, trước mọi thứ
 # =============================================================================
 st.set_page_config(
-    page_title="AI XAUUSD Advisor — Advanced RAG",
+    page_title="Trading Advisory Workspace",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 # =============================================================================
-# 2. CSS THEME TOÀN CỤC — Giao diện premium dark theme
+# 2. SHARED WORKSPACE THEME
 # =============================================================================
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+from src.ui.theme import apply_workspace_theme
 
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-
-/* Main header gradient */
-.main-header {
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-    padding: 1.5rem 2rem;
-    border-radius: 12px;
-    border-left: 4px solid #e94560;
-    margin-bottom: 1rem;
-}
-.main-header h1 { color: #f5f5f5; font-size: 1.6rem; font-weight: 700; margin: 0; }
-.main-header p  { color: #a0aec0; font-size: 0.85rem; margin: 0.3rem 0 0; }
-
-/* Intent badge */
-.badge {
-    display: inline-block;
-    padding: 2px 10px;
-    border-radius: 12px;
-    font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-    margin-bottom: 6px;
-}
-.badge-rag     { background: #1a365d; color: #63b3ed; border: 1px solid #2b6cb0; }
-.badge-trash   { background: #7c2d12; color: #fdba74; border: 1px solid #c2410c; }
-.badge-greet   { background: #2d2a42; color: #b794f4; border: 1px solid #6b46c1; }
-
-/* Sources card */
-.source-card {
-    background: #1a1a2e;
-    border: 1px solid #2d3748;
-    border-radius: 8px;
-    padding: 0.8rem 1rem;
-    margin: 0.4rem 0;
-    font-size: 0.8rem;
-}
-.source-card strong { color: #63b3ed; }
-
-/* Sidebar style */
-section[data-testid="stSidebar"] { background: #0d1117; }
-section[data-testid="stSidebar"] .stButton > button {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid #2d3748;
-    background: #161b22;
-    color: #c9d1d9;
-    transition: all 0.2s;
-}
-section[data-testid="stSidebar"] .stButton > button:hover {
-    background: #21262d;
-    border-color: #58a6ff;
-    color: #58a6ff;
-}
-</style>
-""", unsafe_allow_html=True)
+apply_workspace_theme()
 
 # =============================================================================
 # 3. KHỞI TẠO HỆ THỐNG (Singleton — chỉ chạy 1 lần)
@@ -133,9 +77,16 @@ feature_flags = st.session_state.feature_flags
 # 4. SIDEBAR — Trạng thái hệ thống tóm tắt
 # =============================================================================
 with st.sidebar:
-    st.markdown("## 📈 AI XAUUSD Advisor")
-    st.markdown("---")
-    st.markdown("**📡 Trạng Thái**")
+    st.markdown(
+        """
+        <div class="workspace-brand">
+            <div class="workspace-brand-mark">TA</div>
+            <div><strong>Trading Advisory</strong><span>Operator workspace</span></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("SYSTEM")
     col1, col2 = st.columns(2)
     if Config.LLM_PROVIDER == "openrouter":
         active_llm_name = Config.OPENROUTER_MODEL_NAME
@@ -148,16 +99,16 @@ with st.sidebar:
 
     col1.metric("LLM", active_llm_name)
     col2.metric("DB", "Qdrant")
-    st.caption(f"💬 Chat: {len(st.session_state.messages)} lượt")
+    st.caption(f"Conversation events: {len(st.session_state.messages)}")
     
     
     st.markdown("---")
-    st.markdown("**💬 Phiên Trò Chuyện**")
+    st.caption("CONVERSATIONS")
     from src.services.history_service import HistoryService
     history_svc = HistoryService()
     
     # Nút tạo phiên mới
-    if st.button("➕ Tạo Chat Mới"):
+    if st.button("+ New conversation"):
         new_id = history_svc.create_session("New Chat")
         st.session_state.current_session_id = new_id
         st.session_state.messages = []
@@ -205,24 +156,26 @@ with st.sidebar:
                         st.rerun()
         
     st.markdown("---")
-    st.caption("v3.0 — Facade + Component-Based Architecture")
+    st.caption("v3.0 · Controlled trading workspace")
 
 # =============================================================================
-# 5. HEADER
+# 5. WORKSPACE HEADER
 # =============================================================================
-st.markdown("""
-<div class="main-header">
-    <h1>📈 AI Cố Vấn Tài Chính Chiến Lược XAUUSD</h1>
-    <p>Cloud LLM · Hybrid Search · Cohere Reranker · Parent-Child RAG · Multi-Hop Reasoning</p>
-</div>
-""", unsafe_allow_html=True)
+from src.ui.theme import render_workspace_header
+
+render_workspace_header(
+    model_name=active_llm_name,
+    message_count=len(st.session_state.messages),
+)
 
 # =============================================================================
 # 6. TAB NAVIGATION — Facade điều phối đến Isolated Components
 # =============================================================================
 from src.ui import tab_chatbot, tab_dashboard, tab_evaluation_dashboard, tab_settings
 
-tab1, tab2, tab3, tab4 = st.tabs(["💬 Chatbot Tư Vấn", "📊 Dashboard", "Dashboard Đánh Giá", "⚙️ Cấu Hình"])
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["Advisory", "Operations", "Evaluation", "Settings"]
+)
 
 with tab1:
     tab_chatbot.render(orchestrator, feature_flags)

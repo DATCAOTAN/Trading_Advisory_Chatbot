@@ -16,6 +16,7 @@ from src.ui.runtime_flags import (
     USE_KNOWLEDGE_V3_KEY,
     ensure_knowledge_v3_flags,
 )
+from src.ui.theme import render_section_heading
 
 
 # =============================================================================
@@ -29,17 +30,19 @@ def render(orchestrator, feature_flags: dict):
         orchestrator:  RAGOrchestrator instance (dependency injection)
         feature_flags: Dict chứa trạng thái feature toggles (read/write)
     """
-    st.markdown("### ⚙️ Cấu Hình Hệ Thống")
-    st.markdown("---")
+    render_section_heading(
+        "Settings",
+        "AI pipeline controls, knowledge maintenance, and local workspace preferences.",
+    )
 
     # ── Phần 1: Feature Toggles AI ──────────────────────────────────────
-    st.markdown("#### 🎛️ Tính Năng AI Pipeline")
+    st.markdown("#### AI pipeline")
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
         feature_flags["query_rewriting"] = st.toggle(
-            "✏️ Query Rewriting",
+            "Query rewriting",
             value=feature_flags["query_rewriting"],
             help="Tự động mở rộng câu hỏi thành câu truy vấn chuẩn tài chính",
             key="settings_qr",
@@ -47,7 +50,7 @@ def render(orchestrator, feature_flags: dict):
 
     with col2:
         feature_flags["reranker"] = st.toggle(
-            "🎯 BGE Reranker",
+            "BGE reranker",
             value=feature_flags["reranker"],
             help="Chấm điểm lại top 10 → chọn 3 đoạn tốt nhất (chậm thêm ~1-2s)",
             key="settings_reranker",
@@ -55,7 +58,7 @@ def render(orchestrator, feature_flags: dict):
 
     with col3:
         feature_flags["self_correction"] = st.toggle(
-            "🔍 Self-Correction",
+            "Self-correction",
             value=feature_flags["self_correction"],
             help="Kiểm tra hallucination sau khi AI trả lời (chậm hơn ~30-50%)",
             key="settings_sc",
@@ -92,7 +95,7 @@ def render(orchestrator, feature_flags: dict):
     st.markdown("---")
 
     # ── Phần 2: Quản lý kho tri thức ────────────────────────────────────
-    st.markdown("#### 📚 Quản Lý Kho Tri Thức")
+    st.markdown("#### Knowledge maintenance")
 
     st.caption(
         "**Incremental Sync**: Chỉ nạp file mới/sửa đổi, bỏ qua file không đổi.  \n"
@@ -102,18 +105,18 @@ def render(orchestrator, feature_flags: dict):
     col_sync, col_force = st.columns(2)
 
     with col_sync:
-        if st.button("🔄 Đồng Bộ Thông Minh", use_container_width=True, type="primary",
+        if st.button("Incremental sync", use_container_width=True, type="primary",
                       key="settings_sync"):
             _run_sync(orchestrator, force=False)
 
     with col_force:
-        if st.button("🔥 Force Re-index", use_container_width=True, key="settings_force"):
+        if st.button("Force re-index", use_container_width=True, key="settings_force"):
             _run_sync(orchestrator, force=True)
 
     st.markdown("---")
 
     # ── Phần 3: Bộ nhớ hội thoại ────────────────────────────────────────
-    st.markdown("#### 💬 Bộ Nhớ Hội Thoại")
+    st.markdown("#### Conversation memory")
 
     msg_count = len(st.session_state.messages)
     col_mem1, col_mem2 = st.columns([3, 1])
@@ -125,16 +128,16 @@ def render(orchestrator, feature_flags: dict):
 
     with col_mem2:
         st.markdown("")  # spacing
-        if st.button("🗑️ Xóa Lịch Sử", use_container_width=True, key="settings_clear"):
+        if st.button("Clear history", use_container_width=True, key="settings_clear"):
             st.session_state.messages = []
             st.rerun()
 
     st.markdown("---")
 
     # ── Phần 4: Cấu hình Broker (Placeholder) ──────────────────────────
-    st.markdown("#### 🏦 Cấu Hình Broker (Sắp ra mắt)")
+    st.markdown("#### Broker integration")
 
-    with st.expander("🔑 Oanda API Configuration"):
+    with st.expander("Oanda API configuration"):
         st.text_input("API Key", type="password", key="oanda_key",
                        placeholder="Nhập Oanda API Key...", disabled=True)
         st.text_input("Account ID", key="oanda_account",
@@ -144,7 +147,7 @@ def render(orchestrator, feature_flags: dict):
     st.markdown("---")
 
     # ── Phần 5: Thông tin phiên bản ─────────────────────────────────────
-    st.markdown("#### ℹ️ Thông Tin Phiên Bản")
+    st.markdown("#### Build information")
     embedding_model_name = "Cohere Embed (v3.0)" if Config.COHERE_API_KEY else "BGE-M3 (Local)"
     if Config.LLM_PROVIDER == "openrouter":
         active_llm_name = Config.OPENROUTER_MODEL_NAME

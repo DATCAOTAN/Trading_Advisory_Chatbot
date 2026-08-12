@@ -3042,3 +3042,13 @@ The existing review controls and protected confirmation journal now form the exp
 - Focused and neighboring request, Candidate, authority, supervisor, position-read, policy, and thin-UI tests passed with `279 passed` and unchanged dependency warnings. Changed-path compileall and diff checks passed.
 - No full regression was run because the approved task requested focused verification by default. No controlled-submit, runtime `order_send`, MT5 write, or broker mutation was performed.
 - Verification level: `FOCUSED_PASS`. Verdict: `CONVERSATION_SCOPED_TRADING_OWNERSHIP_COMPLETE`.
+
+# 105. PROFESSIONAL TRADING WORKSPACE UI
+
+- The Streamlit shell now uses one shared operational theme with a compact product header, restrained navigation, dense metrics, consistent controls, and responsive desktop/mobile behavior.
+- Advisory remains conversation-led. Operations keeps the authoritative market, account, lifecycle, mandate, Supervisor, Candidate, and permission projections while placing legacy execution diagnostics behind one collapsed disclosure.
+- Evaluation and Settings use the same visual hierarchy without changing their services, persistence, feature flags, or widget authority.
+- Existing widget keys, callbacks, typed requests, trading scope, mandate ownership, Supervisor ownership, Candidate generation, lifecycle, and execution boundaries are unchanged.
+- Focused UI and neighboring tests passed with `68 passed` and two unchanged dependency warnings. Live Streamlit verification covered all four tabs plus desktop/mobile overflow and exception checks.
+- No candidate generation, confirmation, controlled-submit, `order_send`, MT5 write, or broker mutation was performed.
+- Verification level: `FOCUSED_AND_LIVE_PASS`. Verdict: `TRADING_WORKSPACE_UI_REDESIGN_COMPLETE`.
