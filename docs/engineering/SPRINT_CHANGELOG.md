@@ -2405,3 +2405,30 @@ Commit: this commit
 - Verdict: `DETERMINISTIC_AUTONOMOUS_CANDIDATE_ELIGIBILITY_COMPLETE`.
 
 ---
+
+### Post-release fix - Deterministic Draft Policy Alignment
+
+Date: 2026-08-12
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Reused the existing deterministic Draft readiness contract at the autonomous policy boundary.
+- Allowed valid `EDITABLE_TRADE_DRAFT` openings with non-blocking advisory readiness to reach controlled-boundary eligibility.
+- Kept ordinary non-deterministic `WAIT`, hard risk blockers, mandate/account validation, permissions, idempotency, and bridge checks fail closed.
+
+#### Verification
+
+- Focused policy/strategy tests: 46 passed.
+- Canonical acceptance: 67 passed, including all 60 canonical cases.
+- Full regression: 3,718 passed and 156 subtests passed with 3 unchanged warnings.
+
+#### Runtime limitation and safety
+
+- The bounded DEMO rerun received no new completed M1 bar, so no fresh Candidate or downstream submission artifact was created.
+- Supervisor stopped, temporary mandate revoked, original fail-closed app/bridge configuration restored, and health checks passed.
+- Controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero.
+- Verdict: `DEMO_AUTONOMOUS_ORDER_SEND_END_TO_END_BLOCKED`; first remaining blocker: `NO_FRESH_COMPLETED_M1_BAR`.
+
+---

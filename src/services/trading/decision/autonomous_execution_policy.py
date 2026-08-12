@@ -14,6 +14,8 @@ from typing import Any, Mapping, Sequence
 
 from src.services.trading.decision.autonomous_orchestrator import (
     AUTONOMOUS_DECISION_SCHEMA_VERSION,
+    DETERMINISTIC_DRAFT_NON_BLOCKING_READINESS_ACTIONS,
+    EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE,
     AutonomousDecisionCandidate,
     AutonomousDecisionConfig,
     AutonomousDecisionEligibility,
@@ -635,7 +637,12 @@ def _policy_decision(
             return AutonomousPolicyDecision.BLOCK, AutonomousControlledBoundary.NONE, "OPEN_ELIGIBILITY_DISABLED"
         if not inputs.semantic_proposal_complete or not candidate.proposed_semantic_parameter_references:
             return AutonomousPolicyDecision.BLOCK, AutonomousControlledBoundary.NONE, "SEMANTIC_PROPOSAL_INCOMPLETE"
-        if inputs.risk_result is None or inputs.risk_result.action != "REVIEW_READY":
+        risk_action = inputs.risk_result.action if inputs.risk_result else ""
+        deterministic_draft_ready = (
+            candidate.proposal_source == EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE
+            and risk_action in DETERMINISTIC_DRAFT_NON_BLOCKING_READINESS_ACTIONS
+        )
+        if risk_action != "REVIEW_READY" and not deterministic_draft_ready:
             return AutonomousPolicyDecision.BLOCK, AutonomousControlledBoundary.NONE, "OPEN_POLICY_NOT_READY"
         return (
             AutonomousPolicyDecision.ELIGIBLE_FOR_CONTROLLED_BOUNDARY,

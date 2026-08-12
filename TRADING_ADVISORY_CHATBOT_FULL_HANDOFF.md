@@ -2991,3 +2991,12 @@ The existing review controls and protected confirmation journal now form the exp
 - Full regression passed with `3,717 passed`, `156 subtests passed`, and three unchanged warnings. Documentation integrity, compileall, diff, and static safety checks passed.
 - Controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero. Exactly one production `.order_send(` call-site remains and `src/` retains zero `MetaTrader5` imports.
 - Verification level: `FULL_REGRESSION_PASS`. Verdict: `DETERMINISTIC_AUTONOMOUS_CANDIDATE_ELIGIBILITY_COMPLETE`.
+
+# 100. DETERMINISTIC DRAFT AUTONOMOUS POLICY ALIGNMENT
+
+- Root cause: Candidate classification already treated a valid `EDITABLE_TRADE_DRAFT` with advisory readiness `WAIT` or `NO_TRADE` as an eligible deterministic opening, but the later autonomous policy gate still required the advisory-only `REVIEW_READY` value. The same production Candidate therefore stopped at `OPEN_POLICY_NOT_READY`.
+- The policy gate now reuses the existing deterministic Draft readiness contract. A valid deterministic Draft may reach `CONTROLLED_OPEN_POSITION`; ordinary non-deterministic `WAIT` remains blocked, and hard risk, lifecycle, account, mandate, freshness, idempotency, permission, and bridge checks remain unchanged.
+- Focused autonomous policy/strategy tests passed with `46 passed`. Canonical acceptance passed with `67 passed`, including all 60 canonical cases. Full regression passed with `3,718 passed`, `156 subtests passed`, and three unchanged warnings.
+- Bounded DEMO rerun used an operator-approved mandate aligned with the repository's 1% DEMO sizing policy. The earlier volume/risk mismatch and `OPEN_POLICY_NOT_READY` contract defect were resolved without copying Candidate values or widening unrelated scope.
+- The final runtime rerun did not receive a new completed XAUUSDm M1 bar during the bounded observation window, so no new Candidate, pre-submit artifact, adapter call, bridge mutation, or `order_send` occurred. The supervisor was stopped, the temporary mandate was revoked, and app/bridge configuration was restored byte-for-byte to fail closed.
+- Verification level: `FULL_REGRESSION_PASS`. Runtime verdict remains `DEMO_AUTONOMOUS_ORDER_SEND_END_TO_END_BLOCKED` with first remaining blocker `NO_FRESH_COMPLETED_M1_BAR`.

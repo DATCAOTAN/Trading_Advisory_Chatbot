@@ -142,10 +142,8 @@ def test_valid_deterministic_draft_preserves_open_eligibility_until_policy(
         ),
         now=NOW,
     )
-    assert policy.policy_result.decision == "BLOCK"
-    assert policy.policy_result.deterministic_reason_codes == (
-        "OPEN_POLICY_NOT_READY",
-    )
+    assert policy.policy_result.decision == "ELIGIBLE_FOR_CONTROLLED_BOUNDARY"
+    assert policy.policy_result.target_controlled_boundary == "CONTROLLED_OPEN_POSITION"
 
 
 def test_deterministic_hard_risk_blocker_is_preserved_before_policy(tmp_path):

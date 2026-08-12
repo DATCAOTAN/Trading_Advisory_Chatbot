@@ -81,6 +81,16 @@ def test_valid_open_candidate_becomes_eligible_for_controlled_boundary(tmp_path)
     assert result.execution_authority is False
 
 
+def test_non_deterministic_wait_remains_not_ready_for_open_policy(tmp_path):
+    inputs = policy_inputs()
+    inputs = replace(inputs, risk_result=replace(inputs.risk_result, action="WAIT"))
+
+    result = run(tmp_path, inputs).policy_result
+
+    assert result.decision == "BLOCK"
+    assert "OPEN_POLICY_NOT_READY" in result.deterministic_reason_codes
+
+
 def test_risk_blocked_candidate_is_blocked(tmp_path):
     inputs = policy_inputs()
     inputs.risk_result.blockers.append(DecisionBlocker(code="RISK_LIMIT"))
