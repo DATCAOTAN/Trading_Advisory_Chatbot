@@ -3020,3 +3020,14 @@ The existing review controls and protected confirmation journal now form the exp
 - Focused mandate-aware sizing tests passed with `68 passed`; neighboring autonomous, mandate, sizing, policy, and lifecycle tests passed with `196 passed`; canonical acceptance passed with `67 passed`, including all 60 canonical cases.
 - Final full regression passed with `3,728 passed`, `156 subtests passed`, and three unchanged warnings. No execution configuration, controlled-submit, runtime `order_send`, MT5 write, or broker mutation was changed or invoked.
 - Verification level: `FULL_REGRESSION_PASS`. Verdict: `AUTONOMOUS_MANDATE_AWARE_SIZING_COMPLETE`.
+
+# 103. CONTINUOUS AUTONOMOUS CHAT RUNTIME CONTINUITY
+
+- Current account trade-state questions are distinguished from conceptual knowledge before the structured semantic provider selects `KNOWLEDGE`. Multilingual P/L, position, pending-order, SL/TP, volume, history, lifecycle, and provenance reads retain the existing `POSITION_MANAGEMENT` read contract.
+- The active conversational trading request is reloaded with only the semantic state stored on the same assistant artifact. A later unrelated answer cannot be paired with that older trading request.
+- Chat submission now renders the existing persisted mandate/runtime panel in the same Streamlit run. Unrelated chat turns do not hide the controls, replace the strategy, reset mandate limits, or stop the continuous Supervisor.
+- Standing Mandate widgets initialize through session defaults and authoritative persisted-mandate synchronization, avoiding conflicting widget defaults while preserving the store as authority.
+- Focused position-read, conversational, thin-UI, dashboard, and mandate tests passed with `108 passed` and two unchanged dependency warnings.
+- Runtime acceptance passed in one active DEMO conversation: current P/L and SL/TP used `position_state_read` and `position_read`; `ATR là gì?` retained the normal knowledge path. The panel remained visible, Supervisor remained running, lifecycle remained `HEALTHY`, and reconciliation discrepancies/unresolved states remained zero.
+- After a natural reload, the persisted mandate limits remained `0.01 / 100 / 5 / 5 / 500` and the selected mandate/Supervisor state remained present. The read-only position queries caused no controlled-submit, `order_send`, MT5 write, or broker mutation.
+- Verification level: `FOCUSED_AND_LIVE_PASS`. Verdict: `AUTONOMOUS_CHAT_RUNTIME_CONTINUITY_COMPLETE`.

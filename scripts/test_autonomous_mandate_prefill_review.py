@@ -284,12 +284,13 @@ def test_streamlit_review_uses_structured_controls_and_clear_money_units():
     assert "Autonomous Strategy & Mandate Setup" in dashboard
     assert "Max risk / trade (account currency)" in dashboard
     assert "Max loss / day (account currency)" in dashboard
-    assert "value=setup.suggested_maximum_risk_per_trade" in dashboard
+    assert '"mandate_max_risk": setup.suggested_maximum_risk_per_trade' in dashboard
     assert "disabled=command is None or not grant_mandate" in dashboard
     assert "Mandate duration" in dashboard
     assert "Active from (UTC ISO-8601)" not in dashboard
     assert "Confirm Standing Mandate" in dashboard
-    assert "default=setup.suggested_management_actions" in dashboard
+    assert '"mandate_management_actions": list(setup.suggested_management_actions)' in dashboard
+    assert "st.session_state.setdefault" in dashboard
     assert 'order_family="MARKET" if request.trade_action == "OPEN_POSITION" else ""' in chatbot
 
 

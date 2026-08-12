@@ -261,14 +261,14 @@ def render(orchestrator, feature_flags: dict):
                     _render_trade_chart(metrics)
 
     user_query = st.chat_input("Hoi ve xu huong vang, chien luoc SMC, du lieu vi mo...")
-    latest_trading_request = _latest_conversational_trading_request(
+    latest_trading_request, latest_trading_state = _latest_trading_authorization(
         st.session_state.messages
     )
     if latest_trading_request is not None and not user_query:
         _render_conversational_trading_authorization(
             orchestrator,
             latest_trading_request,
-            _latest_resolved_semantic_state(st.session_state.messages),
+            latest_trading_state,
         )
 
     if user_query:
@@ -476,11 +476,14 @@ def render(orchestrator, feature_flags: dict):
             )
             _store_evaluation_runtime_artifacts(artifacts_for_review)
 
-        if trading_request is not None:
+        request_to_render, state_to_render = _latest_trading_authorization(
+            st.session_state.messages
+        )
+        if request_to_render is not None:
             _render_conversational_trading_authorization(
                 orchestrator,
-                trading_request,
-                _latest_resolved_semantic_state(st.session_state.messages),
+                request_to_render,
+                state_to_render,
             )
 
 
@@ -737,16 +740,29 @@ def _ui_decimal(value) -> Decimal | None:
         return None
 
 
-def _latest_conversational_trading_request(messages) -> ConversationalTradingRequest | None:
+def _latest_trading_authorization(
+    messages,
+) -> tuple[ConversationalTradingRequest | None, ResolvedSemanticState | None]:
     for message in reversed(messages):
         payload = message.get("trading_request") if isinstance(message, dict) else None
         if not isinstance(payload, dict):
             continue
         try:
-            return ConversationalTradingRequest.from_public_dict(payload)
+            request = ConversationalTradingRequest.from_public_dict(payload)
         except ValueError:
-            return None
-    return None
+            return None, None
+        state_payload = message.get("resolved_semantic_state")
+        if not isinstance(state_payload, dict):
+            return request, None
+        try:
+            return request, ResolvedSemanticState.from_dict(state_payload)
+        except ValueError:
+            return request, None
+    return None, None
+
+
+def _latest_conversational_trading_request(messages) -> ConversationalTradingRequest | None:
+    return _latest_trading_authorization(messages)[0]
 
 
 def _latest_conversational_context(messages) -> ConversationalIntentContext | None:

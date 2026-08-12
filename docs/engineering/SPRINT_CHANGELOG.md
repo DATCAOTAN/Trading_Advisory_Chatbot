@@ -2483,3 +2483,24 @@ Commit: this commit
 - No execution flag, controlled-submit path, bridge permission, `order_send`, MT5 write, or broker state was changed.
 
 ---
+
+### Post-release fix - Continuous Autonomous Chat Runtime Continuity
+
+Date: 2026-08-12
+Verification: `FOCUSED_AND_LIVE_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Clarified the structured semantic contract so multilingual current trade/account-state reads use the existing authoritative position-read path rather than conceptual knowledge retrieval.
+- Kept each persisted trading request bound only to its own semantic-state artifact and rendered the active runtime panel after unrelated chat responses in the same Streamlit run.
+- Preserved persisted Standing Mandate form values without conflicting Streamlit widget defaults.
+
+#### Verification and safety
+
+- Focused position-read, conversational, thin-UI, dashboard, and mandate tests: 108 passed with two unchanged dependency warnings.
+- Live DEMO P/L and SL/TP queries used `position_state_read`/`position_read`; an unrelated ATR question used the normal knowledge path.
+- The mandate, controls, running Supervisor, healthy lifecycle, and zero reconciliation discrepancies/unresolved states survived the chat sequence and a natural reload.
+- Read-only queries caused zero controlled-submit, runtime `order_send`, MT5 writes, or broker mutations.
+
+---

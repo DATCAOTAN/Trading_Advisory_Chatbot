@@ -738,6 +738,17 @@ def _render_trading_runtime_controls(
                     )
 
                 st.markdown("**Review / Edit bounded limits**")
+                form_defaults = {
+                    "mandate_management_actions": list(setup.suggested_management_actions),
+                    "mandate_max_volume": setup.suggested_maximum_volume,
+                    "mandate_max_risk": setup.suggested_maximum_risk_per_trade,
+                    "mandate_max_positions": setup.suggested_maximum_concurrent_positions,
+                    "mandate_max_trades": setup.suggested_maximum_trades_per_day,
+                    "mandate_max_loss": setup.suggested_maximum_loss_per_day,
+                    "mandate_kill_switch": True,
+                }
+                for suffix, value in form_defaults.items():
+                    st.session_state.setdefault(f"{key_prefix}{suffix}", value)
                 management_actions = tuple(
                     st.multiselect(
                         "Management actions",
@@ -749,43 +760,36 @@ def _render_trading_runtime_controls(
                             "PARTIAL_CLOSE",
                             "CLOSE_POSITION",
                         ),
-                        default=setup.suggested_management_actions,
                         key=f"{key_prefix}mandate_management_actions",
                     )
                 )
                 limit_columns = st.columns(5)
                 maximum_volume = limit_columns[0].text_input(
                     "Max volume (broker units)",
-                    value=setup.suggested_maximum_volume,
                     key=f"{key_prefix}mandate_max_volume",
                 )
                 maximum_risk = limit_columns[1].text_input(
                     "Max risk / trade (account currency)",
-                    value=setup.suggested_maximum_risk_per_trade,
                     key=f"{key_prefix}mandate_max_risk",
                 )
                 maximum_positions = limit_columns[2].number_input(
                     "Max positions",
                     min_value=1,
                     step=1,
-                    value=setup.suggested_maximum_concurrent_positions,
                     key=f"{key_prefix}mandate_max_positions",
                 )
                 maximum_trades = limit_columns[3].number_input(
                     "Max trades / day",
                     min_value=1,
                     step=1,
-                    value=setup.suggested_maximum_trades_per_day,
                     key=f"{key_prefix}mandate_max_trades",
                 )
                 maximum_loss = limit_columns[4].text_input(
                     "Max loss / day (account currency)",
-                    value=setup.suggested_maximum_loss_per_day,
                     key=f"{key_prefix}mandate_max_loss",
                 )
                 mandate_kill_switch = st.checkbox(
                     "Mandate kill switch engaged",
-                    value=True,
                     key=f"{key_prefix}mandate_kill_switch",
                 )
                 grant_mandate = st.checkbox(

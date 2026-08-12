@@ -291,3 +291,32 @@ def test_streamlit_reload_uses_persisted_context_and_renders_completion_card(mon
     assert restored == context
     assert any("Strategy Completion Required" in str(value) for _, value in rendered)
     assert any("STRATEGY_DIRECTION_MISSING" in str(value) for _, value in rendered)
+
+
+def test_unrelated_chat_turn_keeps_latest_trading_request_without_pairing_new_semantics():
+    context = resolve_conversational_context(
+        "Trade BTCUSD automatically when RSI 14 on M1 exceeds 10 on demo"
+    )
+    request = parse_conversational_trading_request(
+        "Trade BTCUSD automatically when RSI 14 on M1 exceeds 10 on demo",
+        conversation_id="runtime-continuity",
+        context=context,
+    )
+    messages = [
+        {
+            "role": "assistant",
+            "trading_request": request.to_public_dict(),
+        },
+        {
+            "role": "assistant",
+            "content": "An unrelated knowledge answer",
+            "resolved_semantic_state": {"newer": "unrelated"},
+        },
+    ]
+
+    restored_request, restored_state = tab_chatbot._latest_trading_authorization(
+        messages
+    )
+
+    assert restored_request == request
+    assert restored_state is None

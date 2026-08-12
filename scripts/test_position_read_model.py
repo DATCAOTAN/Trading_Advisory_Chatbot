@@ -358,6 +358,11 @@ def test_structured_position_read_routes_to_one_read_capability_without_executio
 
 def test_semantic_contract_assigns_existing_trade_reads_to_position_management():
     prompt = StructuredSemanticInterpreter._prompt("arbitrary position-state wording")
+    assert "Before choosing KNOWLEDGE" in prompt
+    assert "in any language" in prompt
+    assert "Interpret multilingual requests directly without requiring translation" in prompt
+    assert "current/latest/now request" in prompt
+    assert "must not be used for account-specific current or historical trade facts" in prompt
     assert "existing positions, pending orders, current or realized P/L" in prompt
     assert "as POSITION_MANAGEMENT with action NONE or EXPLAIN" in prompt
     assert "Do not classify such reads as STRATEGY" in prompt
