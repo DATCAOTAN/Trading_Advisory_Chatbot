@@ -249,6 +249,23 @@ class TradeDraftPolicy:
     maximum_reward_risk_ratio: Decimal = Decimal("10")
 
 
+@dataclass(frozen=True)
+class TradeDraftSizingConstraints:
+    maximum_risk_amount: Decimal
+    maximum_volume: Decimal
+    authority_reference: str
+
+    def __post_init__(self) -> None:
+        if (
+            not self.maximum_risk_amount.is_finite()
+            or self.maximum_risk_amount <= 0
+            or not self.maximum_volume.is_finite()
+            or self.maximum_volume <= 0
+            or not str(self.authority_reference).strip()
+        ):
+            raise ValueError("TRADE_DRAFT_SIZING_CONSTRAINTS_INVALID")
+
+
 class EditableTradeDraftStore:
     _lock = threading.Lock()
 
@@ -327,9 +344,11 @@ class EditableTradeDraftService:
         self,
         store: EditableTradeDraftStore | None = None,
         policy: TradeDraftPolicy | None = None,
+        sizing_constraints: TradeDraftSizingConstraints | None = None,
     ) -> None:
         self.store = store or EditableTradeDraftStore()
         self.policy = policy or TradeDraftPolicy()
+        self.sizing_constraints = sizing_constraints
 
     def build_or_load(
         self,
@@ -394,6 +413,7 @@ class EditableTradeDraftService:
             evidence or _evidence_from_draft(current),
             self.policy,
             changed,
+            self.sizing_constraints,
         )
         next_draft = replace(
             next_draft,
@@ -465,7 +485,9 @@ class EditableTradeDraftService:
             account_scope=_field(values["account_scope"] or None, "VALID" if values["account_scope"] else "MISSING_REQUIRED", "CONVERSATION_INHERITED"),
             blockers=semantic_blockers,
         )
-        return _calculate_draft(base, values, evidence, self.policy, set())
+        return _calculate_draft(
+            base, values, evidence, self.policy, set(), self.sizing_constraints
+        )
 
 
 def build_deterministic_strategy_draft(
@@ -476,6 +498,7 @@ def build_deterministic_strategy_draft(
     broker_symbol: str,
     evidence: TradeDraftMarketEvidence,
     policy: TradeDraftPolicy | None = None,
+    sizing_constraints: TradeDraftSizingConstraints | None = None,
 ) -> EditableTradeDraft:
     """Calculate one non-persistent proposal from an authoritative typed strategy."""
     request = _DeterministicStrategyDraftRequest(
@@ -496,7 +519,9 @@ def build_deterministic_strategy_draft(
     if blockers:
         raise TradeDraftError("STRATEGY_COMPLETION_REQUIRED")
     conversation_id = f"{strategy.identity.strategy_id}:{evidence.reference}"
-    return EditableTradeDraftService(policy=policy)._build(
+    return EditableTradeDraftService(
+        policy=policy, sizing_constraints=sizing_constraints
+    )._build(
         request, conversation_id, evidence, None
     )
 
@@ -597,6 +622,7 @@ def _calculate_draft(
     evidence: TradeDraftMarketEvidence | None,
     policy: TradeDraftPolicy,
     changed: set[str],
+    sizing_constraints: TradeDraftSizingConstraints | None = None,
 ) -> EditableTradeDraft:
     blockers = list(base.blockers)
     warnings: list[str] = []
@@ -747,6 +773,11 @@ def _calculate_draft(
         blockers.append("RISK_LIMIT_EXCEEDED")
     equity = evidence.account_equity if evidence_valid and evidence else None
     risk_amount = equity * risk_fraction if equity is not None else None
+    authorized_risk_budget = (
+        min(risk_amount, sizing_constraints.maximum_risk_amount)
+        if risk_amount is not None and sizing_constraints is not None
+        else risk_amount
+    )
     if equity is None and not evidence_not_attempted:
         blockers.append("ACCOUNT_RISK_BASIS_UNAVAILABLE")
     risk_source = "USER_EDITED" if "risk_fraction" in changed else str(values.get("risk_source") or ("USER_EXPLICIT" if values.get("risk_fraction") else "DEMO_DEFAULT"))
@@ -755,10 +786,35 @@ def _calculate_draft(
     sizing_method = str(values.get("sizing_method") or ("USER_EXPLICIT_VOLUME" if requested_volume is not None else "ACCOUNT_RISK_FRACTION"))
     proposed_volume = requested_volume
     required_metadata = bool(evidence and evidence.tick_size and evidence.tick_value and evidence.volume_step and evidence.volume_min and evidence.volume_max)
+    volume_by_risk = None
+    authorized_volume_cap = None
     if sizing_method == "ACCOUNT_RISK_FRACTION":
-        if risk_amount is not None and distance and required_metadata:
-            raw_volume = risk_amount / ((distance / evidence.tick_size) * evidence.tick_value)
-            proposed_volume = _floor_volume(raw_volume, evidence.volume_step, evidence.volume_min, evidence.volume_max)
+        if authorized_risk_budget is not None and distance and required_metadata:
+            risk_per_lot = (distance / evidence.tick_size) * evidence.tick_value
+            volume_by_risk = authorized_risk_budget / risk_per_lot
+            if sizing_constraints is None:
+                proposed_volume = _floor_volume(
+                    volume_by_risk,
+                    evidence.volume_step,
+                    evidence.volume_min,
+                    evidence.volume_max,
+                )
+            else:
+                authorized_volume_cap = min(
+                    sizing_constraints.maximum_volume, evidence.volume_max
+                )
+                proposed_volume = _floor_volume_to_cap(
+                    min(volume_by_risk, authorized_volume_cap),
+                    evidence.volume_step,
+                    authorized_volume_cap,
+                )
+                if proposed_volume < evidence.volume_min:
+                    blockers.append(
+                        "MANDATE_VOLUME_LIMIT_BELOW_BROKER_MINIMUM"
+                        if authorized_volume_cap < evidence.volume_min
+                        else "MANDATE_RISK_BUDGET_BELOW_BROKER_MINIMUM"
+                    )
+                    proposed_volume = None
         elif not required_metadata and not evidence_not_attempted:
             blockers.append("TICK_VALUE_UNAVAILABLE" if not evidence or not evidence.tick_value else "VOLUME_STEP_INVALID")
     elif sizing_method != "USER_EXPLICIT_VOLUME":
@@ -770,6 +826,13 @@ def _calculate_draft(
         actual_fraction = actual_risk / equity if equity else None
         if actual_fraction is not None and actual_fraction > policy.maximum_risk_fraction:
             blockers.append("RISK_LIMIT_EXCEEDED")
+        if sizing_constraints is not None:
+            if actual_risk > sizing_constraints.maximum_risk_amount:
+                blockers.append("MANDATE_RISK_LIMIT_EXCEEDED")
+            if proposed_volume > sizing_constraints.maximum_volume:
+                blockers.append("MANDATE_VOLUME_LIMIT_EXCEEDED")
+            if proposed_volume > evidence.volume_max:
+                blockers.append("BROKER_VOLUME_MAXIMUM_EXCEEDED")
     sizing_source = "USER_EDITED" if "requested_volume" in changed else str(values.get("sizing_source") or ("USER_EXPLICIT" if requested_volume is not None else "SYSTEM_CALCULATED"))
     sizing_status = "VALID" if proposed_volume is not None else "CALCULATED_PENDING"
     sizing_field = _field(
@@ -779,13 +842,33 @@ def _calculate_draft(
             "proposed_volume": proposed_volume,
             "actual_risk_amount": actual_risk,
             "actual_risk_fraction": actual_fraction,
+            "volume_by_risk": volume_by_risk,
+            "authorized_volume_cap": authorized_volume_cap,
+            "mandate_maximum_volume": (
+                sizing_constraints.maximum_volume if sizing_constraints else None
+            ),
+            "broker_minimum_volume": evidence.volume_min if evidence else None,
+            "broker_maximum_volume": evidence.volume_max if evidence else None,
+            "broker_volume_step": evidence.volume_step if evidence else None,
+            "sizing_authority_reference": (
+                sizing_constraints.authority_reference if sizing_constraints else ""
+            ),
         },
         sizing_status,
         sizing_source,
         (evidence.reference,) if proposed_volume is not None and evidence_valid and evidence else (),
     )
     risk_field = _field(
-        {"fraction": risk_fraction, "amount": risk_amount, "policy_version": policy.policy_version},
+        {
+            "fraction": risk_fraction,
+            "amount": risk_amount,
+            "policy_risk_amount": risk_amount,
+            "mandate_maximum_risk": (
+                sizing_constraints.maximum_risk_amount if sizing_constraints else None
+            ),
+            "authorized_risk_budget": authorized_risk_budget,
+            "policy_version": policy.policy_version,
+        },
         "VALID" if risk_amount is not None and "RISK_LIMIT_EXCEEDED" not in blockers else "CALCULATED_PENDING" if risk_amount is None else "INVALID",
         risk_source,
         (evidence.account_reference,) if evidence and evidence.account_reference else (),
@@ -911,10 +994,16 @@ def _field_from_dict(name: str, payload: Mapping[str, Any]) -> TradeFieldValue[A
             "entry": ("reference_price",),
             "stop": ("price", "atr_multiplier"),
             "target": ("price", "reward_risk_ratio"),
-            "risk": ("fraction", "amount"),
+            "risk": (
+                "fraction", "amount", "policy_risk_amount",
+                "mandate_maximum_risk", "authorized_risk_budget",
+            ),
             "sizing": (
                 "requested_volume", "proposed_volume", "actual_risk_amount",
-                "actual_risk_fraction",
+                "actual_risk_fraction", "volume_by_risk",
+                "authorized_volume_cap", "mandate_maximum_volume",
+                "broker_minimum_volume", "broker_maximum_volume",
+                "broker_volume_step",
             ),
         }.get(name, ())
         for key in decimal_keys:
@@ -971,6 +1060,11 @@ def _round_tick(value: Decimal, tick_size: Decimal) -> Decimal:
 def _floor_volume(value: Decimal, step: Decimal, minimum: Decimal, maximum: Decimal) -> Decimal:
     bounded = max(minimum, min(maximum, value))
     return max(minimum, (bounded / step).quantize(Decimal("1"), rounding=ROUND_DOWN) * step)
+
+
+def _floor_volume_to_cap(value: Decimal, step: Decimal, maximum: Decimal) -> Decimal:
+    bounded = min(maximum, value)
+    return (bounded / step).quantize(Decimal("1"), rounding=ROUND_DOWN) * step
 
 
 def _hash(value: Mapping[str, Any]) -> str:

@@ -2457,3 +2457,29 @@ Commit: this commit
 - No execution permission was enabled and no controlled-submit, runtime `order_send`, MT5 write, or broker mutation occurred during the repair.
 
 ---
+
+### Post-release fix - Autonomous Mandate-Aware Sizing
+
+Date: 2026-08-12
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added a minimal typed projection of the active Standing Mandate risk and volume caps to deterministic autonomous Draft sizing.
+- Applied the lower policy/mandate risk budget and mandate/broker volume cap before Candidate persistence, with broker-step flooring and no upward broker-minimum clamp.
+- Preserved separate policy, mandate, broker, proposed-volume, and actual-risk provenance; kept final `TradingAuthorityService` enforcement unchanged.
+- Kept human-confirmed sizing behavior unchanged and failed closed for inactive, mismatched, expired, revoked, or below-minimum mandate constraints.
+
+#### Verification
+
+- Focused sizing tests: 68 passed.
+- Autonomous/mandate/sizing neighbors: 196 passed.
+- Canonical acceptance: 67 passed, including all 60 canonical cases.
+- Full regression: 3,728 passed and 156 subtests passed with 3 unchanged warnings.
+
+#### Safety
+
+- No execution flag, controlled-submit path, bridge permission, `order_send`, MT5 write, or broker state was changed.
+
+---

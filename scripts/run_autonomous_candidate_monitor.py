@@ -21,6 +21,7 @@ from src.services.trading.decision.autonomous_candidate_monitor import (  # noqa
 from src.services.trading.decision.autonomous_trading_coordinator import (  # noqa: E402
     AutonomousTradingCoordinator,
     production_mandate_context,
+    production_trade_draft_sizing_constraints,
 )
 from src.services.trading.decision.autonomous_orchestrator import AutonomousDecisionJournal  # noqa: E402
 from src.services.trading.decision.operator_candidate_generation import (  # noqa: E402
@@ -115,11 +116,24 @@ def main(argv: list[str] | None = None) -> int:
             ),
         )
 
+    def draft_sizing_constraints(current_strategy):
+        current = account_context()
+        return production_trade_draft_sizing_constraints(
+            current_strategy,
+            authority_service=authority_service,
+            mandate_id=args.mandate_id,
+            account_context_fingerprint=current["account_context_fingerprint"],
+            account_is_demo=current["account_is_demo"],
+        )
+
     coordinator = AutonomousTradingCoordinator(
         feature_service=LiveFeatureService(
             bundle_builder=MarketSnapshotBundleBuilder(live_service.provider)
         ),
-        input_assembler=AuthoritativeAutonomousInputAssembler(live_service),
+        input_assembler=AuthoritativeAutonomousInputAssembler(
+            live_service,
+            sizing_constraints_provider=draft_sizing_constraints,
+        ),
         strategy=strategy,
         strategy_direction=mandate.strategy_direction,
         strategy_action=mandate.strategy_action,

@@ -16,6 +16,7 @@ from src.services.trading.decision.autonomous_candidate_monitor import (
 )
 from src.services.trading.decision.autonomous_trading_coordinator import (
     AutonomousTradingCoordinator,
+    production_trade_draft_sizing_constraints,
 )
 from src.services.trading.decision.operator_candidate_generation import (
     OperatorCandidateInputError,
@@ -54,6 +55,16 @@ def test_bound_strategy_reloads_from_fresh_authority_service(tmp_path):
 
     assert reloaded_mandate.strategy_id == strategy.identity.strategy_id
     assert strategy == _strategy()
+    constraints = production_trade_draft_sizing_constraints(
+        strategy,
+        authority_service=restarted,
+        mandate_id=mandate.mandate_id,
+        account_context_fingerprint="a" * 64,
+        account_is_demo=True,
+        now=NOW,
+    )
+    assert str(constraints.maximum_volume) == mandate.maximum_volume
+    assert str(constraints.maximum_risk_amount) == mandate.maximum_risk_per_trade
 
 
 def test_legacy_mandate_without_strategy_fails_closed(tmp_path):
@@ -173,9 +184,11 @@ def test_unsupported_strategy_rule_is_rejected_before_persistence(tmp_path):
 def test_supervisor_reload_rejects_account_revocation_and_expiry(tmp_path):
     authority, mandate = _bound_authority(tmp_path)
     with pytest.raises(TradingAuthorityError, match="SUPERVISOR_ACCOUNT_MISMATCH"):
-        authority.load_supervisor_strategy(
-            mandate.mandate_id,
-            account_fingerprint="b" * 64,
+        production_trade_draft_sizing_constraints(
+            _strategy(),
+            authority_service=authority,
+            mandate_id=mandate.mandate_id,
+            account_context_fingerprint="b" * 64,
             account_is_demo=True,
             now=NOW,
         )
@@ -187,18 +200,22 @@ def test_supervisor_reload_rejects_account_revocation_and_expiry(tmp_path):
         now=NOW,
     )
     with pytest.raises(TradingAuthorityError, match="SUPERVISOR_MANDATE_INACTIVE"):
-        authority.load_supervisor_strategy(
-            mandate.mandate_id,
-            account_fingerprint="a" * 64,
+        production_trade_draft_sizing_constraints(
+            _strategy(),
+            authority_service=authority,
+            mandate_id=mandate.mandate_id,
+            account_context_fingerprint="a" * 64,
             account_is_demo=True,
             now=NOW,
         )
 
     other, other_mandate = _bound_authority(tmp_path / "expired")
     with pytest.raises(TradingAuthorityError, match="SUPERVISOR_MANDATE_INACTIVE"):
-        other.load_supervisor_strategy(
-            other_mandate.mandate_id,
-            account_fingerprint="a" * 64,
+        production_trade_draft_sizing_constraints(
+            _strategy(),
+            authority_service=other,
+            mandate_id=other_mandate.mandate_id,
+            account_context_fingerprint="a" * 64,
             account_is_demo=True,
             now=NOW + timedelta(hours=2),
         )

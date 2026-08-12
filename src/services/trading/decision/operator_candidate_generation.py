@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from src.config import Config
 from src.services.trading.decision.autonomous_proposal_provider import (
@@ -53,6 +53,7 @@ from src.services.trading.proposal.editable_trade_draft import (
     EditableTradeDraftStore,
     market_evidence_from_live_result,
     TradeDraftError,
+    TradeDraftSizingConstraints,
 )
 
 
@@ -109,6 +110,9 @@ class AuthoritativeAutonomousInputAssembler:
         decision_engine: Any | None = None,
         lifecycle_supervisor: Any | None = None,
         proposal_provider: Any | None = None,
+        sizing_constraints_provider: Callable[
+            [ConversationalStrategyRequest], TradeDraftSizingConstraints
+        ] | None = None,
         mode: str = AUTONOMOUS_RUNTIME_MODE,
     ) -> None:
         self.live_service = live_service
@@ -126,6 +130,7 @@ class AuthoritativeAutonomousInputAssembler:
         self.decision_engine = decision_engine or TradeDecisionPolicyEngine()
         self.lifecycle_supervisor = lifecycle_supervisor or MT5PositionLifecycleSupervisor()
         self.proposal_provider = proposal_provider or AutonomousOrderProposalProvider()
+        self.sizing_constraints_provider = sizing_constraints_provider
         self.mode = mode
 
     def build(
@@ -364,14 +369,28 @@ class AuthoritativeAutonomousInputAssembler:
             account_environment=getattr(account, "account_environment", "UNKNOWN"),
         )
         try:
+            if self.sizing_constraints_provider is None:
+                raise OperatorCandidateInputError(
+                    "MANDATE_SIZING_CONSTRAINTS_MISSING"
+                )
+            sizing_constraints = self.sizing_constraints_provider(strategy)
+            if not isinstance(sizing_constraints, TradeDraftSizingConstraints):
+                raise OperatorCandidateInputError(
+                    "MANDATE_SIZING_CONSTRAINTS_INVALID"
+                )
             draft = build_deterministic_strategy_draft(
                 strategy,
                 direction=strategy_direction,
                 action=strategy_action,
                 broker_symbol=feature_result.feature_snapshot.broker_symbol,
                 evidence=evidence,
+                sizing_constraints=sizing_constraints,
             )
+        except OperatorCandidateInputError:
+            raise
         except TradeDraftError as exc:
+            raise OperatorCandidateInputError(str(exc)) from exc
+        except (TypeError, ValueError, RuntimeError) as exc:
             raise OperatorCandidateInputError(str(exc)) from exc
         if draft.blockers:
             raise OperatorCandidateInputError(*draft.blockers)

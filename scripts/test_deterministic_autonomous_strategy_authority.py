@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -19,6 +20,9 @@ from src.services.trading.decision.models import DecisionBlocker
 from src.services.trading.decision.operator_candidate_generation import (
     AuthoritativeAutonomousInputAssembler,
     OperatorCandidateInputError,
+)
+from src.services.trading.proposal.editable_trade_draft import (
+    TradeDraftSizingConstraints,
 )
 
 
@@ -90,6 +94,99 @@ def test_explicit_deterministic_strategy_builds_candidate_inputs_without_llm_vet
     assert candidate.executable is False
     assert candidate.execution_authority is False
     assert candidate.order_send_allowed is False
+
+
+@pytest.mark.parametrize(
+    ("maximum_risk", "maximum_volume", "volume"),
+    (
+        ("1000", "100", "0.33"),
+        ("30", "100", "0.1"),
+        ("1000", "0.05", "0.05"),
+        ("30", "0.05", "0.05"),
+    ),
+)
+def test_deterministic_sizing_uses_most_restrictive_mandate_cap(
+    maximum_risk, maximum_volume, volume
+):
+    assembler, _provider, _selector = _assembler(
+        maximum_risk=maximum_risk,
+        maximum_volume=maximum_volume,
+    )
+
+    result = assembler.build(
+        now=NOW,
+        symbol="XAUUSD",
+        strategy=_strategy(),
+        strategy_direction="BUY",
+        strategy_action="OPEN_POSITION",
+    )
+
+    assert result.order_proposal.proposed_volume == volume
+    actual_risk = Decimal(volume) * Decimal("300")
+    assert actual_risk <= Decimal(maximum_risk)
+    assert Decimal(volume) <= Decimal(maximum_volume)
+
+
+def test_deterministic_sizing_floors_to_broker_step():
+    assembler, _provider, _selector = _assembler(
+        tick_change={"volume_step": "0.03"},
+        maximum_risk="1000",
+        maximum_volume="0.1",
+    )
+
+    result = assembler.build(
+        now=NOW,
+        symbol="XAUUSD",
+        strategy=_strategy(),
+        strategy_direction="BUY",
+        strategy_action="OPEN_POSITION",
+    )
+
+    assert result.order_proposal.proposed_volume == "0.09"
+
+
+@pytest.mark.parametrize(
+    ("maximum_risk", "maximum_volume", "blocker"),
+    (
+        ("1", "100", "MANDATE_RISK_BUDGET_BELOW_BROKER_MINIMUM"),
+        ("1000", "0.005", "MANDATE_VOLUME_LIMIT_BELOW_BROKER_MINIMUM"),
+    ),
+)
+def test_mandate_budget_below_broker_minimum_fails_without_rounding_up(
+    maximum_risk, maximum_volume, blocker
+):
+    assembler, provider, _selector = _assembler(
+        maximum_risk=maximum_risk,
+        maximum_volume=maximum_volume,
+    )
+
+    with pytest.raises(OperatorCandidateInputError) as exc_info:
+        assembler.build(
+            now=NOW,
+            symbol="XAUUSD",
+            strategy=_strategy(),
+            strategy_direction="BUY",
+            strategy_action="OPEN_POSITION",
+        )
+
+    assert exc_info.value.blockers == (blocker,)
+    assert provider.calls == 0
+
+
+def test_autonomous_deterministic_sizing_requires_authoritative_constraints():
+    assembler, provider, _selector = _assembler(include_constraints=False)
+
+    with pytest.raises(OperatorCandidateInputError) as exc_info:
+        assembler.build(
+            now=NOW,
+            symbol="XAUUSD",
+            strategy=_strategy(),
+            strategy_direction="BUY",
+            strategy_action="OPEN_POSITION",
+        )
+
+    assert exc_info.value.blockers == ("MANDATE_SIZING_CONSTRAINTS_MISSING",)
+    assert provider.calls == 0
 
 
 @pytest.mark.parametrize("readiness_action", ("WAIT", "NO_TRADE"))
@@ -259,6 +356,9 @@ def _assembler(
     risk_action="REVIEW_READY",
     risk_blockers=(),
     feature_blockers=(),
+    maximum_risk="1000",
+    maximum_volume="100",
+    include_constraints=True,
 ):
     inputs = make_inputs()
     inputs.runtime_context.symbol = "XAUUSD"
@@ -350,6 +450,16 @@ def _assembler(
         decision_engine=_Component(inputs.risk_result),
         lifecycle_supervisor=_Component(inputs.lifecycle_status),
         proposal_provider=provider,
+        sizing_constraints_provider=(
+            (
+                lambda _strategy: TradeDraftSizingConstraints(
+                    maximum_risk_amount=Decimal(maximum_risk),
+                    maximum_volume=Decimal(maximum_volume),
+                    authority_reference="mandate-test:v1",
+                )
+            )
+            if include_constraints else None
+        ),
     )
     return assembler, provider, method_selector
 

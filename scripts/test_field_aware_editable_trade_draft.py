@@ -17,6 +17,7 @@ from src.services.trading.proposal.editable_trade_draft import (
     EditableTradeDraftStore,
     TradeDraftError,
     TradeDraftMarketEvidence,
+    TradeDraftSizingConstraints,
     TradeParameterPatch,
 )
 
@@ -114,6 +115,44 @@ def test_inherited_symbol_and_explicit_timeframe_override(tmp_path):
     assert not draft.blockers
     assert draft.executable is False
     assert draft.execution_authority is False
+
+
+def test_mandate_sizing_provenance_survives_protected_reload(tmp_path):
+    request, _ = _request(
+        "buy XAUUSDm when RSI 14 M1 > 10, demo account, confirm every trade"
+    )
+    assert request is not None
+    store = EditableTradeDraftStore(tmp_path / "drafts.jsonl")
+    service = EditableTradeDraftService(
+        store=store,
+        sizing_constraints=TradeDraftSizingConstraints(
+            maximum_risk_amount=Decimal("30"),
+            maximum_volume=Decimal("0.05"),
+            authority_reference="mandate-safe:v2",
+        ),
+    )
+
+    draft = service.build_or_load(
+        request, conversation_id="mandate-sizing", evidence=_evidence()
+    )
+    loaded = store.load(draft.draft_id, draft.revision)
+
+    assert loaded == draft
+    assert draft.risk.value == {
+        "fraction": Decimal("0.01"),
+        "amount": Decimal("100.00"),
+        "policy_risk_amount": Decimal("100.00"),
+        "mandate_maximum_risk": Decimal("30"),
+        "authorized_risk_budget": Decimal("30"),
+        "policy_version": "editable-trade-risk/v1",
+    }
+    assert draft.sizing.value["mandate_maximum_volume"] == Decimal("0.05")
+    assert draft.sizing.value["broker_minimum_volume"] == Decimal("0.01")
+    assert draft.sizing.value["broker_maximum_volume"] == Decimal("100")
+    assert draft.sizing.value["broker_volume_step"] == Decimal("0.01")
+    assert draft.sizing.value["proposed_volume"] == Decimal("0.05")
+    assert draft.sizing.value["actual_risk_amount"] == Decimal("15.00")
+    assert draft.sizing.value["sizing_authority_reference"] == "mandate-safe:v2"
 
 
 def test_partial_completion_preserves_explicit_fields_and_only_supplies_stop(tmp_path):

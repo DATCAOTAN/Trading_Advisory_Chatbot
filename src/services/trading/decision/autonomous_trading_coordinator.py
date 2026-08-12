@@ -46,6 +46,9 @@ from src.services.trading.human_confirmed_management import (
     management_target_changed,
 )
 from src.services.trading.position_read_model import PositionReadModelService
+from src.services.trading.proposal.editable_trade_draft import (
+    TradeDraftSizingConstraints,
+)
 
 
 @dataclass(frozen=True)
@@ -927,6 +930,31 @@ def production_mandate_context(
         ).hexdigest(),
         "terminal_capability": capability,
     }
+
+
+def production_trade_draft_sizing_constraints(
+    strategy: Any,
+    *,
+    authority_service: TradingAuthorityService,
+    mandate_id: str,
+    account_context_fingerprint: str,
+    account_is_demo: bool,
+    now: datetime | None = None,
+) -> TradeDraftSizingConstraints:
+    """Project current mandate caps for one deterministic autonomous Draft."""
+    mandate, bound_strategy = authority_service.load_supervisor_strategy(
+        mandate_id,
+        account_fingerprint=account_context_fingerprint,
+        account_is_demo=account_is_demo,
+        now=now,
+    )
+    if bound_strategy != strategy:
+        raise TradingAuthorityError("SUPERVISOR_STRATEGY_BINDING_CHANGED")
+    return TradeDraftSizingConstraints(
+        maximum_risk_amount=Decimal(mandate.maximum_risk_per_trade),
+        maximum_volume=Decimal(mandate.maximum_volume),
+        authority_reference=f"{mandate.mandate_id}:v{mandate.mandate_version}",
+    )
 
 
 def _candidate_risk_amount(candidate: Any, inputs: Any) -> str:

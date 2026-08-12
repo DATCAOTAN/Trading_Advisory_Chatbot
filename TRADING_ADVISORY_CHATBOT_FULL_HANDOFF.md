@@ -3009,3 +3009,14 @@ The existing review controls and protected confirmation journal now form the exp
 - Focused lifecycle/reconciliation tests passed with `46 passed`; lifecycle/reconciliation/coordinator/monitor neighbors passed with `69 passed`. Full regression passed with `3,719 passed`, `156 subtests passed`, and three unchanged warnings.
 - A read-only DEMO lifecycle cycle reported `HEALTHY`, account match true, zero discrepancies, one historical `BROKER_REJECTED` record, and one `POSITION_CLOSED` record. No execution permission, controlled-submit, runtime `order_send`, MT5 write, or broker mutation occurred during the repair.
 - Verification level: `FULL_REGRESSION_PASS`.
+
+# 102. AUTONOMOUS MANDATE-AWARE DETERMINISTIC SIZING
+
+- Root cause: deterministic autonomous Draft sizing used only configured account-risk policy and broker metadata. Standing Mandate risk and volume limits were first applied after Candidate persistence, so a valid but permanently unauthorized Candidate could be stored.
+- The production autonomous assembler now reloads the active account-bound Standing Mandate for every fresh deterministic proposal and passes only its typed maximum-risk, maximum-volume, and authority reference projection into the existing Draft calculator.
+- Deterministic sizing uses the lower policy/mandate risk budget, caps volume by the lower mandate/broker maximum, floors to broker step, and recalculates actual risk. A constrained result below broker minimum fails closed and is never rounded upward.
+- Policy risk, mandate risk, effective budget, broker volume metadata, mandate volume cap, proposed volume, and actual risk retain separate protected provenance through strict Draft persistence/reload.
+- Human-confirmed and unconstrained Draft behavior is unchanged. `TradingAuthorityService` remains the independent final mandate authorization check and still rejects tampered or out-of-limit Candidates.
+- Focused mandate-aware sizing tests passed with `68 passed`; neighboring autonomous, mandate, sizing, policy, and lifecycle tests passed with `196 passed`; canonical acceptance passed with `67 passed`, including all 60 canonical cases.
+- Final full regression passed with `3,728 passed`, `156 subtests passed`, and three unchanged warnings. No execution configuration, controlled-submit, runtime `order_send`, MT5 write, or broker mutation was changed or invoked.
+- Verification level: `FULL_REGRESSION_PASS`. Verdict: `AUTONOMOUS_MANDATE_AWARE_SIZING_COMPLETE`.
