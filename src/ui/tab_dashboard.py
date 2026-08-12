@@ -460,6 +460,52 @@ def _mode_ui_capabilities(mode: str) -> dict[str, bool]:
     }
 
 
+def _active_mandate_for_setup(
+    setup, mandates, *, preferred_mandate_id: str = "", now: datetime | None = None
+):
+    expected_id = preferred_mandate_id or setup.mandate_id
+    current = now or datetime.now(timezone.utc)
+    for mandate in reversed(tuple(mandates)):
+        try:
+            expires_at = datetime.fromisoformat(
+                str(mandate["expires_at"]).replace("Z", "+00:00")
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (
+            expires_at.tzinfo is not None
+            and mandate.get("mandate_id") == expected_id
+            and mandate.get("strategy_id") == setup.strategy_id
+            and mandate.get("operating_mode") == setup.operating_mode
+            and mandate.get("integrity_valid") is True
+            and mandate.get("revoked") is False
+            and expires_at > current
+        ):
+            return mandate
+    return None
+
+
+def _sync_mandate_form_state(key_prefix: str, mandate) -> None:
+    if mandate is None:
+        return
+    authority_key = f"{key_prefix}mandate_form_authority"
+    authority = f"{mandate['mandate_id']}:v{mandate['mandate_version']}"
+    if st.session_state.get(authority_key) == authority:
+        return
+    values = {
+        "mandate_management_actions": list(mandate["permitted_management_actions"]),
+        "mandate_max_volume": mandate["maximum_volume"],
+        "mandate_max_risk": mandate["maximum_risk_per_trade"],
+        "mandate_max_positions": mandate["maximum_concurrent_positions"],
+        "mandate_max_trades": mandate["maximum_trades_per_day"],
+        "mandate_max_loss": mandate["maximum_loss_per_day"],
+        "mandate_kill_switch": mandate["kill_switch_engaged"],
+    }
+    for suffix, value in values.items():
+        st.session_state[f"{key_prefix}{suffix}"] = value
+    st.session_state[authority_key] = authority
+
+
 def _candidate_runtime_blockers(status) -> tuple[str, ...]:
     lifecycle = status["lifecycle"]
     blockers = []
@@ -613,6 +659,9 @@ def _render_trading_runtime_controls(
         if not mode_ui["mandate_controls"]:
             return status["mode"], runtime_blockers
 
+        process = _autonomous_monitor_process()
+        process_status = process.status()
+        persisted_mandate = None
         if strategy is None:
             st.info("Complete an autonomous strategy before reviewing a Standing Mandate.")
         else:
@@ -640,6 +689,14 @@ def _render_trading_runtime_controls(
                 st.warning(f"Standing Mandate setup unavailable: {str(exc)}")
 
             if setup is not None:
+                persisted_mandate = _active_mandate_for_setup(
+                    setup,
+                    status["mandates"],
+                    preferred_mandate_id=(
+                        process_status["mandate_id"] if process_status["running"] else ""
+                    ),
+                )
+                _sync_mandate_form_state(key_prefix, persisted_mandate)
                 st.markdown("#### Autonomous Strategy & Mandate Setup")
                 st.caption(
                     f"Strategy: {setup.strategy_description} | "
@@ -673,6 +730,12 @@ def _render_trading_runtime_controls(
                         f"{field}={source}" for field, source in setup.field_sources
                     )
                 )
+                if persisted_mandate is not None:
+                    st.caption(
+                        "Displayed limits loaded from persisted Standing Mandate "
+                        f"{persisted_mandate['mandate_id']}:v"
+                        f"{persisted_mandate['mandate_version']}."
+                    )
 
                 st.markdown("**Review / Edit bounded limits**")
                 management_actions = tuple(
@@ -784,13 +847,27 @@ def _render_trading_runtime_controls(
                 except Exception as exc:
                     st.warning(f"Mandate revocation blocked: {str(exc)}")
         with command_columns[1]:
-            process = _autonomous_monitor_process()
-            process_status = process.status()
+            selected_mandate_id = (
+                process_status["mandate_id"]
+                if process_status["running"]
+                else (
+                    persisted_mandate["mandate_id"]
+                    if persisted_mandate is not None
+                    else ""
+                )
+            )
+            supervisor_key = f"{key_prefix}supervisor_mandate"
+            if selected_mandate_id in mandate_ids:
+                st.session_state[supervisor_key] = selected_mandate_id
             monitor_mandate = st.selectbox(
                 "Supervisor mandate",
                 mandate_ids,
-                index=None,
-                key=f"{key_prefix}supervisor_mandate",
+                index=(
+                    mandate_ids.index(selected_mandate_id)
+                    if selected_mandate_id in mandate_ids
+                    else None
+                ),
+                key=supervisor_key,
             )
             start, stop = st.columns(2)
             if start.button(

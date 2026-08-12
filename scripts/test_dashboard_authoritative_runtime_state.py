@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,11 +9,34 @@ from src.services.trading.decision.operator_candidate_generation import (
     operator_timeframe_profile,
 )
 from src.ui.tab_dashboard import (
+    _active_mandate_for_setup,
     _candidate_runtime_blockers,
     _latest_monitor_row,
     _market_runtime_projection,
     _mode_ui_capabilities,
+    _sync_mandate_form_state,
 )
+
+
+def _mandate(**overrides):
+    value = {
+        "mandate_id": "mandate-current",
+        "mandate_version": 2,
+        "strategy_id": "strategy-current",
+        "operating_mode": "autonomous_live",
+        "expires_at": "2026-08-02T11:00:00+00:00",
+        "integrity_valid": True,
+        "revoked": False,
+        "permitted_management_actions": ["OBSERVE", "NO_ACTION"],
+        "maximum_volume": "0.01",
+        "maximum_risk_per_trade": "100",
+        "maximum_concurrent_positions": 3,
+        "maximum_trades_per_day": 3,
+        "maximum_loss_per_day": "500",
+        "kill_switch_engaged": False,
+    }
+    value.update(overrides)
+    return value
 
 
 def _market_result(*, symbol="BTCUSD", broker_symbol="BTCUSDm", issue=None):
@@ -66,6 +90,59 @@ def test_btc_selection_resolves_existing_broker_symbol_and_profile():
 def test_xau_default_profile_is_unchanged_and_not_session_owned():
     assert operator_timeframe_profile("XAUUSD") != ("M1", "H1", "H4")
     assert "session_state" not in operator_timeframe_profile.__code__.co_names
+
+
+def test_dashboard_reload_uses_current_integrity_valid_persisted_mandate():
+    setup = SimpleNamespace(
+        mandate_id="mandate-current",
+        strategy_id="strategy-current",
+        operating_mode="autonomous_live",
+    )
+    mandate = _mandate()
+
+    assert _active_mandate_for_setup(
+        setup,
+        [mandate],
+        preferred_mandate_id="mandate-current",
+        now=datetime.fromisoformat("2026-08-02T10:00:00+00:00"),
+    ) == mandate
+
+
+def test_dashboard_does_not_restore_expired_revoked_or_wrong_strategy_mandate():
+    setup = SimpleNamespace(
+        mandate_id="mandate-current",
+        strategy_id="strategy-current",
+        operating_mode="autonomous_live",
+    )
+    now = datetime.fromisoformat("2026-08-02T10:00:00+00:00")
+
+    for mandate in (
+        _mandate(expires_at="2026-08-02T09:59:00+00:00"),
+        _mandate(revoked=True),
+        _mandate(strategy_id="strategy-other"),
+        _mandate(integrity_valid=False),
+    ):
+        assert _active_mandate_for_setup(setup, [mandate], now=now) is None
+
+
+def test_persisted_mandate_values_replace_fresh_session_defaults(monkeypatch):
+    session_state = {}
+    monkeypatch.setattr(
+        "src.ui.tab_dashboard.st", SimpleNamespace(session_state=session_state)
+    )
+
+    _sync_mandate_form_state("trade_", _mandate())
+
+    assert session_state["trade_mandate_management_actions"] == [
+        "OBSERVE",
+        "NO_ACTION",
+    ]
+    assert session_state["trade_mandate_max_volume"] == "0.01"
+    assert session_state["trade_mandate_max_risk"] == "100"
+    assert session_state["trade_mandate_max_positions"] == 3
+    assert session_state["trade_mandate_max_trades"] == 3
+    assert session_state["trade_mandate_max_loss"] == "500"
+    assert session_state["trade_mandate_kill_switch"] is False
 
 
 def test_symbol_mismatch_is_visible_and_never_falls_back():
