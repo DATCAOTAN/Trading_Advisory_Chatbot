@@ -1155,6 +1155,24 @@ class TradingAuthorityService:
             blockers.append("MANDATE_EXPIRED_OR_INACTIVE")
         if candidate.operating_mode != "autonomous_live":
             blockers.append("CANDIDATE_MODE_MISMATCH")
+        strategy = None
+        if mandate.protected_strategy:
+            try:
+                strategy = ConversationalStrategyRequest.from_dict(
+                    dict(mandate.protected_strategy)
+                )
+            except (TypeError, ValueError):
+                blockers.append("MANDATE_STRATEGY_BINDING_INVALID")
+        if strategy is not None and (
+            getattr(candidate, "strategy_id", "") != strategy.identity.strategy_id
+            or getattr(candidate, "strategy_version", "") != strategy.identity.strategy_version
+            or not hmac.compare_digest(
+                getattr(candidate, "normalized_strategy_hash", ""),
+                strategy.identity.normalized_strategy_hash,
+            )
+            or getattr(candidate, "trading_scope", "") != strategy.trading_scope
+        ):
+            blockers.append("CANDIDATE_STRATEGY_BINDING_MISMATCH")
         required_references = (
             candidate.candidate_reference,
             candidate.provenance_hash,

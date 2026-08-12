@@ -161,6 +161,60 @@ def test_strategy_scope_does_not_replace_authoritative_demo_account_binding(tmp_
     assert reloaded.account_is_demo is True
 
 
+def test_mandate_authorization_rejects_candidate_from_another_trading_scope(tmp_path):
+    authority = _authority(tmp_path)
+    strategy = replace(_strategy(), trading_scope="trading_scope_" + "a" * 24)
+    strategy = replace(strategy, identity=strategy_identity(strategy))
+    mandate = authority.grant_mandate(
+        **replace(_command_for_strategy(strategy), kill_switch_engaged=False).__dict__,
+        account_fingerprint="a" * 64,
+        account_is_demo=True,
+        nonce="scope-nonce",
+        idempotency_key="scope-idempotency",
+        operator_grant=True,
+        now=NOW,
+    )
+    candidate = SimpleNamespace(
+        operating_mode="autonomous_live",
+        strategy_id=strategy.identity.strategy_id,
+        strategy_version=strategy.identity.strategy_version,
+        normalized_strategy_hash=strategy.identity.normalized_strategy_hash,
+        trading_scope="trading_scope_" + "b" * 24,
+        candidate_reference="candidate-ref",
+        provenance_hash="a" * 64,
+        structured_order_hash="b" * 64,
+        proposal_source_reference="proposal-ref",
+        account_context_reference="account-ref",
+        risk_result_reference="risk-ref",
+        lifecycle_observation_reference="lifecycle-ref",
+        expires_at=(NOW + timedelta(minutes=5)).isoformat(),
+        symbol_reference="XAUUSD",
+        broker_symbol_reference="XAUUSDm",
+        action="MARKET",
+        deterministic_eligibility_result="ELIGIBLE_CANDIDATE",
+        blocked_reason_codes=(),
+        proposed_volume="0.01",
+    )
+
+    blockers = authority._candidate_blockers(
+        candidate,
+        authority.store.latest_mode(),
+        mandate,
+        "a" * 64,
+        True,
+        "0.5",
+        0,
+        0,
+        "0",
+        False,
+        True,
+        True,
+        NOW,
+    )
+
+    assert blockers == ("CANDIDATE_STRATEGY_BINDING_MISMATCH",)
+
+
 def test_unsupported_strategy_rule_is_rejected_before_persistence(tmp_path):
     authority = _authority(tmp_path)
     strategy = replace(

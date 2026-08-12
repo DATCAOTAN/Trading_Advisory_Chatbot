@@ -268,6 +268,7 @@ class AuthoritativeAutonomousInputAssembler:
                 strategy.identity.normalized_strategy_hash if strategy else ""
             ),
             reasoning_evidence_summary=_reasoning_evidence_summary(feature_result),
+            trading_scope=(strategy.trading_scope if strategy else ""),
         )
         handoff_evaluated_at = (
             _utc(now) if now is not None else datetime.now(timezone.utc)
@@ -339,6 +340,7 @@ class AuthoritativeAutonomousInputAssembler:
             strategy_version=inputs.strategy_version,
             normalized_strategy_hash=inputs.normalized_strategy_hash,
             reasoning_evidence_summary=evidence_summary,
+            trading_scope=inputs.trading_scope,
         )
 
     def _deterministic_strategy_inputs(
@@ -609,6 +611,7 @@ def _manual_inputs(
         strategy_version=inputs.strategy_version,
         normalized_strategy_hash=inputs.normalized_strategy_hash,
         reasoning_evidence_summary=inputs.reasoning_evidence_summary,
+        trading_scope=inputs.trading_scope,
     )
 
 

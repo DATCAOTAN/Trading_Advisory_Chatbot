@@ -22,6 +22,7 @@ from tools.mt5_bridge.execution import ProtectedExecutionJournal, ProtectedExecu
 
 @dataclass(frozen=True)
 class PositionProvenance:
+    trading_scope: str = field(default="", repr=False)
     strategy_reference: str = ""
     draft_reference: str = ""
     candidate_reference: str = ""
@@ -75,6 +76,11 @@ class PositionReadModel:
     def to_public_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload.pop("account_context_fingerprint", None)
+        for collection in ("open_positions", "pending_orders", "history"):
+            for item in payload[collection]:
+                item["provenance"].pop("trading_scope", None)
+        if payload.get("selected_position"):
+            payload["selected_position"]["provenance"].pop("trading_scope", None)
         payload["metadata_redacted"] = True
         return payload
 
@@ -120,6 +126,10 @@ class PositionReadModelService:
         )
         symbols = list(getattr(getattr(query_plan, "entities", None), "symbols", []) or [])
         query_type = _query_type(requested, str(semantic_payload.get("subtype", "")))
+        account_wide = "account_wide" in requested
+        trading_scope = str(
+            getattr(query_plan, "constraints", {}).get("trading_scope") or ""
+        )
         management_request = getattr(query_plan, "primary_intent", "") == "position_management"
         if management_request and len(protected_references) > 1:
             return self._blocked(query_type, "AMBIGUOUS_POSITION_REFERENCE")
@@ -127,7 +137,16 @@ class PositionReadModelService:
             query_type=query_type,
             canonical_symbol=symbols[0] if len(symbols) == 1 else "",
             protected_reference=protected_references[0] if len(protected_references) == 1 else "",
-            singular=management_request or query_type in {"DETAIL", "PNL", "PROVENANCE"} or bool(references),
+            singular=(
+                not account_wide
+                and (
+                    management_request
+                    or query_type in {"DETAIL", "PNL", "PROVENANCE"}
+                    or bool(references)
+                )
+            ),
+            trading_scope=trading_scope,
+            account_wide=account_wide,
         )
 
     def read(
@@ -137,6 +156,8 @@ class PositionReadModelService:
         canonical_symbol: str = "",
         protected_reference: str = "",
         singular: bool = False,
+        trading_scope: str = "",
+        account_wide: bool = False,
     ) -> PositionReadModel:
         try:
             lifecycle = self.lifecycle_journal.latest_by_execution()
@@ -197,6 +218,20 @@ class PositionReadModelService:
             for row in snapshot.get("recent_deals", [])
             if str(row.get("entry")) in {"OUT", "INOUT"}
         )
+        all_items = positions + orders + history
+        if trading_scope and not account_wide:
+            positions = tuple(
+                item for item in positions
+                if hmac.compare_digest(item.provenance.trading_scope, trading_scope)
+            )
+            orders = tuple(
+                item for item in orders
+                if hmac.compare_digest(item.provenance.trading_scope, trading_scope)
+            )
+            history = tuple(
+                item for item in history
+                if hmac.compare_digest(item.provenance.trading_scope, trading_scope)
+            )
         selectable = (
             orders
             if query_type == "PENDING"
@@ -208,7 +243,7 @@ class PositionReadModelService:
             selectable, canonical_symbol, protected_reference, singular
         )
         unsafe_states = {
-            item.state for item in positions + orders + history
+            item.state for item in all_items
             if item.state in {"RECONCILIATION_REQUIRED", "INCONSISTENT"}
         }
         blockers = tuple(
@@ -330,6 +365,7 @@ class PositionReadModelService:
         candidate_ref = str(protected.get("source_artifact_reference") or "")
         strategy_ref = ""
         draft_ref = ""
+        trading_scope = ""
         authorization_ref = str(protected.get("authorization_reference") or protected.get("human_confirmation_reference") or "")
         if self.candidate_journal and candidate_ref:
             try:
@@ -339,6 +375,7 @@ class PositionReadModelService:
             if candidate is not None:
                 strategy_ref = str(getattr(candidate, "strategy_id", "") or "")
                 draft_ref = str(getattr(candidate, "proposal_source_reference", "") or "")
+                trading_scope = str(getattr(candidate, "trading_scope", "") or "")
         missing = tuple(
             name for name, value in (
                 ("STRATEGY_REFERENCE", strategy_ref),
@@ -350,6 +387,7 @@ class PositionReadModelService:
             ) if not value
         )
         return PositionProvenance(
+            trading_scope=trading_scope,
             strategy_reference=strategy_ref,
             draft_reference=draft_ref,
             candidate_reference=candidate_ref,

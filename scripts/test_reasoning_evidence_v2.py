@@ -349,12 +349,17 @@ def test_strategy_identity_is_bound_into_candidate_provenance(tmp_path):
         strategy_version="reasoning-strategy/v2",
         normalized_strategy_hash="b" * 64,
         reasoning_evidence_summary='{"regime":"RANGE"}',
+        trading_scope="trading_scope_" + "d" * 24,
     )
-    candidate = service(tmp_path).build_candidate(inputs, now=NOW)
-    validation = service(tmp_path).validate_candidate(candidate, now=NOW)
+    orchestrator = service(tmp_path)
+    result = orchestrator.run_once(inputs, now=NOW)
+    candidate = result.candidate
+    validation = orchestrator.validate_candidate(candidate, now=NOW)
     assert validation.valid
     assert candidate.strategy_id == inputs.strategy_id
     assert candidate.normalized_strategy_hash == inputs.normalized_strategy_hash
+    assert candidate.trading_scope == inputs.trading_scope
+    assert orchestrator.journal.load_candidate(candidate.candidate_reference).trading_scope == inputs.trading_scope
     assert candidate.to_operator_review_dict()["reasoning_evidence_summary"]
     changed = service(tmp_path).build_candidate(
         replace(inputs, normalized_strategy_hash="c" * 64), now=NOW

@@ -13,17 +13,22 @@ class AutonomousMonitorProcess:
     def __init__(self, project_root: str | Path | None = None) -> None:
         self.project_root = Path(project_root or Path(__file__).resolve().parents[4])
         self._lock = threading.Lock()
-        self._process: subprocess.Popen[Any] | None = None
-        self._profile: tuple[str, tuple[str, ...], str] | None = None
+        self._processes: dict[str, subprocess.Popen[Any]] = {}
+        self._profiles: dict[str, tuple[str, tuple[str, ...], str]] = {}
 
     def start(
-        self, *, symbol: str, timeframes: tuple[str, ...], mandate_id: str = ""
+        self,
+        *,
+        symbol: str,
+        timeframes: tuple[str, ...],
+        mandate_id: str = "",
+        trading_scope: str = "legacy",
     ) -> dict[str, Any]:
         if not str(mandate_id).strip():
             raise ValueError("SUPERVISOR_MANDATE_REQUIRED")
         with self._lock:
-            if self._running():
-                return self.status()
+            if self._running(trading_scope):
+                return self.status(trading_scope)
             command = [
                 sys.executable,
                 str(self.project_root / "scripts" / "run_autonomous_candidate_monitor.py"),
@@ -32,39 +37,40 @@ class AutonomousMonitorProcess:
                 "--watch",
             ]
             command.extend(("--mandate-id", mandate_id))
-            self._process = subprocess.Popen(
+            self._processes[trading_scope] = subprocess.Popen(
                 command,
                 cwd=self.project_root,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            self._profile = (symbol, timeframes, mandate_id)
-            return self.status()
+            self._profiles[trading_scope] = (symbol, timeframes, mandate_id)
+            return self.status(trading_scope)
 
-    def stop(self) -> dict[str, Any]:
+    def stop(self, trading_scope: str = "legacy") -> dict[str, Any]:
         with self._lock:
-            if self._running():
-                assert self._process is not None
-                self._process.terminate()
+            process = self._processes.get(trading_scope)
+            if self._running(trading_scope) and process is not None:
+                process.terminate()
                 try:
-                    self._process.wait(timeout=5)
+                    process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    self._process.kill()
-                    self._process.wait(timeout=5)
-            self._process = None
-            self._profile = None
-            return self.status()
+                    process.kill()
+                    process.wait(timeout=5)
+            self._processes.pop(trading_scope, None)
+            self._profiles.pop(trading_scope, None)
+            return self.status(trading_scope)
 
-    def status(self) -> dict[str, Any]:
-        profile = self._profile
+    def status(self, trading_scope: str = "legacy") -> dict[str, Any]:
+        profile = self._profiles.get(trading_scope)
         return {
-            "running": self._running(),
+            "running": self._running(trading_scope),
             "symbol": profile[0] if profile else "",
             "timeframes": list(profile[1]) if profile else [],
             "mandate_id": profile[2] if profile else "",
             "metadata_redacted": True,
         }
 
-    def _running(self) -> bool:
-        return self._process is not None and self._process.poll() is None
+    def _running(self, trading_scope: str) -> bool:
+        process = self._processes.get(trading_scope)
+        return process is not None and process.poll() is None

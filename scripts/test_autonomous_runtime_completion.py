@@ -219,6 +219,36 @@ def test_monitor_process_starts_once_and_stops(monkeypatch, tmp_path):
     assert controller.stop()["running"] is False
 
 
+def test_monitor_processes_are_owned_by_trading_scope(monkeypatch, tmp_path):
+    script = tmp_path / "scripts" / "run_autonomous_candidate_monitor.py"
+    script.parent.mkdir()
+    script.write_text("", encoding="utf-8")
+
+    class Process:
+        def __init__(self, *_args, **_kwargs):
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 0
+
+        def wait(self, timeout):
+            return self.returncode
+
+    monkeypatch.setattr("subprocess.Popen", Process)
+    controller = AutonomousMonitorProcess(tmp_path)
+    controller.start(symbol="XAUUSD", timeframes=("M1",), mandate_id="mandate-a", trading_scope="scope-a")
+    controller.start(symbol="BTCUSD", timeframes=("M1",), mandate_id="mandate-b", trading_scope="scope-b")
+
+    assert controller.status("scope-a")["mandate_id"] == "mandate-a"
+    assert controller.status("scope-b")["mandate_id"] == "mandate-b"
+    assert controller.stop("scope-a")["running"] is False
+    assert controller.status("scope-b")["running"] is True
+    controller.stop("scope-b")
+
+
 def test_monitor_process_requires_mandate_before_start(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "subprocess.Popen",

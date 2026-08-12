@@ -3031,3 +3031,14 @@ The existing review controls and protected confirmation journal now form the exp
 - Runtime acceptance passed in one active DEMO conversation: current P/L and SL/TP used `position_state_read` and `position_read`; `ATR là gì?` retained the normal knowledge path. The panel remained visible, Supervisor remained running, lifecycle remained `HEALTHY`, and reconciliation discrepancies/unresolved states remained zero.
 - After a natural reload, the persisted mandate limits remained `0.01 / 100 / 5 / 5 / 500` and the selected mandate/Supervisor state remained present. The read-only position queries caused no controlled-submit, `order_send`, MT5 write, or broker mutation.
 - Verification level: `FOCUSED_AND_LIVE_PASS`. Verdict: `AUTONOMOUS_CHAT_RUNTIME_CONTINUITY_COMPLETE`.
+
+# 104. CONVERSATION-SCOPED TRADING OWNERSHIP
+
+- Each conversational trading request now derives one stable protected `trading_scope` from its conversation ID. The scope persists through typed strategy identity, autonomous inputs, protected Candidate provenance, Standing Mandate strategy binding, supervisor ownership, and exact position/history provenance.
+- Identical strategy semantics in separate conversations produce distinct strategy and runtime identities. Streamlit lists and controls only the mandate and supervisor bound to the current strategy scope; stopping one scoped supervisor leaves other scoped supervisors running.
+- Position and history reads default to the current conversation scope. Explicit account-wide requests retain the existing global read behavior. Raw conversation IDs are never persisted in trading artifacts; public Candidate and position projections do not expose the derived scope reference.
+- MT5 account context, broker positions/orders, lifecycle, reconciliation, permission gates, and execution safety remain account-global. A same-symbol active Candidate, order, or position still blocks another opening with `ENTRY_ALREADY_ACTIVE`; conversation scope does not partition broker risk or bypass idempotency.
+- Read-only DEMO runtime verification produced two distinct conversation scopes. Each scope returned zero owned positions, orders, and history, while an explicit account-wide read returned the five authoritative broker-history records; all reads retained account match and no blockers.
+- Focused and neighboring request, Candidate, authority, supervisor, position-read, policy, and thin-UI tests passed with `279 passed` and unchanged dependency warnings. Changed-path compileall and diff checks passed.
+- No full regression was run because the approved task requested focused verification by default. No controlled-submit, runtime `order_send`, MT5 write, or broker mutation was performed.
+- Verification level: `FOCUSED_PASS`. Verdict: `CONVERSATION_SCOPED_TRADING_OWNERSHIP_COMPLETE`.

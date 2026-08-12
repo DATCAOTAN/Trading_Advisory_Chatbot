@@ -660,7 +660,8 @@ def _render_trading_runtime_controls(
             return status["mode"], runtime_blockers
 
         process = _autonomous_monitor_process()
-        process_status = process.status()
+        trading_scope = str(getattr(strategy, "trading_scope", "") or "legacy")
+        process_status = process.status(trading_scope)
         persisted_mandate = None
         if strategy is None:
             st.info("Complete an autonomous strategy before reviewing a Standing Mandate.")
@@ -828,6 +829,8 @@ def _render_trading_runtime_controls(
             item["mandate_id"]
             for item in status["mandates"]
             if not item["revoked"]
+            and strategy is not None
+            and item.get("strategy_id") == strategy.identity.strategy_id
         )
         command_columns = st.columns(2)
         with command_columns[0]:
@@ -883,13 +886,14 @@ def _render_trading_runtime_controls(
                     symbol=symbol,
                     timeframes=timeframes,
                     mandate_id=monitor_mandate or "",
+                    trading_scope=trading_scope,
                 )
             if stop.button(
                 "Stop Supervisor",
                 disabled=not process_status["running"],
                 key=f"{key_prefix}stop_supervisor",
             ):
-                process_status = process.stop()
+                process_status = process.stop(trading_scope)
             st.caption(
                 f"supervisor_running={str(process_status['running']).lower()} | "
                 f"profile={symbol}:{','.join(timeframes)}"

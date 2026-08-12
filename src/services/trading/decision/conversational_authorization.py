@@ -22,6 +22,7 @@ from src.services.trading.reasoning.strategy_evidence import (
     parse_conversational_strategy,
     project_resolved_semantic_strategy,
     validate_strategy,
+    conversation_trading_scope,
 )
 from src.services.semantic.query_plan import QueryPlan
 from src.services.semantic.resolved_semantics import (
@@ -54,6 +55,7 @@ class ConversationalTradingRequest:
     trade_instruction_text: str = ""
     blockers: tuple[str, ...] = ()
     strategy: ConversationalStrategyRequest | None = None
+    trading_scope: str = ""
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +77,7 @@ class ConversationalTradingRequest:
             "trade_instruction_text": self.trade_instruction_text,
             "blockers": list(self.blockers),
             "strategy": self.strategy.as_dict() if self.strategy else None,
+            "trading_scope": self.trading_scope,
             "execution_authority": False,
             "executable": False,
             "metadata_redacted": True,
@@ -99,6 +102,7 @@ class ConversationalTradingRequest:
         trade_action = str(payload.get("trade_action") or "")
         trade_direction = str(payload.get("trade_direction") or "")
         blockers = tuple(str(item) for item in payload.get("blockers") or ())
+        trading_scope = str(payload.get("trading_scope") or "")
         missing_symbol_allowed = (
             response_format == "STRATEGY_COMPLETION_REQUIRED_CARD"
             and bool({"SYMBOL_REQUIRED", "SYMBOL_UNRESOLVED"} & set(blockers))
@@ -115,7 +119,9 @@ class ConversationalTradingRequest:
                 or strategy.requested_mode != mode
                 or strategy.confirmation_policy != str(payload.get("confirmation_policy") or "")
                 or strategy.account_scope != str(payload.get("account_scope") or "UNKNOWN")
+                or strategy.trading_scope != trading_scope
             )
+            or bool(trading_scope) and not re.fullmatch(r"trading_scope_[0-9a-f]{24}", trading_scope)
             or payload.get("execution_authority") is not False
             or payload.get("executable") is not False
             or payload.get("metadata_redacted") is not True
@@ -143,6 +149,7 @@ class ConversationalTradingRequest:
             trade_instruction_text=str(payload.get("trade_instruction_text") or "")[:500],
             blockers=blockers,
             strategy=strategy,
+            trading_scope=trading_scope,
         )
 
 
@@ -262,6 +269,7 @@ def apply_strategy_completion(
         confirmation_policy=request.confirmation_policy,
         account_scope=request.account_scope,
         request_id=request_id,
+        trading_scope=request.trading_scope,
     )
     if strategy is None:
         raise ValueError("STRATEGY_COMPLETION_PROJECTION_INVALID")
@@ -356,6 +364,7 @@ def parse_conversational_trading_request(
     }[mode]
     request_material = f"{conversation_id.strip()}|{query.strip()}"
     request_id = "conversation_trade_" + hashlib.sha256(request_material.encode("utf-8")).hexdigest()[:24]
+    trading_scope = conversation_trading_scope(conversation_id)
     has_local_timeframe = bool(
         re.search(r"\b(?:M1|M5|M15|H1|H4|D1)\b", str(query or ""), re.IGNORECASE)
     )
@@ -372,6 +381,7 @@ def parse_conversational_trading_request(
         account_scope=account_scope,
         request_id=request_id,
         default_timeframes=strategy_default_timeframes,
+        trading_scope=trading_scope,
     )
     strategy_issues = ()
     if strategy is not None:
@@ -394,6 +404,7 @@ def parse_conversational_trading_request(
         trade_instruction_text=str(query or "").strip()[:500],
         blockers=tuple(dict.fromkeys((*blockers, *strategy_issues))),
         strategy=strategy,
+        trading_scope=trading_scope,
     )
 
 
@@ -436,6 +447,7 @@ def project_conversational_trading_request(
         separators=(",", ":"),
     )
     request_id = "conversation_trade_" + hashlib.sha256(request_material.encode("utf-8")).hexdigest()[:24]
+    trading_scope = conversation_trading_scope(conversation_id)
     strategy = project_resolved_semantic_strategy(
         semantic_context,
         canonical_symbol=canonical_symbol,
@@ -443,6 +455,7 @@ def project_conversational_trading_request(
         confirmation_policy=confirmation_policy,
         account_scope=account_scope,
         request_id=request_id,
+        trading_scope=trading_scope,
     )
     # The strict strategy projection is the authority for indicator-child completion.
     # Retain every other semantic unresolved field, and only clear children it has
@@ -519,4 +532,5 @@ def project_conversational_trading_request(
         trade_instruction_text=str(query_plan.original_query or "")[:500],
         blockers=tuple(blockers),
         strategy=strategy,
+        trading_scope=trading_scope,
     )

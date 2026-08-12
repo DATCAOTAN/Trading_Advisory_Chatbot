@@ -2504,3 +2504,25 @@ Commit: this commit
 - Read-only queries caused zero controlled-submit, runtime `order_send`, MT5 writes, or broker mutations.
 
 ---
+
+### Post-release feature - Conversation-Scoped Trading Ownership
+
+Date: 2026-08-12
+Verification: `FOCUSED_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added one stable protected conversation trading scope to the existing typed request, strategy, Candidate, mandate-binding, supervisor, and exact position/history provenance contracts.
+- Scoped mandate and supervisor controls to the current strategy while preserving account-global lifecycle, reconciliation, broker state, permissions, and opening safety.
+- Made position/history reads scope-local by default and retained explicit account-wide reads without exposing protected scope identifiers publicly.
+- Kept same-symbol concurrent openings fail closed through the existing `ENTRY_ALREADY_ACTIVE` predicate.
+
+#### Verification and safety
+
+- Focused and neighboring ownership, request, Candidate, authority, supervisor, position-read, policy, and thin-UI tests: 279 passed with unchanged dependency warnings.
+- Read-only DEMO verification produced two distinct scopes with no cross-attributed trades; explicit account-wide history returned five authoritative records with account match true.
+- Changed-path compileall and diff checks passed; full regression was not run for this focused task.
+- Controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero.
+
+---

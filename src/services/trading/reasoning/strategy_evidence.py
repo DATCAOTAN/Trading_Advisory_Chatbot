@@ -141,6 +141,7 @@ class ConversationalStrategyRequest:
     identity: StrategyIdentity
     semantic_unresolved_fields: tuple[str, ...] = ()
     field_sources: tuple[tuple[str, str], ...] = ()
+    trading_scope: str = ""
 
     @property
     def timeframes(self) -> tuple[str, ...]:
@@ -165,6 +166,7 @@ class ConversationalStrategyRequest:
             "identity": self.identity.as_dict(),
             "semantic_unresolved_fields": list(self.semantic_unresolved_fields),
             "field_sources": dict(self.field_sources),
+            "trading_scope": self.trading_scope,
         }
 
     @classmethod
@@ -212,6 +214,7 @@ class ConversationalStrategyRequest:
                 for field, source in dict(payload.get("field_sources") or {}).items()
                 if str(field).strip() and str(source) in FIELD_SOURCES
             ),
+            trading_scope=str(payload.get("trading_scope") or ""),
         )
         if len(value.field_sources) != len(dict(payload.get("field_sources") or {})):
             raise ValueError("STRATEGY_FIELD_PROVENANCE_INVALID")
@@ -375,6 +378,7 @@ def parse_conversational_strategy(
     account_scope: str,
     request_id: str,
     default_timeframes: Sequence[str],
+    trading_scope: str = "",
 ) -> ConversationalStrategyRequest | None:
     normalized = _normalize_indicator_text(text)
     indicators = list(parse_indicator_specs(text, default_timeframes))
@@ -400,6 +404,7 @@ def parse_conversational_strategy(
         risk_policy_reference="CONFIGURED_RISK_POLICY",
         request_id=request_id,
         identity=StrategyIdentity("", "reasoning-strategy/v2", ""),
+        trading_scope=trading_scope,
     )
     identity = strategy_identity(provisional)
     return ConversationalStrategyRequest(**{**provisional.__dict__, "identity": identity})
@@ -413,6 +418,7 @@ def project_resolved_semantic_strategy(
     confirmation_policy: str,
     account_scope: str,
     request_id: str,
+    trading_scope: str = "",
 ) -> ConversationalStrategyRequest | None:
     """Project resolved semantic facts into the existing typed strategy contract."""
 
@@ -507,6 +513,7 @@ def project_resolved_semantic_strategy(
             for field, source in field_sources_payload.items()
             if str(field).strip() and str(source) in FIELD_SOURCES
         ),
+        trading_scope=trading_scope,
     )
     strategy = ConversationalStrategyRequest(
         **{**provisional.__dict__, "identity": strategy_identity(provisional)}
@@ -615,6 +622,10 @@ def _normalize_indicator_text(text: str) -> str:
 
 def validate_strategy(strategy: ConversationalStrategyRequest) -> tuple[str, ...]:
     issues: list[str] = []
+    if strategy.trading_scope and not re.fullmatch(
+        r"trading_scope_[0-9a-f]{24}", strategy.trading_scope
+    ):
+        issues.append("TRADING_SCOPE_INVALID")
     unresolved = set(strategy.semantic_unresolved_fields)
     if unresolved:
         issues.append("SEMANTIC_FIELDS_UNRESOLVED")
@@ -685,8 +696,15 @@ def strategy_identity(strategy: ConversationalStrategyRequest) -> StrategyIdenti
     }
     if strategy.semantic_unresolved_fields:
         material["semantic_unresolved_fields"] = list(strategy.semantic_unresolved_fields)
+    if strategy.trading_scope:
+        material["trading_scope"] = strategy.trading_scope
     digest = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return StrategyIdentity("strategy_" + digest[:24], "reasoning-strategy/v2", digest)
+
+
+def conversation_trading_scope(conversation_id: str) -> str:
+    value = str(conversation_id or "").strip()
+    return "trading_scope_" + hashlib.sha256(value.encode("utf-8")).hexdigest()[:24] if value else ""
 
 
 def plan_strategy_data(

@@ -285,6 +285,7 @@ class AutonomousTradingCoordinator:
             or candidate.strategy_version != self.strategy.identity.strategy_version
             or candidate.normalized_strategy_hash
             != self.strategy.identity.normalized_strategy_hash
+            or candidate.trading_scope != self.strategy.trading_scope
             or (
                 candidate.intent == "OPEN_POSITION"
                 and candidate.direction != self.strategy_direction

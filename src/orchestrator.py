@@ -75,6 +75,7 @@ from src.services.semantic.context_acquisition import ContextAcquisitionExecutor
 from src.services.trading.decision.conversational_authorization import (
     project_conversational_trading_request,
 )
+from src.services.trading.reasoning.strategy_evidence import conversation_trading_scope
 from src.config import Config
 
 # Nhập các Mô-đun Modular RAG
@@ -242,6 +243,9 @@ class RAGOrchestrator:
                     original_query=user_query,
                     structured_semantics=semantic_interpretation.semantic,
                     previous_structured_context=previous_structured_context,
+                )
+                canonical_query_plan.constraints["trading_scope"] = conversation_trading_scope(
+                    session_id
                 )
                 context_requirements = self.decision_context_builder.requirement_planner.plan(canonical_query_plan)
                 context_execution_plan = self.decision_context_builder.execution_planner.plan(context_requirements)

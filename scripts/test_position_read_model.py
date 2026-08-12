@@ -53,10 +53,17 @@ class FakeLifecycleJournal:
 
 
 class FakeCandidateJournal:
+    def __init__(self, scopes=None):
+        self.scopes = dict(scopes or {"candidate_ref": ""})
+
     def load_candidate(self, reference):
-        if reference != "candidate_ref":
+        if reference not in self.scopes:
             return None
-        return SimpleNamespace(strategy_id="strategy_ref", proposal_source_reference="draft_ref")
+        return SimpleNamespace(
+            strategy_id="strategy_ref",
+            proposal_source_reference="draft_ref",
+            trading_scope=self.scopes[reference],
+        )
 
 
 def snapshot(*, positions=(), orders=(), deals=(), timestamp=None, status="OK"):
@@ -158,20 +165,22 @@ def opening_deal(reference="f" * 64):
     return row
 
 
-def execution_record(state="RESULT_CONFIRMED"):
+def execution_record(
+    state="RESULT_CONFIRMED", *, tag="mt5rabc", candidate="candidate_ref", execution="execution_ref"
+):
     return {
         "account_context_fingerprint": FINGERPRINT,
         "state": state,
         "protected_execution": {
-            "correlation_tag": "mt5rabc",
-            "protected_execution_reference": "execution_ref",
-            "source_artifact_reference": "candidate_ref",
+            "correlation_tag": tag,
+            "protected_execution_reference": execution,
+            "source_artifact_reference": candidate,
             "human_confirmation_reference": "confirmation_ref",
         },
     }
 
 
-def service(snapshot_value, *, records=(), lifecycle=None, candidates=False, now=None):
+def service(snapshot_value, *, records=(), lifecycle=None, candidates=False, candidate_journal=None, now=None):
     config = MT5PositionSupervisorConfig(
         history_window_seconds=3600,
         interval_seconds=30,
@@ -182,7 +191,7 @@ def service(snapshot_value, *, records=(), lifecycle=None, candidates=False, now
         bridge_client=FakeBridge(snapshot_value),
         execution_journal=FakeExecutionJournal(records),
         lifecycle_journal=FakeLifecycleJournal(lifecycle),
-        candidate_journal=FakeCandidateJournal() if candidates else None,
+        candidate_journal=candidate_journal or (FakeCandidateJournal() if candidates else None),
         now=(lambda: now) if now else None,
     )
 
@@ -320,6 +329,59 @@ def test_provenance_joins_existing_protected_references_and_marks_missing_fields
     assert joined.unavailable == ("MANAGEMENT_REFERENCE",)
     missing = service(snapshot(positions=[position()])).read().open_positions[0].provenance
     assert missing.unavailable == ("CONTROLLED_EXECUTION_REFERENCE",)
+
+
+def test_conversation_scope_filters_exact_execution_provenance_but_account_wide_keeps_all():
+    scope_a = "trading_scope_" + "a" * 24
+    scope_b = "trading_scope_" + "b" * 24
+    positions = [
+        position(HASH_A, tags=["mt5ra"]),
+        position(HASH_B, tags=["mt5rb"]),
+    ]
+    records = [
+        execution_record(tag="mt5ra", candidate="candidate_a", execution="execution_a"),
+        execution_record(tag="mt5rb", candidate="candidate_b", execution="execution_b"),
+    ]
+    read_service = service(
+        snapshot(positions=positions),
+        records=records,
+        lifecycle={
+            "execution_a": {"observation_id": "life_a", "lifecycle_state": "POSITION_OPEN"},
+            "execution_b": {
+                "observation_id": "life_b",
+                "lifecycle_state": "RECONCILIATION_REQUIRED",
+            },
+        },
+        candidate_journal=FakeCandidateJournal(
+            {"candidate_a": scope_a, "candidate_b": scope_b}
+        ),
+    )
+
+    local = read_service.read(trading_scope=scope_a)
+    unrelated = read_service.read(trading_scope="trading_scope_" + "c" * 24)
+    account = read_service.read(trading_scope=scope_a, account_wide=True)
+
+    assert [item.protected_reference for item in local.open_positions] == [HASH_A]
+    assert local.blockers == ("RECONCILIATION_REQUIRED",)
+    assert unrelated.open_positions == ()
+    assert {item.protected_reference for item in account.open_positions} == {HASH_A, HASH_B}
+    assert "trading_scope" not in repr(local.to_public_dict())
+
+
+def test_query_plan_account_wide_is_explicit_structured_semantics():
+    scope = "trading_scope_" + "a" * 24
+    plan = QueryPlanAssembler().assemble(
+        "wording is not parsed here",
+        structured_semantics=semantic(requested_data=["positions", "account_wide"]),
+    )
+    plan.constraints["trading_scope"] = scope
+    read_service = service(snapshot(positions=[position(), position(HASH_B)]))
+
+    result = read_service.read_from_query_plan(plan)
+
+    assert len(result.open_positions) == 2
+    assert result.blockers == ()
+    assert "account_wide" in StructuredSemanticInterpreter._prompt("ignored")
 
 
 def test_provenance_query_selects_closed_trade_and_renders_only_safe_references():

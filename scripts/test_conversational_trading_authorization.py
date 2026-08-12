@@ -104,6 +104,18 @@ def test_request_id_is_stable_and_public_reload_revalidates_bindings():
         ConversationalTradingRequest.from_public_dict(changed)
 
 
+def test_identical_strategies_in_different_conversations_have_distinct_scope():
+    text = "Tu giao dich XAUUSD demo khi RSI 14 M1 lon hon 10."
+    first = parse_conversational_trading_request(text, conversation_id="chat-a")
+    second = parse_conversational_trading_request(text, conversation_id="chat-b")
+
+    assert first.trading_scope != second.trading_scope
+    assert first.strategy.trading_scope == first.trading_scope
+    assert second.strategy.trading_scope == second.trading_scope
+    assert first.strategy.identity.strategy_id != second.strategy.identity.strategy_id
+    assert ConversationalTradingRequest.from_public_dict(first.to_public_dict()) == first
+
+
 def test_plain_financial_question_does_not_create_authorization_request():
     assert (
         parse_conversational_trading_request(

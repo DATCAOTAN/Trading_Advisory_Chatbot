@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import os
 import threading
 from dataclasses import asdict, dataclass, field, fields
@@ -188,6 +189,7 @@ class AutonomousDecisionInputs:
     strategy_version: str = ""
     normalized_strategy_hash: str = ""
     reasoning_evidence_summary: str = ""
+    trading_scope: str = ""
 
 
 @dataclass(frozen=True)
@@ -251,6 +253,7 @@ class AutonomousDecisionCandidate:
     strategy_version: str = ""
     normalized_strategy_hash: str = ""
     reasoning_evidence_summary: str = field(default="", repr=False)
+    trading_scope: str = field(default="", repr=False)
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -725,6 +728,7 @@ class AutonomousDecisionOrchestrator:
                 else ""
             ),
             reasoning_evidence_summary=str(inputs.reasoning_evidence_summary or "")[:2000],
+            trading_scope=_safe_or_empty(inputs.trading_scope),
         )
 
     def validate_candidate(
@@ -788,6 +792,10 @@ class AutonomousDecisionOrchestrator:
             or not _valid_hash(candidate.normalized_strategy_hash)
         ):
             issues.append("STRATEGY_BINDING_INVALID")
+        if candidate.trading_scope and not re.fullmatch(
+            r"trading_scope_[0-9a-f]{24}", candidate.trading_scope
+        ):
+            issues.append("TRADING_SCOPE_INVALID")
         eligible = (
             candidate.deterministic_eligibility_result
             == AutonomousDecisionEligibility.ELIGIBLE_CANDIDATE.value
@@ -1884,6 +1892,7 @@ def _canonical_provenance(
         "strategy_version": inputs.strategy_version,
         "normalized_strategy_hash": inputs.normalized_strategy_hash,
         "reasoning_evidence_summary": inputs.reasoning_evidence_summary,
+        "trading_scope": inputs.trading_scope,
         "requested_intent": inputs.requested_intent.strip().upper(),
         "direction": inputs.direction.strip().upper(),
         "exposure_effect": inputs.exposure_effect.strip().upper(),
@@ -2073,6 +2082,7 @@ def _candidate_from_protected_dict(payload: Mapping[str, Any]) -> AutonomousDeci
         "strategy_version",
         "normalized_strategy_hash",
         "reasoning_evidence_summary",
+        "trading_scope",
     }
     if frozenset(payload) not in {
         frozenset(allowed),
@@ -2085,6 +2095,7 @@ def _candidate_from_protected_dict(payload: Mapping[str, Any]) -> AutonomousDeci
         "strategy_version",
         "normalized_strategy_hash",
         "reasoning_evidence_summary",
+        "trading_scope",
     ):
         values.setdefault(name, "")
     for name in (
