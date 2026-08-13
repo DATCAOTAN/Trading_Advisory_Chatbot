@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from src.services.semantic.query_plan import QueryPlanAssembler
 from src.services.semantic.structured_interpreter import StructuredSemanticInterpreter
 from src.services.semantic.structured_semantics import (
     SEMANTIC_SCHEMA_VERSION,
@@ -227,6 +228,81 @@ def test_prompt_separates_indicator_knowledge_from_position_management():
     assert "definitions, explanations, or comparisons" in prompt
     assert "KNOWLEDGE with action EXPLAIN" in prompt
     assert "indicator name alone does not make the request position management" in prompt
+
+
+@pytest.mark.parametrize(
+    "message,requested_data",
+    (
+        ("tổng lời lổ hiện tại", ["pnl"]),
+        ("tong loi lo hien tai", ["pnl"]),
+        ("lời lổ hiện tại", ["pnl"]),
+        ("pnl hien tai", ["pnl"]),
+        ("vị thế hiện tai", ["positions"]),
+        ("sl tp hien tai", ["stop_loss", "take_profit"]),
+        ("lich su giao dich hien tai", ["trade_history"]),
+    ),
+)
+def test_noisy_trade_state_language_keeps_the_position_read_contract(message, requested_data):
+    result, provider = interpreted(
+        message,
+        semantic_payload(
+            primary_intent="POSITION_MANAGEMENT",
+            action="EXPLAIN",
+            direction="",
+            domain="trading",
+            symbols=[],
+            indicators=[],
+            requested_data=requested_data,
+            conditions=[],
+            requested_mode="advisory_only",
+            explicit_fields=["primary_intent", "action", "requested_data"],
+            unresolved_fields=[],
+        ),
+    )
+    plan = QueryPlanAssembler().assemble(message, structured_semantics=result.semantic)
+
+    assert result.is_valid
+    assert result.semantic.primary_intent == "POSITION_MANAGEMENT"
+    assert plan.primary_intent == "position_state_read"
+    assert plan.requires_execution is False
+    assert len(provider.calls) == 1
+    assert message in provider.calls[0][0]
+
+
+@pytest.mark.parametrize("message", ("P/L là gì?", "ATR là gì?", "Lạm phát ảnh hưởng gì đến vàng?"))
+def test_conceptual_financial_questions_remain_knowledge(message):
+    result, provider = interpreted(
+        message,
+        semantic_payload(
+            primary_intent="KNOWLEDGE",
+            action="EXPLAIN",
+            direction="",
+            subtype="concept",
+            domain="finance",
+            symbols=[],
+            indicators=[],
+            requested_data=[],
+            conditions=[],
+            requested_mode="advisory_only",
+            explicit_fields=["primary_intent", "action"],
+            unresolved_fields=[],
+        ),
+    )
+    plan = QueryPlanAssembler().assemble(message, structured_semantics=result.semantic)
+
+    assert result.is_valid
+    assert result.semantic.primary_intent == "KNOWLEDGE"
+    assert plan.primary_intent == "book_concept_explanation"
+    assert len(provider.calls) == 1
+
+
+def test_prompt_requires_noise_tolerance_without_keyword_routing():
+    prompt = StructuredSemanticInterpreter._prompt("tổng lời lổ hiện tại")
+
+    assert "minor spelling errors" in prompt
+    assert "missing or incorrect diacritics" in prompt
+    assert "noisy multilingual wording" in prompt
+    assert "must not change an otherwise clear intent family" in prompt
 
 
 def test_prompt_requires_scalar_optional_semantic_labels():

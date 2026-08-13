@@ -3045,6 +3045,15 @@ The existing review controls and protected confirmation journal now form the exp
 
 # 105. PROFESSIONAL TRADING WORKSPACE UI
 
+# 106. NOISY TRADE-STATE SEMANTIC ROBUSTNESS
+
+- The existing one-call structured semantic boundary now explicitly interprets meaning through minor spelling mistakes, missing or incorrect diacritics, Unicode normalization differences, informal abbreviations, and noisy multilingual wording. It does not add a spell-correction service, keyword router, regex parser, or second semantic path.
+- Obvious current account/trade-state reads continue through `POSITION_MANAGEMENT -> position_state_read -> position_read`; conceptual P/L, indicator, and unrelated financial questions remain `KNOWLEDGE`.
+- Focused semantic interpreter, QueryPlan, and position-read tests passed with `92 passed` and two unchanged dependency warnings.
+- One new live Streamlit query, `tổng lời lổ hiện tại`, produced one valid `POSITION_MANAGEMENT` interpretation, one `position_state_read` QueryPlan, and one successful authoritative `position_read` acquisition. The public result remained `NON_EXECUTABLE`.
+- The old two-message conversation containing the prior RAG blocker remained byte-for-behavior unchanged. Switching back to it reloaded its persisted answer without another provider call.
+- No Candidate, confirmation, controlled-submit, runtime `order_send`, MT5 write, or broker mutation occurred. Verification level: `FOCUSED_AND_LIVE_PASS`. Verdict: `NOISY_TRADE_STATE_SEMANTICS_COMPLETE`.
+
 - The Streamlit shell now uses one shared operational theme with a compact product header, restrained navigation, dense metrics, consistent controls, and responsive desktop/mobile behavior.
 - Advisory remains conversation-led. Operations keeps the authoritative market, account, lifecycle, mandate, Supervisor, Candidate, and permission projections while placing legacy execution diagnostics behind one collapsed disclosure.
 - Evaluation and Settings use the same visual hierarchy without changing their services, persistence, feature flags, or widget authority.

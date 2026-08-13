@@ -2546,3 +2546,22 @@ Commit: this commit
 - Candidate generation, confirmation, controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero.
 
 ---
+
+### Post-release fix - Noisy Trade-State Semantics
+
+Date: 2026-08-13
+Verification: `FOCUSED_AND_LIVE_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Clarified the existing structured semantic provider contract so spelling errors, accent/diacritic noise, Unicode normalization differences, abbreviations, and multilingual noise do not change an otherwise clear trade-state read into conceptual knowledge.
+- Kept the single Pydantic v2 semantic boundary and existing `POSITION_MANAGEMENT -> position_state_read -> position_read` flow; no parser, keyword table, regex, history rewrite, or execution change was added.
+
+#### Verification and safety
+
+- Focused semantic/routing tests passed with `92 passed` and two unchanged dependency warnings; conceptual P/L, ATR, and unrelated financial questions remained `KNOWLEDGE`.
+- One live typo query produced one provider call and a successful authoritative `PositionReadModel`; switching to the old conversation reloaded its unchanged persisted RAG response without another provider call.
+- Candidate generation, confirmation, controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero.
+
+---
