@@ -2565,3 +2565,22 @@ Commit: this commit
 - Candidate generation, confirmation, controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero.
 
 ---
+
+### Post-release fix - Editable Draft Dependency Recalculation
+
+Date: 2026-08-14
+Verification: `FOCUSED_AND_LIVE_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Validated derived target policy against the final Entry/SL/TP/RR values belonging to the same immutable Draft revision.
+- Recomputed deterministic blockers per revision while preserving unresolved semantic prerequisites and explicit user-value conflicts.
+
+#### Verification and safety
+
+- Focused Draft tests: `32 passed`; neighboring Draft lifecycle, completion, UI, and semantic tests: `79 passed` with two unchanged dependency warnings.
+- Live Streamlit revision 4 rendered `VALID_NON_EXECUTABLE` with coherent ATR-derived SL and RR-derived TP; prior revisions remained unchanged.
+- Candidate creation, controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero. Full regression was not run for this bounded Draft-only correction.
+
+---

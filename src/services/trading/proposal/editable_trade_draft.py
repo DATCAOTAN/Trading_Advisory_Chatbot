@@ -624,7 +624,11 @@ def _calculate_draft(
     changed: set[str],
     sizing_constraints: TradeDraftSizingConstraints | None = None,
 ) -> EditableTradeDraft:
-    blockers = list(base.blockers)
+    blockers = [
+        blocker
+        for blocker in base.blockers
+        if blocker.startswith(SEMANTIC_UNRESOLVED_PREFIX)
+    ]
     warnings: list[str] = []
     evidence_not_attempted = any(
         blocker.startswith(SEMANTIC_UNRESOLVED_PREFIX) for blocker in blockers
@@ -745,14 +749,9 @@ def _calculate_draft(
             blockers.append("STRUCTURE_EVIDENCE_UNAVAILABLE")
     elif target_method not in TARGET_METHODS:
         blockers.append("TARGET_POLICY_MISSING")
-    if (
-        values.get("take_profit") not in (None, "")
-        and values.get("reward_risk_ratio") not in (None, "")
-        and entry is not None
-        and distance is not None
-    ):
-        implied = abs(_decimal(values["take_profit"]) - entry) / distance
-        if abs(implied - _decimal(values["reward_risk_ratio"])) > Decimal("0.01"):
+    if target is not None and rr is not None and entry is not None and distance is not None:
+        implied = abs(target - entry) / distance
+        if abs(implied - rr) > Decimal("0.01"):
             blockers.append("TARGET_POLICY_CONFLICT")
     if target is not None and evidence and evidence.tick_size:
         target = _round_tick(target, evidence.tick_size)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -260,6 +261,62 @@ def test_explicit_volume_edit_recalculates_risk_only(tmp_path):
     assert updated.target.value == first.target.value
     assert updated.sizing.value["proposed_volume"] == Decimal("0.5")
     assert updated.sizing.value["actual_risk_amount"] != first.sizing.value["actual_risk_amount"]
+
+
+def test_volume_edit_uses_one_coherent_revision_when_atr_evidence_changes(tmp_path):
+    request, _ = _request(
+        "hãy buy XAUUSDm khi RSI 14 H1 > 55, ATR 14 x 1.5, RR 2, risk 1%, tài khoản demo"
+    )
+    store = EditableTradeDraftStore(tmp_path / "drafts.jsonl")
+    service = EditableTradeDraftService(store=store)
+    first = service.build_or_load(request, conversation_id="fresh-volume-edit", evidence=_evidence())
+    stale = store.append(
+        replace(first, revision=first.revision + 1, blockers=("TARGET_POLICY_CONFLICT",))
+    )
+    updated_evidence = replace(
+        _evidence(),
+        observed_at="2026-08-03T00:01:00+00:00",
+        atr=Decimal("2.02"),
+    )
+
+    updated = service.apply_patch(
+        first.draft_id,
+        TradeParameterPatch(stale.revision, requested_volume=Decimal("0.5")),
+        evidence=updated_evidence,
+    )
+
+    assert updated.revision == stale.revision + 1
+    assert updated.stop.value["price"] != first.stop.value["price"]
+    assert updated.target.value["price"] != first.target.value["price"]
+    assert updated.target.value["reward_risk_ratio"] == Decimal("2")
+    assert updated.target.value["price"] == Decimal("107.06")
+    assert "TARGET_POLICY_CONFLICT" not in updated.blockers
+    assert store.load(first.draft_id, first.revision) == first
+    assert first.target.value["price"] == Decimal("107")
+    assert updated.executable is False
+    assert updated.execution_authority is False
+
+
+def test_atr_edit_recalculates_derived_stop_and_target_together(tmp_path):
+    request, _ = _request(
+        "hãy buy XAUUSDm khi RSI 14 H1 > 55, ATR 14 x 1.5, RR 2, risk 1%, tài khoản demo"
+    )
+    service = EditableTradeDraftService(
+        store=EditableTradeDraftStore(tmp_path / "drafts.jsonl")
+    )
+    first = service.build_or_load(request, conversation_id="atr-edit", evidence=_evidence())
+
+    updated = service.apply_patch(
+        first.draft_id,
+        TradeParameterPatch(first.revision, atr_multiplier=Decimal("2")),
+        evidence=_evidence(),
+    )
+
+    assert updated.entry.value == first.entry.value
+    assert updated.stop.value["price"] == Decimal("97")
+    assert updated.target.value["price"] == Decimal("109")
+    assert updated.target.value["reward_risk_ratio"] == Decimal("2")
+    assert "TARGET_POLICY_CONFLICT" not in updated.blockers
 
 
 def test_direction_edit_refreshes_market_entry_and_only_direction_dependencies(tmp_path):

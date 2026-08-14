@@ -3061,3 +3061,12 @@ The existing review controls and protected confirmation journal now form the exp
 - Focused UI and neighboring tests passed with `68 passed` and two unchanged dependency warnings. Live Streamlit verification covered all four tabs plus desktop/mobile overflow and exception checks.
 - No candidate generation, confirmation, controlled-submit, `order_send`, MT5 write, or broker mutation was performed.
 - Verification level: `FOCUSED_AND_LIVE_PASS`. Verdict: `TRADING_WORKSPACE_UI_REDESIGN_COMPLETE`.
+
+# 107. EDITABLE DRAFT DEPENDENCY RECALCULATION
+
+- Draft revisions now validate Entry, policy-derived Stop Loss, reward:risk-derived Take Profit, and RR from one coherent revision. Derived target values are recomputed before conflict validation.
+- Recalculated revisions retain only unresolved semantic prerequisites from the prior revision; deterministic blockers such as `TARGET_POLICY_CONFLICT` are evaluated again instead of being copied forward.
+- Explicit incompatible user TP and RR values still produce `TARGET_POLICY_CONFLICT`. Previous immutable revisions and the existing `NON_EXECUTABLE` Draft boundary remain unchanged.
+- Focused Draft tests passed with `32 passed`; neighboring Draft lifecycle, strategy completion, thin-UI, and semantic tests passed with `79 passed` and two unchanged dependency warnings.
+- Live Streamlit verification created revision 4 from the affected protected Draft. Fresh ATR evidence produced coherent SL/TP at RR 2 and `VALID_NON_EXECUTABLE`; no Candidate, controlled-submit, `order_send`, MT5 write, or broker mutation occurred.
+- No full regression was run for this bounded Draft-only correction. Verification level: `FOCUSED_AND_LIVE_PASS`. Verdict: `EDITABLE_DRAFT_DEPENDENCY_RECALCULATION_COMPLETE`.
