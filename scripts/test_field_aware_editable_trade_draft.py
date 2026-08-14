@@ -319,6 +319,40 @@ def test_atr_edit_recalculates_derived_stop_and_target_together(tmp_path):
     assert "TARGET_POLICY_CONFLICT" not in updated.blockers
 
 
+def test_evidence_only_refresh_creates_coherent_immutable_revision(tmp_path):
+    request, _ = _request(
+        "hãy buy XAUUSDm khi RSI 14 H1 > 55, ATR 14 x 1.5, RR 2, volume 0.5, tài khoản demo"
+    )
+    store = EditableTradeDraftStore(tmp_path / "drafts.jsonl")
+    service = EditableTradeDraftService(store=store)
+    first = service.build_or_load(request, conversation_id="evidence-refresh", evidence=_evidence())
+    refreshed_evidence = replace(
+        _evidence(),
+        reference="market-evidence-refreshed",
+        observed_at="2026-08-03T00:02:00+00:00",
+        atr=Decimal("2.02"),
+    )
+
+    refreshed = service.apply_patch(
+        first.draft_id,
+        TradeParameterPatch(expected_revision=first.revision),
+        evidence=refreshed_evidence,
+    )
+
+    assert refreshed.revision == first.revision + 1
+    assert refreshed.market_evidence_reference == "market-evidence-refreshed"
+    assert refreshed.market_evidence_timestamp == "2026-08-03T00:02:00+00:00"
+    assert refreshed.sizing.value["requested_volume"] == Decimal("0.5")
+    assert refreshed.sizing.source == first.sizing.source == "USER_EXPLICIT"
+    assert refreshed.stop.value["price"] != first.stop.value["price"]
+    assert refreshed.target.value["price"] != first.target.value["price"]
+    assert refreshed.target.value["reward_risk_ratio"] == Decimal("2")
+    assert "TARGET_POLICY_CONFLICT" not in refreshed.blockers
+    assert refreshed.executable is False
+    assert refreshed.execution_authority is False
+    assert store.load(first.draft_id, first.revision) == first
+
+
 def test_direction_edit_refreshes_market_entry_and_only_direction_dependencies(tmp_path):
     request, _ = _request(
         "h\u00e3y buy XAUUSDm khi RSI 14 H1 > 55, ATR 14 x 1.5, RR 2, risk 1%, t\u00e0i kho\u1ea3n demo"

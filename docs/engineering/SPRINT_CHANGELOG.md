@@ -2584,3 +2584,23 @@ Commit: this commit
 - Candidate creation, controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero. Full regression was not run for this bounded Draft-only correction.
 
 ---
+
+### Post-release UX - Editable Draft Market Evidence Refresh
+
+Date: 2026-08-14
+Verification: `FOCUSED_AND_LIVE_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Added an explicit `Refresh Market Evidence` Draft action using the existing authoritative evidence loader and immutable Draft revision calculation path.
+- Preserved user-owned parameters, recalculated policy-derived dependencies, and kept refresh separate from Candidate creation and all execution authority.
+
+#### Verification and safety
+
+- Focused Draft, thin-UI, and Candidate lifecycle tests passed with `61 passed` and two unchanged dependency warnings.
+- Live DEMO UI refresh created revision 5 from stale revision 4, preserved user-edited volume, recomputed SL/TP coherently, and rendered `VALID_NON_EXECUTABLE` with fresh evidence.
+- One subsequent explicit Candidate action no longer returned `MARKET_DATA_STALE`; it stopped at independent mode authority validation. Controlled-submit, runtime `order_send`, MT5 writes, and broker mutations remained zero.
+- Full regression was not run for this bounded UI/workflow change.
+
+---

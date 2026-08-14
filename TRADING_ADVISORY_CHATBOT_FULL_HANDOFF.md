@@ -3070,3 +3070,13 @@ The existing review controls and protected confirmation journal now form the exp
 - Focused Draft tests passed with `32 passed`; neighboring Draft lifecycle, strategy completion, thin-UI, and semantic tests passed with `79 passed` and two unchanged dependency warnings.
 - Live Streamlit verification created revision 4 from the affected protected Draft. Fresh ATR evidence produced coherent SL/TP at RR 2 and `VALID_NON_EXECUTABLE`; no Candidate, controlled-submit, `order_send`, MT5 write, or broker mutation occurred.
 - No full regression was run for this bounded Draft-only correction. Verification level: `FOCUSED_AND_LIVE_PASS`. Verdict: `EDITABLE_DRAFT_DEPENDENCY_RECALCULATION_COMPLETE`.
+
+# 108. EDITABLE DRAFT MARKET EVIDENCE REFRESH
+
+- The existing Draft UI now exposes an explicit `Refresh Market Evidence` action beside Candidate creation. It reuses `_load_trade_draft_evidence()` and the existing immutable `apply_patch()` revision path without changing operator parameters.
+- Refresh preserves valid `USER_EXPLICIT` and `USER_EDITED` values, recomputes policy/system-derived Entry/SL/TP dependencies from current evidence, revalidates the new revision, and remains `NON_EXECUTABLE`.
+- Refresh never creates a Candidate, confirmation, pre-submit artifact, execution authority, or broker mutation. Candidate creation remains a separate explicit action and retains the existing freshness validator.
+- Focused Draft, thin-UI, and Candidate lifecycle tests passed with `61 passed` and two unchanged dependency warnings.
+- Live DEMO Streamlit verification refreshed the affected stale Draft from revision 4 to 5. Volume `0.03` remained user-owned, ATR-derived SL and RR-derived TP changed coherently, and the UI rendered `VALID_NON_EXECUTABLE` with the new observed timestamp.
+- The subsequent explicit Candidate action passed freshness and stopped at the independent pre-existing `DRAFT_MODE_AUTHORITY_MISMATCH` gate. No Candidate was automatically created and no controlled-submit, `order_send`, MT5 write, or broker mutation occurred.
+- No full regression was run for this bounded UI/workflow change. Verification level: `FOCUSED_AND_LIVE_PASS`. Verdict: `EDITABLE_DRAFT_MARKET_REFRESH_COMPLETE`.

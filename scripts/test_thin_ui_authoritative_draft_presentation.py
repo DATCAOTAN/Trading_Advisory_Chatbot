@@ -51,6 +51,7 @@ class _FakeStreamlit:
         self.messages = []
         self.metrics = []
         self.button_keys = set(button_keys)
+        self.reruns = 0
 
     def markdown(self, *_args, **_kwargs):
         pass
@@ -81,6 +82,9 @@ class _FakeStreamlit:
 
     def button(self, *_args, **kwargs):
         return kwargs.get("key") in self.button_keys
+
+    def rerun(self):
+        self.reruns += 1
 
 
 def _draft(*, revision=2, blockers=(), warnings=()):
@@ -427,6 +431,88 @@ def test_explicit_draft_button_binds_current_id_and_revision_to_candidate_servic
     assert calls[0][0:2] == (draft.draft_id, draft.revision)
     assert calls[0][2]["strategy"] is request.strategy
     assert ("warning", "Candidate creation blocked: MARKET_DATA_STALE") in streamlit.messages
+
+
+def test_explicit_market_refresh_reuses_evidence_and_revision_services(monkeypatch):
+    request = _request()
+    draft = _draft(revision=4)
+    key = f"editable_draft_{draft.draft_id}_{draft.revision}_refresh_market_evidence"
+    streamlit = _FakeStreamlit(button_keys=(key,))
+    refreshed = _draft(revision=5)
+    evidence = object()
+    calls = []
+
+    class Service:
+        def apply_patch(self, draft_id, patch, *, evidence):
+            calls.append((draft_id, patch, evidence))
+            return refreshed
+
+    monkeypatch.setattr(tab_chatbot, "st", streamlit)
+    monkeypatch.setattr(
+        tab_chatbot, "_load_trade_draft_evidence", lambda value: (evidence, "")
+    )
+    cleared = []
+    monkeypatch.setattr(
+        tab_chatbot,
+        "clear_autonomous_decision_run_result",
+        lambda session: cleared.append(session),
+    )
+
+    tab_chatbot._render_trade_draft_refresh_action(Service(), draft, request)
+
+    assert len(calls) == 1
+    assert calls[0][0] == draft.draft_id
+    assert calls[0][1].expected_revision == draft.revision
+    assert all(
+        getattr(calls[0][1], name) is None
+        for name in (
+            "stop_loss", "stop_method", "atr_multiplier", "take_profit",
+            "target_method", "reward_risk_ratio", "risk_fraction",
+            "requested_volume", "direction",
+        )
+    )
+    assert calls[0][2] is evidence
+    assert cleared == [streamlit.session_state]
+    assert streamlit.reruns == 1
+    assert streamlit.session_state[
+        f"editable_draft_{draft.draft_id}_market_refresh_result"
+    ]["validation"] == "VALID_NON_EXECUTABLE"
+
+    streamlit.button_keys.clear()
+    tab_chatbot._render_trade_draft_refresh_action(Service(), refreshed, request)
+    assert any(
+        kind == "success"
+        and "Market evidence refreshed" in message
+        and "revision: 4 -> 5" in message
+        and "Draft validation: VALID_NON_EXECUTABLE" in message
+        for kind, message in streamlit.messages
+    )
+
+
+def test_market_refresh_failure_creates_no_revision_or_candidate(monkeypatch):
+    request = _request()
+    draft = _draft(revision=4)
+    key = f"editable_draft_{draft.draft_id}_{draft.revision}_refresh_market_evidence"
+    streamlit = _FakeStreamlit(button_keys=(key,))
+
+    class Service:
+        def apply_patch(self, *_args, **_kwargs):
+            pytest.fail("refresh must stop before revision creation")
+
+    monkeypatch.setattr(tab_chatbot, "st", streamlit)
+    monkeypatch.setattr(
+        tab_chatbot,
+        "_load_trade_draft_evidence",
+        lambda _value: (None, "EVIDENCE_ACQUISITION_FAILED"),
+    )
+
+    tab_chatbot._render_trade_draft_refresh_action(Service(), draft, request)
+
+    assert streamlit.reruns == 0
+    assert (
+        "warning",
+        "Market evidence refresh blocked: EVIDENCE_ACQUISITION_FAILED",
+    ) in streamlit.messages
 
 
 def test_matching_draft_candidate_renders_existing_review_controls_without_acting(monkeypatch):

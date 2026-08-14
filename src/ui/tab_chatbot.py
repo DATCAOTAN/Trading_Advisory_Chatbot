@@ -1155,6 +1155,7 @@ def _render_editable_trade_draft(
 
     with st.expander("Edit risk parameters", expanded=False):
         _render_trade_draft_patch_form(service, draft, request)
+    _render_trade_draft_refresh_action(service, draft, request)
     _render_draft_candidate_action(orchestrator, store, draft, request)
     st.info(
         "Applying changes creates a new immutable draft revision. It does not create "
@@ -1223,6 +1224,54 @@ def _render_trade_draft_patch_form(
         st.rerun()
     except (TradeDraftError, InvalidOperation) as exc:
         st.error(f"Parameter update blocked: {exc}")
+
+
+def _render_trade_draft_refresh_action(
+    service: EditableTradeDraftService,
+    draft: EditableTradeDraft,
+    request: ConversationalTradingRequest,
+) -> None:
+    result_key = f"editable_draft_{draft.draft_id}_market_refresh_result"
+    result = st.session_state.pop(result_key, None)
+    if result is not None:
+        st.success(
+            "Market evidence refreshed | "
+            f"revision: {result['from_revision']} -> {result['to_revision']} | "
+            f"observed_at: {result['observed_at']} | "
+            f"Draft validation: {result['validation']}"
+        )
+
+    if not st.button(
+        "Refresh Market Evidence",
+        key=f"editable_draft_{draft.draft_id}_{draft.revision}_refresh_market_evidence",
+        use_container_width=True,
+    ):
+        return
+
+    evidence, evidence_error = _load_trade_draft_evidence(request)
+    if evidence is None:
+        st.warning(f"Market evidence refresh blocked: {evidence_error or 'EVIDENCE_UNAVAILABLE'}")
+        return
+    try:
+        updated = service.apply_patch(
+            draft.draft_id,
+            TradeParameterPatch(expected_revision=draft.revision),
+            evidence=evidence,
+        )
+    except (TradeDraftError, InvalidOperation) as exc:
+        st.error(f"Market evidence refresh blocked: {exc}")
+        return
+
+    clear_autonomous_decision_run_result(st.session_state)
+    st.session_state[result_key] = {
+        "from_revision": draft.revision,
+        "to_revision": updated.revision,
+        "observed_at": updated.market_evidence_timestamp or "UNAVAILABLE",
+        "validation": (
+            "BLOCKED_NON_EXECUTABLE" if updated.blockers else "VALID_NON_EXECUTABLE"
+        ),
+    }
+    st.rerun()
 
 
 def _render_draft_candidate_action(
