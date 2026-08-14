@@ -1333,6 +1333,12 @@ def _render_draft_candidate_action(
                 "Candidate creation blocked: "
                 + (outcome.blocker or outcome.status)
             )
+            if outcome.blocker == "DRAFT_MODE_AUTHORITY_MISMATCH":
+                st.info(
+                    f"This Draft requires authoritative mode {draft.mode.value}. "
+                    "Use the existing DEMO mode authorization control to grant that mode, "
+                    "then retry Create Candidate."
+                )
 
     run_result = get_autonomous_decision_run_result(st.session_state)
     candidate = run_result.candidate if run_result is not None else None

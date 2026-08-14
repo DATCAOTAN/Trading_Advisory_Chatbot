@@ -398,7 +398,7 @@ def test_explicit_draft_button_binds_current_id_and_revision_to_candidate_servic
         def status(self, *, refresh_runtime):
             assert refresh_runtime is False
             return {
-                "mode": "human_confirmed_live",
+                "mode": "autonomous_live",
                 "account_environment": "DEMO",
                 "mode_integrity_valid": True,
             }
@@ -414,7 +414,7 @@ def test_explicit_draft_button_binds_current_id_and_revision_to_candidate_servic
             calls.append((draft_id, revision, kwargs))
             return SimpleNamespace(
                 status="DRAFT_NOT_ELIGIBLE",
-                blocker="MARKET_DATA_STALE",
+                blocker="DRAFT_MODE_AUTHORITY_MISMATCH",
                 run_result=None,
             )
 
@@ -430,7 +430,17 @@ def test_explicit_draft_button_binds_current_id_and_revision_to_candidate_servic
     assert len(calls) == 1
     assert calls[0][0:2] == (draft.draft_id, draft.revision)
     assert calls[0][2]["strategy"] is request.strategy
-    assert ("warning", "Candidate creation blocked: MARKET_DATA_STALE") in streamlit.messages
+    assert calls[0][2]["authoritative_mode"] == "autonomous_live"
+    assert (
+        "warning",
+        "Candidate creation blocked: DRAFT_MODE_AUTHORITY_MISMATCH",
+    ) in streamlit.messages
+    assert (
+        "info",
+        "This Draft requires authoritative mode human_confirmed_live. "
+        "Use the existing DEMO mode authorization control to grant that mode, "
+        "then retry Create Candidate.",
+    ) in streamlit.messages
 
 
 def test_explicit_market_refresh_reuses_evidence_and_revision_services(monkeypatch):
