@@ -17,6 +17,8 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.lifecycle_superv
     MT5LifecycleState,
     MT5PositionLifecycleSupervisor,
     MT5PositionSupervisorConfig,
+    _classification,
+    _make_observation,
 )
 from tools.mt5_bridge.execution import ProtectedExecutionJournal
 
@@ -236,6 +238,63 @@ def test_pending_order_is_order_active(tmp_path):
 def test_fully_closed_position_requires_linked_closing_deal(tmp_path):
     status, _ = run(tmp_path, make_snapshot(recent_deals=[opening_deal(), closing_deal()]))
     assert state_of(status) == MT5LifecycleState.POSITION_CLOSED.value
+
+
+def test_closed_position_remains_terminal_after_broker_history_ages_out(tmp_path):
+    cfg = seed_execution(tmp_path)
+    supervisor = MT5PositionLifecycleSupervisor(
+        cfg,
+        bridge_client=FakeLifecycleClient(
+            make_snapshot(recent_deals=[opening_deal(), closing_deal()])
+        ),
+    )
+    assert state_of(supervisor.run_once()) == MT5LifecycleState.POSITION_CLOSED.value
+
+    supervisor.bridge_client = FakeLifecycleClient(make_snapshot(reference="snapshot-later"))
+    status = supervisor.run_once()
+
+    assert state_of(status) == MT5LifecycleState.POSITION_CLOSED.value
+    assert status.discrepancy_count == 0
+    row = MT5LifecycleJournal(cfg.lifecycle_journal_path).observations()[-1]
+    assert row["evidence_classification"] == "TERMINAL_POSITION_CLOSED_PRESERVED"
+    assert row["discrepancy_reason"] == ""
+
+
+def test_closed_position_recovers_after_a_legacy_missing_evidence_regression(tmp_path):
+    cfg = seed_execution(tmp_path)
+    supervisor = MT5PositionLifecycleSupervisor(
+        cfg,
+        bridge_client=FakeLifecycleClient(
+            make_snapshot(recent_deals=[opening_deal(), closing_deal()])
+        ),
+    )
+    assert state_of(supervisor.run_once()) == MT5LifecycleState.POSITION_CLOSED.value
+
+    journal = MT5LifecycleJournal(cfg.lifecycle_journal_path)
+    closed = journal.observations()[-1]
+    regressed = _make_observation(
+        closed["protected_execution_reference"],
+        MT5LifecycleState.POSITION_CLOSED.value,
+        _classification(
+            MT5LifecycleState.INCONSISTENT,
+            "BROKER_EVIDENCE_MISSING",
+            "CONFIRMED_BROKER_EVIDENCE_ABSENT",
+            [],
+            [],
+            [],
+        ),
+        make_snapshot(reference="snapshot-regressed"),
+    )
+    assert journal.append_if_changed(regressed)
+
+    supervisor.bridge_client = FakeLifecycleClient(make_snapshot(reference="snapshot-recovery"))
+    status = supervisor.run_once()
+
+    assert state_of(status) == MT5LifecycleState.POSITION_CLOSED.value
+    assert status.discrepancy_count == 0
+    row = journal.observations()[-1]
+    assert row["previous_lifecycle_state"] == MT5LifecycleState.INCONSISTENT.value
+    assert row["evidence_classification"] == "TERMINAL_POSITION_CLOSED_PRESERVED"
 
 
 def test_partial_reduction(tmp_path):

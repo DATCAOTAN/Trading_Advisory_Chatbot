@@ -6,7 +6,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, Mapping
 
+from src.services.trading.execution.live_value_approval_lock.models import (
+    ApprovedSemanticExecutionParameters,
+)
 from src.services.trading.execution.mt5_live_adapter_pre_submit.models import hash_text
+from src.services.trading.execution.mt5_live_adapter_pre_submit.store import (
+    pre_submit_record_hash,
+)
 
 
 if TYPE_CHECKING:
@@ -183,6 +189,146 @@ class MT5ControlledExecutionRequest:
             idempotency_key=idempotency_key,
             expected_account_context_fingerprint=fingerprint,
             execution_permission_requested=execution_permission_requested,
+        )
+
+    @classmethod
+    def from_human_candidate_artifacts(
+        cls,
+        candidate,
+        confirmation,
+        pre_submit_record: Mapping[str, Any],
+        *,
+        expected_account_context_fingerprint: str,
+        human_confirmation_phrase: str,
+        execution_permission_requested: bool = True,
+        now: datetime | None = None,
+    ) -> "MT5ControlledExecutionRequest":
+        evaluated_at = now or datetime.now(timezone.utc)
+        if evaluated_at.tzinfo is None:
+            evaluated_at = evaluated_at.replace(tzinfo=timezone.utc)
+        evaluated_at = evaluated_at.astimezone(timezone.utc)
+        fingerprint = str(expected_account_context_fingerprint or "").strip().lower()
+        phrase = str(human_confirmation_phrase or "").strip()
+        protected = dict(pre_submit_record.get("protected_intent", {}) or {})
+        record_material = dict(pre_submit_record)
+        actual_record_hash = str(record_material.get("record_hash", ""))
+        record_material["record_hash"] = ""
+        if (
+            len(fingerprint) != 64
+            or any(character not in "0123456789abcdef" for character in fingerprint)
+            or not phrase
+            or execution_permission_requested is not True
+            or pre_submit_record.get("status") != "PRE_SUBMIT_READY_NON_EXECUTABLE"
+            or pre_submit_record.get("valid") is not True
+            or pre_submit_record.get("pre_submit_state")
+            != "PRE_SUBMIT_READY_NON_EXECUTABLE"
+            or pre_submit_record.get("authorization_source") != "HUMAN_CONFIRMATION"
+            or not actual_record_hash
+            or not hmac.compare_digest(
+                actual_record_hash, pre_submit_record_hash(record_material)
+            )
+            or not protected
+        ):
+            raise ValueError("HUMAN_CANDIDATE_EXECUTION_ARTIFACTS_INVALID")
+        bindings = (
+            (pre_submit_record.get("source_candidate_reference"), candidate.candidate_reference),
+            (pre_submit_record.get("source_confirmation_intent_id"), confirmation.intent_id),
+            (protected.get("candidate_reference"), candidate.candidate_reference),
+            (protected.get("candidate_provenance_hash"), candidate.provenance_hash),
+            (protected.get("structured_order_hash"), candidate.structured_order_hash),
+            (protected.get("confirmation_intent_id"), confirmation.intent_id),
+            (protected.get("authorization_binding_hash"), confirmation.confirmation_binding_hash),
+            (protected.get("account_fingerprint_hash"), hash_text(fingerprint)),
+            (protected.get("symbol"), candidate.symbol_reference),
+            (protected.get("broker_symbol"), candidate.broker_symbol_reference),
+            (protected.get("side"), candidate.side),
+            (protected.get("order_type"), candidate.order_type),
+            (protected.get("action"), candidate.action),
+            (protected.get("entry_price"), candidate.entry_price),
+            (protected.get("stop_loss"), candidate.stop_loss),
+            (protected.get("take_profit"), candidate.take_profit),
+            (protected.get("volume"), candidate.proposed_volume),
+        )
+        if any(left != right for left, right in bindings):
+            raise ValueError("HUMAN_CANDIDATE_EXECUTION_BINDING_MISMATCH")
+        if (
+            confirmation.proposal_boundary_status != "CONFIRMED_FOR_PROPOSAL_WORKFLOW"
+            or confirmation.human_confirmation_state != "CONFIRMED_PROPOSAL_WORKFLOW"
+            or confirmation.operator_action != "CONFIRM"
+            or candidate.action != "MARKET"
+            or candidate.order_type not in {"BUY", "SELL"}
+        ):
+            raise ValueError("HUMAN_CANDIDATE_EXECUTION_AUTHORITY_INVALID")
+        try:
+            expires_at = datetime.fromisoformat(str(protected.get("expires_at", "")))
+            if expires_at.tzinfo is None:
+                raise ValueError
+        except ValueError as exc:
+            raise ValueError("HUMAN_CANDIDATE_EXECUTION_EXPIRED") from exc
+        if expires_at.astimezone(timezone.utc) <= evaluated_at:
+            raise ValueError("HUMAN_CANDIDATE_EXECUTION_EXPIRED")
+        protected_hash = hash_text(
+            json.dumps(protected, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        )
+        if not hmac.compare_digest(
+            protected_hash, str(pre_submit_record.get("artifact_hash", ""))
+        ):
+            raise ValueError("HUMAN_CANDIDATE_EXECUTION_ARTIFACTS_INVALID")
+        idempotency_key = hash_text(
+            "human-confirmed-candidate/v1|"
+            + candidate.candidate_reference
+            + "|"
+            + confirmation.intent_id
+            + "|"
+            + str(pre_submit_record.get("pre_submit_report_id", ""))
+            + "|"
+            + protected_hash
+        )
+        parameters = ApprovedSemanticExecutionParameters.from_mapping(
+            {
+                "action": "MARKET",
+                "symbol": candidate.broker_symbol_reference,
+                "volume": candidate.proposed_volume,
+                "order_type": candidate.order_type,
+                "price": candidate.entry_price or "0",
+                "stop_loss": candidate.stop_loss,
+                "take_profit": candidate.take_profit,
+                "deviation": 0,
+                "magic": 0,
+                "comment": "human-confirmed",
+                "idempotency": idempotency_key,
+                "audit": confirmation.intent_id,
+            },
+            approval_artifact_ref=confirmation.intent_id,
+            lock_artifact_ref=str(pre_submit_record.get("pre_submit_report_id", "")),
+            source_artifact_ref=candidate.candidate_reference,
+            approved_at=confirmation.confirmation_timestamp,
+            locked_at=str(pre_submit_record.get("created_at", "")),
+        )
+        semantic_hash = parameters.canonical_values_hash
+        confirmation_reference = hash_text(
+            f"{phrase}|{idempotency_key}|{fingerprint}"
+        )
+        return cls(
+            request_version="controlled-mt5-execution/v1",
+            approved_semantic_parameters=parameters.to_protected_dict(),
+            canonical_semantic_hash=semantic_hash,
+            approval_value_hash=semantic_hash,
+            lock_value_hash=semantic_hash,
+            approval_reference=parameters.approval_artifact_ref,
+            lock_reference=parameters.lock_artifact_ref,
+            source_artifact_reference=parameters.source_artifact_ref,
+            approval_timestamp=parameters.approved_at,
+            lock_timestamp=parameters.locked_at,
+            human_confirmation_reference=confirmation_reference,
+            human_confirmation_phrase=phrase,
+            pre_submit_validation_reference=str(
+                pre_submit_record.get("pre_submit_report_id", "")
+            ),
+            pre_submit_validation_valid=True,
+            idempotency_key=idempotency_key,
+            expected_account_context_fingerprint=fingerprint,
+            execution_permission_requested=True,
         )
 
     @classmethod

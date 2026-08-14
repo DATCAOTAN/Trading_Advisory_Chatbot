@@ -2604,3 +2604,25 @@ Commit: this commit
 - Full regression was not run for this bounded UI/workflow change.
 
 ---
+
+### Post-release fix - Human-Confirmed DEMO Controlled Execution
+
+Date: 2026-08-14
+Verification: `FULL_REGRESSION_PASS`
+Commit: this commit
+
+#### Implemented
+
+- Completed the existing protected human-confirmed path from Candidate confirmation and final validation to one separately authorized controlled DEMO submission.
+- Reused strict persisted Candidate, confirmation, account-context, pre-submit, permission-snapshot, idempotency, adapter, bridge, and lifecycle contracts; no parallel authority or broker path was added.
+- Preserved deterministic Draft recalculation and explicit-human authority when advisory methodology scoring is the only non-deterministic veto.
+- Kept independent bridge MARKET-price resolution and exact lifecycle evidence binding at their existing trust boundaries.
+
+#### Verification and safety
+
+- Focused Draft, Candidate, policy, approval, controlled-execution, bridge, and lifecycle tests passed with `203 passed` and two unchanged dependency warnings.
+- Final hermetic full regression passed with `3,769 passed`, `156 subtests passed`, and three unchanged warnings; compileall passed.
+- Live DEMO acceptance reached the single production `order_send` boundary exactly once and returned protected `RESULT_CONFIRMED` / retcode `10009`; lifecycle reported `POSITION_OPEN` with a unique evidence match.
+- Duplicate submissions and retries were zero. Protected broker/account identifiers remain excluded from public output and documentation.
+
+---

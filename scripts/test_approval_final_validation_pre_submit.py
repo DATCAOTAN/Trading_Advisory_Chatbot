@@ -34,8 +34,12 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.reconciliation i
 from src.services.trading.execution.mt5_live_adapter_pre_submit.store import (
     MT5PreSubmitJournalStore,
 )
+from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled import (
+    MT5ControlledExecutionRequest,
+)
 from src.services.trading.proposal.intent_store import (
     ProposalIntentJournalStore,
+    load_candidate_confirmation,
     proposal_record_hash,
 )
 from src.ui.autonomous_candidate_review import (
@@ -55,6 +59,60 @@ def test_valid_market_reaches_one_non_executable_pre_submit_record(tmp_path):
     assert result.journal_appended is True
     assert len(state["pre_submit_store"].read_latest()) == 1
     _assert_disabled(result)
+
+
+def test_human_confirmed_market_pre_submit_builds_bound_controlled_request(tmp_path):
+    state, result = _run(tmp_path, "fresh_market")
+    candidate = state["candidate"]
+    confirmation = load_candidate_confirmation(
+        state["review_store"], candidate.candidate_reference
+    )
+    record = state["pre_submit_store"].load_candidate_pre_submit(
+        candidate.candidate_reference
+    )
+
+    request = MT5ControlledExecutionRequest.from_human_candidate_artifacts(
+        candidate,
+        confirmation,
+        record,
+        expected_account_context_fingerprint="a" * 64,
+        human_confirmation_phrase="SUBMIT CONTROLLED MT5 ORDER",
+        now=NOW,
+    )
+
+    protected = request.approved_semantic_parameters
+    assert request.request_version == "controlled-mt5-execution/v1"
+    assert request.execution_permission_requested is True
+    assert request.source_artifact_reference == candidate.candidate_reference
+    assert protected["symbol"] == candidate.broker_symbol_reference
+    assert protected["order_type"] == candidate.order_type
+    assert protected["volume"] == candidate.proposed_volume
+    assert protected["stop_loss"] == candidate.stop_loss
+    assert protected["take_profit"] == candidate.take_profit
+
+
+def test_human_confirmed_request_rejects_tampered_pre_submit_binding(tmp_path):
+    state, _result = _run(tmp_path, "fresh_market")
+    candidate = state["candidate"]
+    confirmation = load_candidate_confirmation(
+        state["review_store"], candidate.candidate_reference
+    )
+    record = dict(
+        state["pre_submit_store"].load_candidate_pre_submit(
+            candidate.candidate_reference
+        )
+    )
+    record["source_candidate_reference"] = "candidate-tampered"
+
+    with pytest.raises(ValueError, match="HUMAN_CANDIDATE_EXECUTION_ARTIFACTS_INVALID"):
+        MT5ControlledExecutionRequest.from_human_candidate_artifacts(
+            candidate,
+            confirmation,
+            record,
+            expected_account_context_fingerprint="a" * 64,
+            human_confirmation_phrase="SUBMIT CONTROLLED MT5 ORDER",
+            now=NOW,
+        )
 
 
 def test_valid_pending_preserves_buy_limit_semantics(tmp_path):
@@ -179,6 +237,38 @@ def test_permission_change_after_confirmation_blocks_final_validation(tmp_path):
     assert not result.final_validation.valid
     assert "CURRENT_PERMISSION_STATE_MISMATCH" in result.final_validation.blockers
     assert result.journal_record is None
+
+
+def test_human_confirmation_accepts_controlled_execution_ready_permissions(
+    tmp_path, monkeypatch
+):
+    from src.config import Config
+
+    state = _prepared(tmp_path, "fresh_market")
+    monkeypatch.setattr(Config, "TRADING_MT5_LIVE_EXECUTION_ENABLED", True)
+    monkeypatch.setattr(Config, "TRADING_MT5_ORDER_SEND_ENABLED", True)
+    config = MT5LiveAdapterPreSubmitConfig(
+        live_adapter_enabled=True,
+        live_adapter_hard_block=False,
+        allow_live_submission=True,
+        allow_order_send=True,
+        controlled_execution_enabled=True,
+        kill_switch_engaged=False,
+    )
+
+    result = _service(state, config=config).run(
+        state["candidate"].candidate_reference,
+        account_context=state["account"],
+        expected_account_fingerprint="a" * 64,
+        terminal_capability=_capability(state),
+        now=NOW,
+    )
+
+    assert result.final_validation and result.final_validation.valid
+    assert result.report and result.report.pre_submit_ready
+    assert result.journal_record is not None
+    assert result.journal_record.executable is False
+    assert result.journal_record.order_sent is False
 
 
 def test_lifecycle_conflict_blocks_final_validation(tmp_path):

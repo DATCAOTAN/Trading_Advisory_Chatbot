@@ -1091,6 +1091,7 @@ def _operator_candidate_review_controller() -> OperatorCandidateReviewController
             pre_submit_store=authority_service.pre_submit_store,
         ),
         pre_submit_evidence_provider=pre_submit_evidence_provider,
+        execution_adapter=MT5LiveAdapterDisabled(),
     )
 
 

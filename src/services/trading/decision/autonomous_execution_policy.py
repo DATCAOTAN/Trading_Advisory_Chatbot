@@ -21,6 +21,7 @@ from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionEligibility,
     AutonomousDecisionIntent,
     AutonomousDecisionOrchestrator,
+    _editable_draft_advisory_only_block,
     _candidate_structured_order_hash,
 )
 from src.services.trading.decision.models import DecisionBlocker, TradeReadinessDecision
@@ -562,9 +563,14 @@ def _policy_reasons(
     ):
         reasons.append("REQUIRED_STRUCTURED_REFERENCE_MISSING")
     risk = inputs.risk_result
+    advisory_only_draft_block = _editable_draft_advisory_only_block(
+        proposal_source=candidate.proposal_source,
+        operating_mode=candidate.operating_mode,
+        risk_result=risk,
+    )
     if risk is None or not risk.decision_id:
         reasons.append("RISK_RESULT_UNAVAILABLE")
-    elif risk.action == "BLOCKED" or risk.blockers:
+    elif (risk.action == "BLOCKED" or risk.blockers) and not advisory_only_draft_block:
         reasons.append("RISK_RESULT_BLOCKED")
     elif not hmac.compare_digest(risk.decision_id, candidate.risk_result_reference):
         reasons.append("RISK_RESULT_REFERENCE_MISMATCH")
@@ -638,9 +644,17 @@ def _policy_decision(
         if not inputs.semantic_proposal_complete or not candidate.proposed_semantic_parameter_references:
             return AutonomousPolicyDecision.BLOCK, AutonomousControlledBoundary.NONE, "SEMANTIC_PROPOSAL_INCOMPLETE"
         risk_action = inputs.risk_result.action if inputs.risk_result else ""
+        advisory_only_draft_block = _editable_draft_advisory_only_block(
+            proposal_source=candidate.proposal_source,
+            operating_mode=candidate.operating_mode,
+            risk_result=inputs.risk_result,
+        )
         deterministic_draft_ready = (
             candidate.proposal_source == EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE
-            and risk_action in DETERMINISTIC_DRAFT_NON_BLOCKING_READINESS_ACTIONS
+            and (
+                risk_action in DETERMINISTIC_DRAFT_NON_BLOCKING_READINESS_ACTIONS
+                or advisory_only_draft_block
+            )
         )
         if risk_action != "REVIEW_READY" and not deterministic_draft_ready:
             return AutonomousPolicyDecision.BLOCK, AutonomousControlledBoundary.NONE, "OPEN_POLICY_NOT_READY"

@@ -41,6 +41,33 @@ DETERMINISTIC_DRAFT_NON_BLOCKING_READINESS_ACTIONS = {
     "WAIT",
     "NO_TRADE",
 }
+
+
+def _editable_draft_advisory_only_block(
+    *,
+    proposal_source: str,
+    operating_mode: str,
+    risk_result: TradeReadinessDecision | None,
+    score_blockers: Sequence[str] = (),
+) -> bool:
+    """Identify a methodology-fit veto that cannot override an explicit human Draft."""
+    if (
+        proposal_source != EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE
+        or operating_mode != "human_confirmed_live"
+        or risk_result is None
+        or risk_result.action != "BLOCKED"
+    ):
+        return False
+    risk_codes = tuple(str(item.code) for item in risk_result.blockers)
+    codes = tuple(str(item) for item in score_blockers) + risk_codes
+    return (
+        any(code.startswith("method_bad_regime:") for code in codes)
+        and all(
+            code == "SCORING_BLOCKERS_PRESENT"
+            or code.startswith("method_bad_regime:")
+            for code in codes
+        )
+    )
 OPERATOR_PROPOSAL_SOURCES = {
     MANUAL_OPERATOR_PROPOSAL_SOURCE,
     EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE,
@@ -1592,6 +1619,12 @@ def _input_blockers(
     method = inputs.method_selection
     score = inputs.score_report
     risk = inputs.risk_result
+    advisory_only_draft_block = _editable_draft_advisory_only_block(
+        proposal_source=_proposal_source(inputs),
+        operating_mode=context.mode,
+        risk_result=risk,
+        score_blockers=score.blockers,
+    )
     if not context.context_pack_id or not method.result_id or not score.score_report_id:
         blockers.append("MISSING_REQUIRED_INPUT")
     if risk is None or not risk.decision_id:
@@ -1636,9 +1669,9 @@ def _input_blockers(
         blockers.append("EVIDENCE_INSUFFICIENT")
     if context.blockers or method.blockers:
         blockers.append("STRUCTURED_INPUT_BLOCKED")
-    if risk and (risk.action == "BLOCKED" or risk.blockers):
+    if risk and (risk.action == "BLOCKED" or risk.blockers) and not advisory_only_draft_block:
         blockers.append("RISK_RESULT_BLOCKED")
-    if score.blockers:
+    if score.blockers and not advisory_only_draft_block:
         blockers.append("SCORING_RESULT_BLOCKED")
     if score.primary_method_id != method.primary_method_id:
         blockers.append("REASONING_SCORE_CONFLICT")
@@ -1803,9 +1836,18 @@ def _classify(
             AutonomousDecisionEligibility.HUMAN_REVIEW_REQUIRED,
         )
     if requested in {"AUTO", AutonomousDecisionIntent.OPEN_POSITION.value}:
+        advisory_only_draft_block = _editable_draft_advisory_only_block(
+            proposal_source=_proposal_source(inputs),
+            operating_mode=inputs.runtime_context.mode,
+            risk_result=inputs.risk_result,
+            score_blockers=inputs.score_report.blockers,
+        )
         deterministic_draft_ready = (
             _proposal_source(inputs) == EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE
-            and risk_action in DETERMINISTIC_DRAFT_NON_BLOCKING_READINESS_ACTIONS
+            and (
+                risk_action in DETERMINISTIC_DRAFT_NON_BLOCKING_READINESS_ACTIONS
+                or advisory_only_draft_block
+            )
         )
         if risk_action == "REVIEW_READY" or deterministic_draft_ready:
             if not inputs.semantic_parameter_references or not inputs.direction:

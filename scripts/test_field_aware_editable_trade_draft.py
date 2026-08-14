@@ -330,6 +330,7 @@ def test_evidence_only_refresh_creates_coherent_immutable_revision(tmp_path):
         _evidence(),
         reference="market-evidence-refreshed",
         observed_at="2026-08-03T00:02:00+00:00",
+        ask=Decimal("102"),
         atr=Decimal("2.02"),
     )
 
@@ -342,12 +343,15 @@ def test_evidence_only_refresh_creates_coherent_immutable_revision(tmp_path):
     assert refreshed.revision == first.revision + 1
     assert refreshed.market_evidence_reference == "market-evidence-refreshed"
     assert refreshed.market_evidence_timestamp == "2026-08-03T00:02:00+00:00"
+    assert first.entry.value["reference_price"] == Decimal("101")
+    assert refreshed.entry.value["reference_price"] == Decimal("102")
     assert refreshed.sizing.value["requested_volume"] == Decimal("0.5")
     assert refreshed.sizing.source == first.sizing.source == "USER_EXPLICIT"
     assert refreshed.stop.value["price"] != first.stop.value["price"]
     assert refreshed.target.value["price"] != first.target.value["price"]
     assert refreshed.target.value["reward_risk_ratio"] == Decimal("2")
     assert "TARGET_POLICY_CONFLICT" not in refreshed.blockers
+    assert store.load(first.draft_id, first.revision) == first
     assert refreshed.executable is False
     assert refreshed.execution_authority is False
     assert store.load(first.draft_id, first.revision) == first

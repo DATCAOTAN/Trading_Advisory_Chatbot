@@ -359,6 +359,11 @@ class MT5PositionLifecycleSupervisor:
     def _run_cycle(self, started: float) -> MT5RuntimeSupervisorStatus:
         try:
             latest = self.lifecycle_journal.latest_by_execution()
+            terminal_closed_references = {
+                row["protected_execution_reference"]
+                for row in self.lifecycle_journal.observations()
+                if row["lifecycle_state"] == MT5LifecycleState.POSITION_CLOSED.value
+            }
         except MT5LifecycleJournalError as exc:
             return self._set_failure(started, "PERSISTENCE_UNSAFE", str(exc))
         try:
@@ -395,6 +400,18 @@ class MT5PositionLifecycleSupervisor:
             classification = _classify_record(record, snapshot, self.config.stale_submission_seconds)
             reference = _execution_reference(record)
             previous = latest.get(reference, {}).get("lifecycle_state", MT5LifecycleState.UNKNOWN.value)
+            if (
+                reference in terminal_closed_references
+                and classification.discrepancy == "CONFIRMED_BROKER_EVIDENCE_ABSENT"
+            ):
+                classification = _classification(
+                    MT5LifecycleState.POSITION_CLOSED,
+                    "TERMINAL_POSITION_CLOSED_PRESERVED",
+                    "",
+                    [],
+                    [],
+                    [],
+                )
             observation = _make_observation(reference, previous, classification, snapshot)
             if self.lifecycle_journal.append_if_changed(observation):
                 appended += 1

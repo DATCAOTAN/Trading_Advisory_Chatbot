@@ -17,6 +17,13 @@ from src.services.trading.decision.candidate_review import (
     present_autonomous_candidate_review,
 )
 from src.services.trading.proposal.intent_store import load_candidate_confirmation
+from src.services.trading.execution.mt5_live_adapter_pre_submit.controlled import (
+    MT5ControlledExecutionRequest,
+    MT5ControlledExecutionReceipt,
+)
+from src.services.trading.execution.mt5_live_adapter_pre_submit.policy import (
+    execution_permission_state,
+)
 
 
 AUTONOMOUS_DECISION_RUN_RESULT_SESSION_KEY = "autonomous_decision_run_result"
@@ -25,6 +32,9 @@ AUTONOMOUS_CANDIDATE_REVIEW_OUTCOME_SESSION_KEY = (
 )
 AUTONOMOUS_CANDIDATE_PRE_SUBMIT_OUTCOME_SESSION_KEY = (
     "autonomous_candidate_pre_submit_outcome"
+)
+AUTONOMOUS_CANDIDATE_EXECUTION_OUTCOME_SESSION_KEY = (
+    "autonomous_candidate_execution_outcome"
 )
 
 
@@ -55,12 +65,24 @@ class OperatorCandidateReviewController:
         account_context_provider,
         pre_submit_service=None,
         pre_submit_evidence_provider=None,
+        execution_adapter=None,
     ):
         self.confirmation_service = confirmation_service
         self.candidate_journal = candidate_journal
         self.account_context_provider = account_context_provider
         self.pre_submit_service = pre_submit_service
         self.pre_submit_evidence_provider = pre_submit_evidence_provider
+        self.execution_adapter = execution_adapter
+
+    @property
+    def execution_confirmation_phrase(self) -> str:
+        return str(
+            getattr(
+                getattr(self.execution_adapter, "config", None),
+                "execution_confirmation_phrase",
+                "",
+            )
+        )
 
     def act(
         self,
@@ -192,6 +214,64 @@ class OperatorCandidateReviewController:
             == "PRE_SUBMIT_READY_NON_EXECUTABLE",
             journal_record_id=str(record.get("journal_record_id", "")),
         )
+
+    def submit_confirmed_candidate(
+        self,
+        session_state: Any,
+        candidate_reference: str,
+        phrase: str,
+        *,
+        now: datetime | None = None,
+    ) -> MT5ControlledExecutionReceipt:
+        if self.execution_adapter is None or self.pre_submit_service is None:
+            receipt = MT5ControlledExecutionReceipt(
+                "BLOCKED", "NOT_RESERVED", False, False, False,
+                "CONTROLLED_EXECUTION_SERVICE_UNAVAILABLE",
+            )
+        else:
+            try:
+                candidate = self.candidate_journal.load_candidate(candidate_reference)
+                confirmation = load_candidate_confirmation(
+                    self.confirmation_service.journal.store, candidate_reference
+                )
+                pre_submit_record = (
+                    self.pre_submit_service.pre_submit_store.load_candidate_pre_submit(
+                        candidate_reference
+                    )
+                )
+                if candidate is None or confirmation is None or pre_submit_record is None:
+                    raise ValueError("HUMAN_CANDIDATE_EXECUTION_ARTIFACTS_MISSING")
+                account_context, fingerprint = self.account_context_provider()
+                if getattr(account_context, "account_environment", "") != "DEMO":
+                    raise ValueError("REAL_ACCOUNT_EXECUTION_FORBIDDEN")
+                protected_permissions = pre_submit_record.get(
+                    "protected_intent", {}
+                ).get("permission_state")
+                current_permissions = execution_permission_state(
+                    self.execution_adapter.config
+                )
+                if protected_permissions != current_permissions:
+                    raise ValueError("PERMISSION_SNAPSHOT_MISMATCH")
+                request = MT5ControlledExecutionRequest.from_human_candidate_artifacts(
+                    candidate,
+                    confirmation,
+                    pre_submit_record,
+                    expected_account_context_fingerprint=fingerprint,
+                    human_confirmation_phrase=phrase,
+                    now=now,
+                )
+                receipt = self.execution_adapter.submit_prepared_request(
+                    request, typed_confirmation=phrase
+                )
+            except (RuntimeError, ValueError) as exc:
+                receipt = MT5ControlledExecutionReceipt(
+                    "BLOCKED", "NOT_RESERVED", False, False, False, str(exc)
+                )
+        session_state[AUTONOMOUS_CANDIDATE_EXECUTION_OUTCOME_SESSION_KEY] = (
+            candidate_reference,
+            receipt,
+        )
+        return receipt
 
 
 def store_autonomous_decision_run_result(
@@ -358,6 +438,28 @@ def render_autonomous_candidate_confirmation_controls(
         )
         if pre_submit_outcome.pre_submit_ready:
             st.success(message + " | submission_disabled=true")
+            st.caption(
+                "A separate exact phrase and click are required for one controlled "
+                "DEMO submission. Refreshes never submit automatically."
+            )
+            st.caption(
+                f"Required phrase: `{controller.execution_confirmation_phrase}`"
+            )
+            execution_phrase = st.text_input(
+                "Controlled DEMO submission phrase",
+                type="password",
+                key=f"{key_prefix}controlled_demo_submission_phrase",
+            )
+            if st.button(
+                "Submit Confirmed DEMO Order",
+                key=f"{key_prefix}submit_confirmed_demo_order",
+                use_container_width=True,
+            ):
+                controller.submit_confirmed_candidate(
+                    st.session_state,
+                    candidate_reference,
+                    execution_phrase,
+                )
         else:
             st.error(
                 message
@@ -367,6 +469,28 @@ def render_autonomous_candidate_confirmation_controls(
                     else ""
                 )
             )
+    execution_outcome = st.session_state.get(
+        AUTONOMOUS_CANDIDATE_EXECUTION_OUTCOME_SESSION_KEY
+    )
+    if (
+        isinstance(execution_outcome, tuple)
+        and len(execution_outcome) == 2
+        and execution_outcome[0] == candidate_reference
+        and isinstance(execution_outcome[1], MT5ControlledExecutionReceipt)
+    ):
+        receipt = execution_outcome[1]
+        message = (
+            f"Controlled submission={receipt.status} | "
+            f"state={receipt.idempotency_status} | order_sent={receipt.order_sent}"
+        )
+        if receipt.idempotency_status == "RESULT_UNKNOWN":
+            st.error(message + " | retry_prohibited=true")
+        elif receipt.status == "ACCEPTED" and receipt.order_sent:
+            st.success(message)
+        elif receipt.status == "REJECTED":
+            st.warning(message + (f" | reason={receipt.reason}" if receipt.reason else ""))
+        else:
+            st.error(message + (f" | reason={receipt.reason}" if receipt.reason else ""))
 
 
 def _render_status(view: AutonomousCandidateReviewView) -> None:

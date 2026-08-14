@@ -70,6 +70,15 @@ class FakeClient:
             "redacted": True,
         }
 
+    def pending_order_context(self, _symbol):
+        return {
+            "status": "OK",
+            "symbol_available": True,
+            "symbol_trade_allowed": True,
+            "ask": "1.2",
+            "bid": "1.1",
+        }
+
 
 class FakeExecutionClient:
     def __init__(self, account_fingerprint=ACCOUNT_A, response=None):
@@ -100,7 +109,9 @@ class FakeExecutionClient:
         return self.response
 
 
-def semantic_parameters(idempotency="idem-controlled-1", *, comment="controlled-test"):
+def semantic_parameters(
+    idempotency="idem-controlled-1", *, comment="controlled-test", price="1.2"
+):
     now = datetime.now(timezone.utc).isoformat()
     return ApprovedSemanticExecutionParameters.from_mapping(
         {
@@ -108,7 +119,7 @@ def semantic_parameters(idempotency="idem-controlled-1", *, comment="controlled-
             "symbol": "TEST_SYMBOL",
             "volume": "0.01",
             "order_type": "BUY",
-            "price": "1.2",
+            "price": price,
             "stop_loss": "1.1",
             "take_profit": "1.3",
             "deviation": 10,
@@ -125,8 +136,11 @@ def semantic_parameters(idempotency="idem-controlled-1", *, comment="controlled-
     )
 
 
-def protected_payload(idempotency="idem-controlled-1", *, fingerprint=ACCOUNT_A, comment="controlled-test"):
-    parameters = semantic_parameters(idempotency, comment=comment)
+def protected_payload(
+    idempotency="idem-controlled-1", *, fingerprint=ACCOUNT_A,
+    comment="controlled-test", price="1.2"
+):
+    parameters = semantic_parameters(idempotency, comment=comment, price=price)
     confirmation_ref = hash_text(f"{CONFIRMATION}|{idempotency}|{fingerprint}")
     return MT5ControlledExecutionRequest(
         request_version="controlled-mt5-execution/v1",
@@ -187,6 +201,17 @@ def test_valid_authenticated_request_calls_order_send_once_and_redacts_result(tm
     assert fake_mt5.calls == 1
     journal = Path(bridge_config(tmp_path).journal_path).read_text(encoding="utf-8")
     assert '"order": 123456' in journal and '"deal": 654321' in journal
+
+
+def test_market_zero_price_is_replaced_with_current_broker_price(tmp_path):
+    fake_mt5 = FakeMT5()
+    response, status = service(tmp_path, mt5=fake_mt5).handle(
+        protected_payload(price="0"), AUTH_TOKEN
+    )
+
+    assert status == 200
+    assert response["status"] == "ACCEPTED"
+    assert fake_mt5.calls == 1
 
 
 def test_invalid_authentication_fails_closed_without_submission(tmp_path):

@@ -3080,3 +3080,15 @@ The existing review controls and protected confirmation journal now form the exp
 - Live DEMO Streamlit verification refreshed the affected stale Draft from revision 4 to 5. Volume `0.03` remained user-owned, ATR-derived SL and RR-derived TP changed coherently, and the UI rendered `VALID_NON_EXECUTABLE` with the new observed timestamp.
 - The subsequent explicit Candidate action passed freshness and stopped at the independent pre-existing `DRAFT_MODE_AUTHORITY_MISMATCH` gate. No Candidate was automatically created and no controlled-submit, `order_send`, MT5 write, or broker mutation occurred.
 - No full regression was run for this bounded UI/workflow change. Verification level: `FOCUSED_AND_LIVE_PASS`. Verdict: `EDITABLE_DRAFT_MARKET_REFRESH_COMPLETE`.
+
+# 109. HUMAN-CONFIRMED DEMO CONTROLLED EXECUTION
+
+- The existing human-confirmed workflow now continues from a protected Candidate confirmation through final validation, `PRE_SUBMIT_READY_NON_EXECUTABLE`, a separate exact controlled-submission phrase, the authenticated host bridge, and the single isolated production `order_send` boundary.
+- The controlled request is rebuilt only from strict persisted Candidate, confirmation, account-context, and pre-submit artifacts. Exact hashes, bindings, expiry, DEMO environment, protected permission snapshot, and idempotency remain independently validated before submission.
+- Human pre-submit accepts either the historical fail-closed permission profile or one coherent controlled-execution-ready profile. The protected pre-submit remains non-executable and a later permission change fails with `PERMISSION_SNAPSHOT_MISMATCH`.
+- Draft evidence refresh recalculates market-owned Entry with dependent SL/TP values. An advisory methodology-fit veto no longer overrides an explicit valid human Draft, while deterministic risk, freshness, account, lifecycle, and broker blockers remain authoritative.
+- Lifecycle preserves a previously proven terminal close when later broker evidence is absent, while new confirmed executions still bind through exact protected evidence. MARKET requests with semantic price zero resolve to the current broker side at the bridge validation boundary.
+- Live DEMO acceptance created one fresh Draft and one `OPEN_POSITION / ELIGIBLE_CANDIDATE`, recorded one explicit confirmation, passed final validation, and performed exactly one controlled submission. The protected result was `RESULT_CONFIRMED` with broker retcode `10009`; lifecycle reported `POSITION_OPEN` with `UNIQUE_POSITION_MATCH`, and the bridge exposed one matching redacted position.
+- Focused changed-boundary tests passed with `203 passed`. Final hermetic full regression passed with `3,769 passed`, `156 subtests passed`, and three unchanged warnings. Compileall and runtime health checks passed.
+- No retry or duplicate submission occurred. The account remained `DEMO`, authoritative mode remained `human_confirmed_live`, and no protected broker/account identifiers were exposed.
+- Verification level: `FULL_REGRESSION_PASS`. Verdict: `HUMAN_CONFIRMED_DEMO_ORDER_SEND_COMPLETE`.

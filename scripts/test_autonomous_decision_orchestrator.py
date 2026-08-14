@@ -16,6 +16,7 @@ from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionJournal,
     AutonomousDecisionJournalError,
     AutonomousDecisionOrchestrator,
+    EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE,
 )
 from src.services.trading.decision.models import DecisionBlocker, TradeReadinessDecision
 from src.services.trading.execution.mt5_live_adapter_pre_submit.lifecycle_supervisor import (
@@ -94,6 +95,27 @@ def test_risk_block_prevents_open_position(tmp_path):
     inputs = make_inputs(risk_action="BLOCKED")
     inputs.risk_result.blockers.append(DecisionBlocker(code="RISK_LIMIT"))
     result = build(tmp_path, inputs)
+    assert result.candidate.intent == "NO_ACTION"
+    assert "RISK_RESULT_BLOCKED" in result.candidate.blocked_reason_codes
+
+
+def test_human_confirmed_draft_method_regime_warning_does_not_veto_candidate(tmp_path):
+    inputs = make_human_draft_advisory_block_inputs()
+
+    result = build(tmp_path, inputs)
+
+    assert result.candidate.intent == "OPEN_POSITION"
+    assert result.candidate.deterministic_eligibility_result == "ELIGIBLE_CANDIDATE"
+    assert "RISK_RESULT_BLOCKED" not in result.candidate.blocked_reason_codes
+    assert "SCORING_RESULT_BLOCKED" not in result.candidate.blocked_reason_codes
+
+
+def test_human_confirmed_draft_real_risk_block_remains_blocking(tmp_path):
+    inputs = make_human_draft_advisory_block_inputs()
+    inputs.risk_result.blockers.append(DecisionBlocker(code="RISK_LIMIT"))
+
+    result = build(tmp_path, inputs)
+
     assert result.candidate.intent == "NO_ACTION"
     assert "RISK_RESULT_BLOCKED" in result.candidate.blocked_reason_codes
 
@@ -443,6 +465,29 @@ def make_inputs(
         direction="BUY",
         semantic_parameter_references=("semantic-ref-fixture",),
         exposure_effect="NONE",
+    )
+
+
+def make_human_draft_advisory_block_inputs():
+    inputs = make_inputs(risk_action="BLOCKED")
+    for item in (
+        inputs.runtime_context,
+        inputs.method_selection,
+        inputs.score_report,
+        inputs.risk_result,
+    ):
+        item.mode = "human_confirmed_live"
+    inputs.score_report.blockers.append("method_bad_regime:CHOPPY")
+    inputs.risk_result.blockers.extend(
+        (
+            DecisionBlocker(code="method_bad_regime:CHOPPY", source="score_report"),
+            DecisionBlocker(code="SCORING_BLOCKERS_PRESENT", source="score_report"),
+        )
+    )
+    return replace(
+        inputs,
+        proposal_source=EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE,
+        proposal_source_reference="editable_trade_draft_fixture",
     )
 
 

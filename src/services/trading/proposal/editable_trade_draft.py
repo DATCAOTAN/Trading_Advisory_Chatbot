@@ -406,6 +406,8 @@ class EditableTradeDraftService:
             values["sizing_method"] = "USER_EXPLICIT_VOLUME"
         if "direction" in changed and current.entry.source == "MARKET_CALCULATED":
             values["entry_price"] = None
+        if evidence is not None and current.entry.source == "MARKET_CALCULATED":
+            values["entry_price"] = None
         _validate_patch(values, changed, self.policy)
         next_draft = _calculate_draft(
             current,

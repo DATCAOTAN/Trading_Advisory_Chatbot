@@ -366,6 +366,43 @@ def test_confirmed_candidate_requires_a_separate_pre_submit_click(monkeypatch):
     assert len(controller.advance_calls) == 1
 
 
+def test_ready_pre_submit_requires_a_separate_controlled_submission_click(monkeypatch):
+    controller = SimpleNamespace(
+        confirmation_service=SimpleNamespace(
+            policy=SimpleNamespace(confirmation_phrase="CONFIRM")
+        ),
+        execution_confirmation_phrase="SUBMIT CONTROLLED MT5 ORDER",
+        current_outcome=lambda _reference: review_ui.OperatorCandidateReviewOutcome(
+            "candidate-1", "CONFIRMED_FOR_PROPOSAL_WORKFLOW", "CONFIRMED", "review-1"
+        ),
+        current_pre_submit_outcome=lambda _reference: review_ui.OperatorCandidatePreSubmitOutcome(
+            "candidate-1", "PRE_SUBMIT_READY_NON_EXECUTABLE", True, True, "pre-submit-1"
+        ),
+        submit_calls=[],
+    )
+    controller.submit_confirmed_candidate = (
+        lambda session, reference, phrase: controller.submit_calls.append(
+            (session, reference, phrase)
+        )
+    )
+    fake = ConfirmationControlStreamlit()
+    fake.text_value = "SUBMIT CONTROLLED MT5 ORDER"
+    monkeypatch.setattr(review_ui, "st", fake)
+
+    review_ui.render_autonomous_candidate_confirmation_controls(
+        "candidate-1", controller, key_prefix="test_"
+    )
+    assert controller.submit_calls == []
+
+    fake.clicked.add("Submit Confirmed DEMO Order")
+    review_ui.render_autonomous_candidate_confirmation_controls(
+        "candidate-1", controller, key_prefix="test_"
+    )
+    assert controller.submit_calls == [
+        (fake.session_state, "candidate-1", "SUBMIT CONTROLLED MT5 ORDER")
+    ]
+
+
 class FakeColumn:
     def __init__(self, owner):
         self.owner = owner
@@ -415,9 +452,10 @@ class ConfirmationControlStreamlit(FakeStreamlit):
         super().__init__()
         self.clicked = set()
         self.session_state = {}
+        self.text_value = ""
 
     def text_input(self, *_args, **_kwargs):
-        return ""
+        return self.text_value
 
     def button(self, label, **_kwargs):
         return label in self.clicked

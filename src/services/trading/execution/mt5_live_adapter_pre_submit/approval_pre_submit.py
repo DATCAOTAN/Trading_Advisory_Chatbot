@@ -651,7 +651,10 @@ class ApprovalPreSubmitLifecycleService:
                 )
             )
             if approval.authorization_source == "STANDING_MANDATE"
-            else _permissions_safely_disabled(permission_state)
+            else (
+                _permissions_safely_disabled(permission_state)
+                or _human_permissions_execution_ready(permission_state)
+            )
         )
         if not permission_valid:
             blockers.append("CURRENT_PERMISSION_STATE_MISMATCH")
@@ -918,6 +921,21 @@ def _permissions_safely_disabled(state: Mapping[str, bool]) -> bool:
             )
         )
     )
+
+
+def _human_permissions_execution_ready(state: Mapping[str, bool]) -> bool:
+    return (
+        state.get("live_adapter_enabled") is True
+        and state.get("live_adapter_hard_block") is False
+        and state.get("allow_live_submission") is True
+        and state.get("allow_order_send") is True
+        and state.get("controlled_execution_enabled") is True
+        and state.get("kill_switch_engaged") is False
+        and state.get("global_live_execution_enabled") is True
+        and state.get("global_order_send_enabled") is True
+    )
+
+
 def _blocked_final(final: FinalValidationResult, blocker: str) -> FinalValidationResult:
     return FinalValidationResult(
         final.final_validation_id,

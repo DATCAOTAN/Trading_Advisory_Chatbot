@@ -1185,7 +1185,7 @@ class ControlledMT5ExecutionService:
         if self.mt5 is None:
             raise ValueError("MT5_PACKAGE_UNAVAILABLE")
         if values["mapping_kind"] == "MARKET":
-            if values.get("price") is None:
+            if not values.get("price"):
                 context = self.client.pending_order_context(values["symbol"])
                 if (
                     context.get("status") != "OK"

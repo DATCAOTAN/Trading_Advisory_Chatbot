@@ -140,6 +140,7 @@ class ProtectedAccountContextCapture:
     trade_mode: object
     redacted: bool
     captured_at: str
+    account_environment: str = "UNKNOWN"
 
     @classmethod
     def from_read_only_payload(
@@ -162,6 +163,9 @@ class ProtectedAccountContextCapture:
             trade_mode=payload.get("trade_mode"),
             redacted=True,
             captured_at=captured_at.isoformat(),
+            account_environment=str(
+                payload.get("account_environment", "UNKNOWN")
+            ).upper(),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -174,6 +178,7 @@ class ProtectedAccountContextCapture:
             "trade_mode": self.trade_mode,
             "redacted": self.redacted,
             "captured_at": self.captured_at,
+            "account_environment": self.account_environment,
         }
 
 

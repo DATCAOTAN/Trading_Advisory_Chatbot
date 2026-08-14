@@ -14,6 +14,7 @@ from scripts.test_autonomous_decision_orchestrator import (
     BROKER_HASH,
     NOW,
     make_inputs,
+    make_human_draft_advisory_block_inputs,
     make_management_inputs,
     reconciliation_unknown,
 )
@@ -351,6 +352,53 @@ def test_policy_result_expiry_is_validated(tmp_path):
     validation = gate.validate_policy_result(expired, now=NOW)
     assert not validation.valid
     assert "POLICY_RESULT_EXPIRED" in validation.issues
+
+
+def test_human_confirmed_draft_method_regime_warning_reaches_controlled_boundary(tmp_path):
+    source_inputs = make_human_draft_advisory_block_inputs()
+    candidate = AutonomousDecisionOrchestrator(
+        config=AutonomousDecisionConfig(journal_path="unused.jsonl")
+    ).build_candidate(source_inputs, now=NOW)
+    inputs = AutonomousPolicyInputs(
+        candidate=candidate,
+        risk_result=source_inputs.risk_result,
+        account_context_reference=ACCOUNT_REFERENCE,
+        account_context_created_at=NOW.isoformat(),
+        account_context_matches=True,
+        semantic_proposal_complete=True,
+    )
+
+    gate = AutonomousExecutionPolicyGate(
+        config=replace(
+            enabled_config(tmp_path),
+            allowed_operating_modes=("human_confirmed_live",),
+        )
+    )
+    result = gate.run_once(inputs, now=NOW).policy_result
+
+    assert result.decision == "ELIGIBLE_FOR_CONTROLLED_BOUNDARY"
+    assert result.target_controlled_boundary == "CONTROLLED_OPEN_POSITION"
+
+
+def test_human_confirmed_draft_non_advisory_risk_block_still_fails_policy(tmp_path):
+    source_inputs = make_human_draft_advisory_block_inputs()
+    source_inputs.risk_result.blockers.append(DecisionBlocker(code="RISK_LIMIT"))
+    candidate = AutonomousDecisionOrchestrator(
+        config=AutonomousDecisionConfig(journal_path="unused.jsonl")
+    ).build_candidate(source_inputs, now=NOW)
+    inputs = AutonomousPolicyInputs(
+        candidate=candidate,
+        risk_result=source_inputs.risk_result,
+        account_context_reference=ACCOUNT_REFERENCE,
+        account_context_created_at=NOW.isoformat(),
+        account_context_matches=True,
+        semantic_proposal_complete=True,
+    )
+
+    result = run(tmp_path, inputs).policy_result
+
+    assert result.decision == "BLOCK"
+    assert "RISK_RESULT_BLOCKED" in result.deterministic_reason_codes
 
 
 def test_default_cli_run_is_blocked_and_redacted(tmp_path, capsys):
