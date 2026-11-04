@@ -14,6 +14,7 @@ from src.services.semantic.structured_semantics import SEMANTIC_SCHEMA_VERSION, 
 from src.services.semantic.structured_interpreter import StructuredSemanticInterpreter
 from src.services.trading.execution.mt5_live_adapter_pre_submit.lifecycle_supervisor import (
     MT5PositionSupervisorConfig,
+    _sha256,
 )
 from src.services.trading.position_read_model import PositionReadModelService, render_position_read_model
 from src.ui import tab_chatbot
@@ -257,6 +258,7 @@ def test_closed_history_uses_authoritative_broker_components():
     item = result.history[0]
     assert item.realized_pnl == 97.0
     assert item.pnl_source == "BROKER_COMPONENTS"
+    assert item.direction == "BUY"
     assert (item.entry_price, item.current_price) == (62000.0, 63000.0)
     assert (item.open_time, item.close_time) == (
         "2026-08-09T01:00:00+00:00", "2026-08-09T02:00:00+00:00"
@@ -304,6 +306,7 @@ def test_unknown_execution_state_surfaces_reconciliation_lifecycle(execution_sta
         "execution_ref": {
             "observation_id": "lifecycle_ref",
             "lifecycle_state": "RECONCILIATION_REQUIRED",
+            "account_fingerprint_hash": _sha256(FINGERPRINT),
         }
     }
     result = service(
@@ -315,7 +318,10 @@ def test_unknown_execution_state_surfaces_reconciliation_lifecycle(execution_sta
 
 
 def test_provenance_joins_existing_protected_references_and_marks_missing_fields():
-    lifecycle = {"execution_ref": {"observation_id": "lifecycle_ref", "lifecycle_state": "POSITION_OPEN"}}
+    lifecycle = {"execution_ref": {
+        "observation_id": "lifecycle_ref", "lifecycle_state": "POSITION_OPEN",
+        "account_fingerprint_hash": _sha256(FINGERPRINT),
+    }}
     joined = service(
         snapshot(positions=[position(tags=["mt5rabc"])]),
         records=[execution_record()], lifecycle=lifecycle, candidates=True,
@@ -329,6 +335,145 @@ def test_provenance_joins_existing_protected_references_and_marks_missing_fields
     assert joined.unavailable == ("MANAGEMENT_REFERENCE",)
     missing = service(snapshot(positions=[position()])).read().open_positions[0].provenance
     assert missing.unavailable == ("CONTROLLED_EXECUTION_REFERENCE",)
+
+
+@pytest.mark.parametrize("evidence", ["lifecycle", "broker_result"])
+def test_untagged_position_links_only_by_exact_protected_evidence(evidence):
+    record = execution_record()
+    lifecycle = {
+        "execution_ref": {
+            "observation_id": "life_ref",
+            "lifecycle_state": "POSITION_OPEN",
+            "account_fingerprint_hash": _sha256(FINGERPRINT),
+            "protected_broker_references": {"positions": [HASH_A], "orders": [], "deals": []},
+        }
+    }
+    reference = HASH_A
+    if evidence == "broker_result":
+        record["protected_result"] = {"order": 123456}
+        reference = _sha256("123456")
+        lifecycle["execution_ref"]["protected_broker_references"]["positions"] = []
+    model = service(
+        snapshot(positions=[position(reference), position(HASH_B)]),
+        records=[record], lifecycle=lifecycle, candidates=True,
+    ).read()
+    linked, unrelated = model.open_positions
+    assert model.status == "AVAILABLE"
+    assert linked.provenance.candidate_reference == "candidate_ref"
+    assert linked.provenance.strategy_reference == "strategy_ref"
+    assert linked.provenance.draft_reference == "draft_ref"
+    assert linked.provenance.authorization_reference == "confirmation_ref"
+    assert linked.provenance.execution_reference == "execution_ref"
+    assert linked.provenance.lifecycle_reference == "life_ref"
+    assert (linked.volume, linked.stop_loss, linked.take_profit, linked.unrealized_pnl) == (
+        0.1, 61000.0, 64000.0, 25.5,
+    )
+    assert unrelated.provenance.candidate_reference == ""
+    assert unrelated.provenance.unavailable == ("CONTROLLED_EXECUTION_REFERENCE",)
+
+
+@pytest.mark.parametrize("evidence", ["tag", "broker_result", "lifecycle"])
+def test_multiple_exact_execution_claims_never_select_first(evidence):
+    records = [execution_record(), execution_record(execution="execution_other")]
+    lifecycle = {}
+    row = position(tags=["mt5rabc"] if evidence == "tag" else [])
+    if evidence == "broker_result":
+        row["broker_reference_hash"] = _sha256("123456")
+        for record in records:
+            record["protected_result"] = {"order": 123456}
+    if evidence == "lifecycle":
+        lifecycle = {
+            record["protected_execution"]["protected_execution_reference"]: {
+                "observation_id": "life_ref",
+                "lifecycle_state": "POSITION_OPEN",
+                "account_fingerprint_hash": _sha256(FINGERPRINT),
+                "protected_broker_references": {"positions": [HASH_A]},
+            } for record in records
+        }
+    model = service(snapshot(positions=[row]), records=records, lifecycle=lifecycle).read()
+    assert model.status == "BLOCKED"
+    assert model.open_positions[0].state == "INCONSISTENT"
+    assert model.open_positions[0].provenance.candidate_reference == ""
+    assert model.open_positions[0].provenance.unavailable == ("AMBIGUOUS_EXECUTION_REFERENCE",)
+
+
+def test_foreign_lifecycle_proof_cannot_supply_current_position_ownership():
+    record = execution_record()
+    lifecycle = {"execution_ref": {
+        "observation_id": "foreign_life",
+        "lifecycle_state": "POSITION_CLOSED",
+        "account_fingerprint_hash": _sha256("e" * 64),
+        "protected_broker_references": {"positions": [HASH_A]},
+    }}
+    item = service(
+        snapshot(positions=[position()]), records=[record], lifecycle=lifecycle,
+    ).read().open_positions[0]
+    assert item.state == "POSITION_OPEN"
+    assert item.provenance.candidate_reference == ""
+    assert item.provenance.lifecycle_reference == ""
+
+
+def test_one_execution_cannot_own_multiple_active_broker_objects():
+    model = service(
+        snapshot(positions=[position(tags=["mt5rabc"]), position(HASH_B, tags=["mt5rabc"])]),
+        records=[execution_record()], candidates=True,
+    ).read()
+    assert model.status == "BLOCKED"
+    assert len(model.open_positions) == 2
+    for item in model.open_positions:
+        assert item.state == "INCONSISTENT"
+        assert item.provenance.execution_reference == ""
+        assert item.provenance.candidate_reference == ""
+        assert item.provenance.unavailable == ("AMBIGUOUS_EXECUTION_REFERENCE",)
+
+
+def test_exact_broker_reference_still_requires_current_account_binding():
+    record = execution_record()
+    record["account_context_fingerprint"] = "e" * 64
+    record["protected_result"] = {"position": 123456}
+    model = service(
+        snapshot(positions=[position(_sha256("123456"))]), records=[record],
+    ).read()
+    assert model.status == "UNAVAILABLE"
+    assert model.blockers == ("ACCOUNT_CONTEXT_MISMATCH",)
+
+
+def test_untagged_natural_close_retains_exact_position_provenance():
+    lifecycle = {"execution_ref": {
+        "observation_id": "closed_life",
+        "lifecycle_state": "POSITION_CLOSED",
+        "account_fingerprint_hash": _sha256(FINGERPRINT),
+        "protected_broker_references": {"positions": [HASH_A]},
+    }}
+    item = service(
+        snapshot(deals=[opening_deal(), closing_deal()]),
+        records=[execution_record()], lifecycle=lifecycle, candidates=True,
+    ).read(query_type="HISTORY").history[0]
+    assert item.state == "POSITION_CLOSED"
+    assert item.provenance.candidate_reference == "candidate_ref"
+    assert item.provenance.lifecycle_reference == "closed_life"
+    assert item.realized_pnl == 97.0
+    assert item.direction == "BUY"
+
+
+def test_closed_trade_without_opening_evidence_does_not_invent_position_direction():
+    item = service(snapshot(deals=[closing_deal()])).read(query_type="HISTORY").history[0]
+    assert item.direction == "UNKNOWN"
+    assert item.entry_price is None
+    assert item.provenance.candidate_reference == ""
+
+
+def test_bridge_failure_and_corrupt_journal_remain_unavailable():
+    read_service = service(snapshot())
+    def bridge_failure(*args):
+        raise ConnectionError("offline")
+    read_service.bridge_client.lifecycle_snapshot = bridge_failure
+    assert read_service.read().blockers == ("BRIDGE_UNAVAILABLE",)
+    from tools.mt5_bridge.execution import ProtectedExecutionJournalError
+    def corrupt_records():
+        raise ProtectedExecutionJournalError("invalid")
+    read_service.execution_journal.execution_records = corrupt_records
+    assert read_service.read().blockers == ("PROTECTED_JOURNAL_UNAVAILABLE",)
 
 
 def test_conversation_scope_filters_exact_execution_provenance_but_account_wide_keeps_all():
@@ -350,6 +495,7 @@ def test_conversation_scope_filters_exact_execution_provenance_but_account_wide_
             "execution_b": {
                 "observation_id": "life_b",
                 "lifecycle_state": "RECONCILIATION_REQUIRED",
+                "account_fingerprint_hash": _sha256(FINGERPRINT),
             },
         },
         candidate_journal=FakeCandidateJournal(
@@ -385,7 +531,10 @@ def test_query_plan_account_wide_is_explicit_structured_semantics():
 
 
 def test_provenance_query_selects_closed_trade_and_renders_only_safe_references():
-    lifecycle = {"execution_ref": {"observation_id": "lifecycle_ref", "lifecycle_state": "POSITION_CLOSED"}}
+    lifecycle = {"execution_ref": {
+        "observation_id": "lifecycle_ref", "lifecycle_state": "POSITION_CLOSED",
+        "account_fingerprint_hash": _sha256(FINGERPRINT),
+    }}
     result = service(
         snapshot(deals=[opening_deal(), closing_deal(tags=["mt5rabc"])]),
         records=[execution_record()], lifecycle=lifecycle, candidates=True,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -11,6 +12,7 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.lifecycle_superv
     MT5LifecycleJournal,
     MT5LifecycleJournalError,
     MT5PositionSupervisorConfig,
+    _sha256,
     _validate_snapshot,
 )
 from src.services.trading.execution.mt5_bridge_write_skeleton.client import (
@@ -182,43 +184,35 @@ class PositionReadModelService:
         if not _fresh(timestamp, self.config.interval_seconds * 3, self._now()):
             return self._blocked(query_type, "POSITION_SNAPSHOT_STALE", snapshot)
         fingerprint = str(snapshot.get("account_context_fingerprint") or "")
-        snapshot_tags = {
-            str(tag)
-            for group in ("positions", "active_orders", "recent_deals")
-            for row in snapshot.get(group, [])
-            for tag in row.get("matched_correlation_tags", []) or []
-        }
-        linked_executions = [
-            record for record in executions
-            if str(record.get("protected_execution", {}).get("correlation_tag", "")) in snapshot_tags
-        ]
-        account_match = all(
-            not record.get("account_context_fingerprint")
-            or hmac.compare_digest(str(record["account_context_fingerprint"]), fingerprint)
-            for record in linked_executions
-        )
-        if not account_match:
-            return self._blocked(query_type, "ACCOUNT_CONTEXT_MISMATCH", snapshot)
-
-        execution_by_tag = {
-            str(record.get("protected_execution", {}).get("correlation_tag")): record
-            for record in executions
-            if record.get("protected_execution", {}).get("correlation_tag")
-        }
         positions = tuple(
-            self._item(row, "POSITION_OPEN", execution_by_tag, lifecycle)
+            self._item(row, "POSITION_OPEN", executions, lifecycle, fingerprint)
             for row in snapshot.get("positions", [])
         )
         orders = tuple(
-            self._item(row, "ORDER_ACTIVE", execution_by_tag, lifecycle)
+            self._item(row, "ORDER_ACTIVE", executions, lifecycle, fingerprint)
             for row in snapshot.get("active_orders", [])
         )
+        owners = Counter(
+            item.provenance.execution_reference for item in positions + orders
+            if item.provenance.execution_reference
+        )
+        positions, orders = (
+            tuple(
+                replace(
+                    item, state="INCONSISTENT",
+                    provenance=PositionProvenance(unavailable=("AMBIGUOUS_EXECUTION_REFERENCE",)),
+                ) if owners[item.provenance.execution_reference] > 1 else item
+                for item in collection
+            ) for collection in (positions, orders)
+        )
         history = tuple(
-            self._closed_item(row, snapshot.get("recent_deals", []), execution_by_tag, lifecycle)
+            self._closed_item(row, snapshot.get("recent_deals", []), executions, lifecycle, fingerprint)
             for row in snapshot.get("recent_deals", [])
             if str(row.get("entry")) in {"OUT", "INOUT"}
         )
         all_items = positions + orders + history
+        if any("ACCOUNT_CONTEXT_MISMATCH" in item.provenance.unavailable for item in all_items):
+            return self._blocked(query_type, "ACCOUNT_CONTEXT_MISMATCH", snapshot)
         if trading_scope and not account_wide:
             positions = tuple(
                 item for item in positions
@@ -274,11 +268,48 @@ class PositionReadModelService:
         self,
         row: Mapping[str, Any],
         default_state: str,
-        execution_by_tag: Mapping[str, Mapping[str, Any]],
+        executions: list[Mapping[str, Any]],
         lifecycle: Mapping[str, Mapping[str, Any]],
+        fingerprint: str,
     ) -> PositionReadItem:
-        tags = [str(value) for value in row.get("matched_correlation_tags", []) or []]
-        execution = next((execution_by_tag[tag] for tag in tags if tag in execution_by_tag), None)
+        tags = set(row.get("matched_correlation_tags", []) or [])
+        broker_references = {
+            str(row.get(key)) for key in (
+                "broker_reference_hash", "order_reference_hash", "position_reference_hash"
+            ) if row.get(key)
+        }
+        matches = []
+        for record in executions:
+            protected = record.get("protected_execution", {})
+            reference = str(protected.get("protected_execution_reference") or "")
+            observed = lifecycle.get(reference, {})
+            observed_references = set()
+            # Lifecycle references are evidence only for the execution's original account.
+            if observed.get("account_fingerprint_hash") == _sha256(
+                str(record.get("account_context_fingerprint", ""))
+            ):
+                observed_references = {
+                    value for values in observed.get("protected_broker_references", {}).values()
+                    for value in values
+                }
+            result = record.get("protected_result", {}) or {}
+            result_references = {
+                _sha256(str(result[key])) for key in ("order", "deal", "position") if result.get(key)
+            }
+            if (
+                protected.get("correlation_tag") in tags
+                or broker_references.intersection(result_references | observed_references)
+            ):
+                matches.append(record)
+        correlation_blocker = ""
+        if any(
+            not hmac.compare_digest(str(record.get("account_context_fingerprint", "")), fingerprint)
+            for record in matches
+        ):
+            correlation_blocker = "ACCOUNT_CONTEXT_MISMATCH"
+        elif len(matches) > 1:
+            correlation_blocker = "AMBIGUOUS_EXECUTION_REFERENCE"
+        execution = matches[0] if len(matches) == 1 and not correlation_blocker else None
         broker_symbol = str(row.get("symbol") or "")
         resolved = resolve_symbol(broker_symbol)
         realized = _net_realized(row) if default_state == "POSITION_CLOSED" else None
@@ -286,21 +317,13 @@ class PositionReadModelService:
         if execution:
             reference = str(execution.get("protected_execution", {}).get("protected_execution_reference") or "")
             observation = lifecycle.get(reference, {})
-        if not observation:
-            broker_reference = str(row.get("broker_reference_hash") or "")
-            observation = next(
-                (
-                    value for value in lifecycle.values()
-                    if broker_reference
-                    and broker_reference in (
-                        value.get("protected_broker_references", {}).get("positions", [])
-                        + value.get("protected_broker_references", {}).get("orders", [])
-                        + value.get("protected_broker_references", {}).get("deals", [])
-                    )
-                ),
-                {},
-            )
+        if observation.get("account_fingerprint_hash") != _sha256(fingerprint):
+            observation = {}
         lifecycle_state = str(observation.get("lifecycle_state") or default_state)
+        provenance = self._provenance(execution, observation)
+        if correlation_blocker:
+            lifecycle_state = "INCONSISTENT"
+            provenance = PositionProvenance(unavailable=(correlation_blocker,))
         return PositionReadItem(
             protected_reference=str(row.get("broker_reference_hash") or ""),
             canonical_symbol=resolved.canonical_symbol or broker_symbol,
@@ -319,17 +342,18 @@ class PositionReadModelService:
             realized_pnl=realized,
             order_type=str(row.get("order_type") or ""),
             pnl_source=("BROKER_CURRENT" if row.get("unrealized_pnl") is not None else "BROKER_COMPONENTS" if realized is not None else "UNAVAILABLE"),
-            provenance=self._provenance(execution, observation),
+            provenance=provenance,
         )
 
     def _closed_item(
         self,
         row: Mapping[str, Any],
         deals: list[Mapping[str, Any]],
-        execution_by_tag: Mapping[str, Mapping[str, Any]],
+        executions: list[Mapping[str, Any]],
         lifecycle: Mapping[str, Mapping[str, Any]],
+        fingerprint: str,
     ) -> PositionReadItem:
-        item = self._item(row, "POSITION_CLOSED", execution_by_tag, lifecycle)
+        item = self._item(row, "POSITION_CLOSED", executions, lifecycle, fingerprint)
         position_reference = str(row.get("position_reference_hash") or "")
         opening = next(
             (
@@ -344,6 +368,7 @@ class PositionReadModelService:
         )
         return replace(
             item,
+            direction=str(opening.get("direction") or "UNKNOWN") if opening else "UNKNOWN",
             entry_price=_number(opening.get("price")) if opening else None,
             current_price=_number(row.get("price")),
             open_time=str(opening.get("time") or "") if opening else "",

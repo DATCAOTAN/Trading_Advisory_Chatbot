@@ -2647,3 +2647,48 @@ Verification: `FULL_REGRESSION_PASS`
 - No new authority, Candidate, mandate, submission, management, MT5 write or broker mutation. Historical evidence and unrelated worktree changes preserved; no push.
 
 ---
+
+### Acceptance - Fresh Human-Confirmed DEMO Draft and Candidate
+
+Date: 2026-11-03
+Verification: `FOCUSED_AND_LIVE_PASS`
+
+- Used the existing completed BUY XAUUSD/XAUUSDm RSI14 M15 > 10 strategy and current DEMO account-bound human-confirmed mode; no new strategy or authority was created.
+- Real authenticated preflight passed: lifecycle healthy, account/mode match, discrepancies/foreign unresolved zero, no open positions. Permissions and kill switches were unchanged.
+- One UI market refresh created immutable Draft revision 2 with coherent Entry/ATR SL/RR TP and deterministic volume/risk. One Create Candidate action persisted one eligible opening and displayed one valid non-executable Review Card.
+- Strict reload verified account, Draft revision, strategy, symbol/profile, snapshot and volume constraints. Candidate generated at 10:53:42 UTC with expiry 10:58:42 UTC; later confirmation still requires a fresh valid Candidate.
+- Journal delta: one Draft revision and one Candidate only; historical bytes and confirmation/pre-submit/authority/execution stores preserved. No confirmation, submission, `order_send`, management, broker mutation or simulated fill.
+- Focused existing Draft/Candidate/UI tests: `61 passed`, two unchanged warnings. No production/test change, full regression, rebuild, restart or push. Order execution remains a separate operator-authorized task.
+
+---
+
+### Acceptance - Current-Account Human-Confirmed DEMO Execution
+
+Date: 2026-11-03
+Verification: `FOCUSED_AND_LIVE_PASS`
+
+- Operator personally confirmed a fresh Candidate and separately authorized controlled submission in Streamlit; no automated consent or repeated submission.
+- Protected execution: current DEMO binding matches, result confirmed, retcode 10009; one submission-start and one confirmation for the idempotency key.
+- Independent broker read: one BUY XAUUSDm position, volume 0.11, fill approximately 3904.282, SL 3896.414, TP 3923.135, no pending orders. Lifecycle uniquely matches the open position; current-account health healthy, discrepancies zero.
+- PositionReadModel available/account-matched but position provenance lacks Candidate/execution references; protected lifecycle evidence provides correlation. No separate reconciliation record; recovery and closure not exercised.
+- No production/test/config change or new full regression; prior focused coverage 61 passed retained. No management action, second trade, autonomous startup, rebuild, commit or push. Unrelated user state preserved.
+- Verdict: `HUMAN_CONFIRMED_DEMO_EXECUTION_ACCEPTANCE_COMPLETE`.
+
+---
+
+### Sprint 6 - Live Position Read and Provenance Acceptance
+
+Date: 2026-11-04
+Verification: `FULL_REGRESSION_PASS`
+
+- Reused PositionReadModel and protected execution/lifecycle stores to link missing-tag broker rows through unique exact protected references with account binding. Ambiguous/foreign matches and duplicate active-object ownership remain fail-closed; no heuristic ownership or new authority/store.
+- Corrected closed-position direction using the position-linked opening deal; missing opening evidence remains UNKNOWN. Existing immutable conversations and trading history were not rewritten.
+- Live DEMO open-position evidence and later closed history matched the read model: BUY XAUUSDm 0.11, entry approximately 3904.282, close 3923.135, realized net P/L 207.39 USD. No current positions/orders; lifecycle POSITION_CLOSED / LINKED_CLOSING_DEAL, HEALTHY, zero discrepancies/foreign unresolved.
+- Streamlit visibly rendered corrected closed history and strategy/Draft/Candidate/execution/lifecycle provenance. Authorization reference is not joined by this execution projection, although separate reads verified historical confirmation and protected approval; management evidence is not linked. These remain explicitly unavailable, not evidence of absent consent. Closing reason code was unavailable; matching the old TP is not proof of TP causation.
+- Final focused neighbors: 232 passed, including all 60 canonical cases. Final full regression (`.\venv\Scripts\python.exe -m pytest -q`): 3,798 passed, 156 subtests passed, three unchanged warnings, 156.70s. Process-local offline defaults only; initial local execution flags were correctly rejected by the offline harness. Earlier runs preceded the browser-proven direction correction and final duplicate-ownership guard; the result above covers final source.
+- Host/container source hashes matched, app healthy, Streamlit 200; app-only source reload, no rebuild or bridge/terminal restart. Compileall/diff passed; one production order_send call-site, zero MetaTrader5 imports under src/.
+- No Candidate, confirmation, mandate, submission, management action, broker mutation or MT5 write. Protected history and unrelated worktree/cache/.agents/ retained; no commit or push. Management and unknown-result recovery are not live-accepted here.
+- Documentation integrity: 13 passed; final Ponytail review PASS after the duplicate active-owner negative control. Focused command: `.\venv\Scripts\python.exe -m pytest scripts/test_position_read_model.py scripts/test_mt5_position_lifecycle_supervisor.py scripts/test_human_confirmed_position_management.py scripts/test_autonomous_post_entry_management.py scripts/test_thin_ui_full_conversational_integration.py scripts/test_60_case_product_acceptance.py -q`.
+- Verdict: `LIVE_POSITION_READ_AND_PROVENANCE_ACCEPTANCE_COMPLETE`.
+
+---
