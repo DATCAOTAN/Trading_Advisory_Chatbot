@@ -102,6 +102,7 @@ def make_snapshot(
         "recent_deals": recent_deals or [],
         "positions": positions or [],
         "snapshot_reference": reference,
+        "snapshot_timestamp": datetime.now(timezone.utc).isoformat(),
         "metadata_redacted": True,
     }
 
@@ -308,10 +309,119 @@ def test_result_unknown_requires_reconciliation(tmp_path):
 
 
 def test_account_fingerprint_change_is_inconsistent(tmp_path):
-    status, _ = run(tmp_path, make_snapshot(fingerprint=ACCOUNT_B, positions=[open_position()]))
+    status, _ = run(tmp_path, make_snapshot(fingerprint=ACCOUNT_B))
     assert state_of(status) == MT5LifecycleState.INCONSISTENT.value
     assert status.account_context_match is False
     assert status.discrepancy_count == 1
+
+
+def test_terminal_account_history_survives_a_b_a_and_restart(tmp_path):
+    status, first = run(tmp_path, make_snapshot(recent_deals=[opening_deal(), closing_deal()]))
+    assert state_of(status) == "POSITION_CLOSED"
+    cfg = config(tmp_path)
+    execution_before = Path(cfg.execution_journal_path).read_bytes()
+    history_before = Path(cfg.lifecycle_journal_path).read_bytes()
+    other = MT5PositionLifecycleSupervisor(
+        cfg, bridge_client=FakeLifecycleClient(make_snapshot(fingerprint=ACCOUNT_B))
+    ).run_once()
+    assert other.supervisor_status == "HEALTHY"
+    assert other.account_context_match and other.discrepancy_count == 0
+    assert other.historical_records_excluded == 1
+    assert other.lifecycle_state_counts == {}
+    from src.services.trading.decision.autonomous_trading_coordinator import _runtime_safe
+    assert _runtime_safe(SimpleNamespace(lifecycle_status=other)) is True
+    assert Path(cfg.lifecycle_journal_path).read_bytes() == history_before
+    returned = MT5PositionLifecycleSupervisor(
+        cfg, bridge_client=FakeLifecycleClient(make_snapshot(reference="returned-a"))
+    ).run_once()
+    assert state_of(returned) == "POSITION_CLOSED"
+    assert returned.historical_records_excluded == 0
+    assert Path(cfg.execution_journal_path).read_bytes() == execution_before
+    assert Path(cfg.lifecycle_journal_path).read_bytes().startswith(history_before)
+
+
+def test_rejected_foreign_execution_is_terminal_history(tmp_path):
+    cfg = seed_execution(tmp_path, "SUBMISSION_STARTED")
+    ProtectedExecutionJournal(cfg.execution_journal_path).transition("fixture-idempotency", "RESULT_REJECTED")
+    result = MT5PositionLifecycleSupervisor(
+        cfg, bridge_client=FakeLifecycleClient(make_snapshot(fingerprint=ACCOUNT_B))
+    ).run_once()
+    assert result.supervisor_status == "HEALTHY"
+    assert result.historical_records_excluded == 1
+
+
+@pytest.mark.parametrize("state", ["RESERVED", "SUBMISSION_STARTED", "RESULT_UNKNOWN", "RESULT_CONFIRMED"])
+def test_unresolved_foreign_execution_blocks_without_rewriting_history(tmp_path, state):
+    cfg = seed_execution(tmp_path, state)
+    before = Path(cfg.execution_journal_path).read_bytes()
+    result = MT5PositionLifecycleSupervisor(
+        cfg, bridge_client=FakeLifecycleClient(make_snapshot(fingerprint=ACCOUNT_B))
+    ).run_once()
+    assert result.supervisor_status == "DEGRADED"
+    assert result.historical_unresolved_records == 1
+    assert result.historical_records_excluded == 0
+    assert not result.account_context_match
+    from src.services.trading.decision.autonomous_trading_coordinator import _runtime_safe
+    assert _runtime_safe(SimpleNamespace(lifecycle_status=result)) is False
+    assert not Path(cfg.lifecycle_journal_path).exists()
+    assert Path(cfg.execution_journal_path).read_bytes() == before
+
+
+@pytest.mark.parametrize("fingerprint", [None, "", "not-a-fingerprint"])
+def test_invalid_record_binding_cannot_be_excluded_as_history(tmp_path, fingerprint):
+    cfg = seed_execution(tmp_path)
+    record = ProtectedExecutionJournal(cfg.execution_journal_path).execution_records()[0]
+    record["account_context_fingerprint"] = fingerprint
+    result = MT5PositionLifecycleSupervisor(
+        cfg, bridge_client=FakeLifecycleClient(),
+        execution_journal=SimpleNamespace(execution_records=lambda: [record]),
+    ).run_once()
+    assert result.supervisor_status == "DEGRADED"
+    assert result.historical_records_excluded == 0
+
+
+def test_foreign_closed_proof_must_match_its_original_account(tmp_path):
+    cfg = seed_execution(tmp_path)
+    observation = _make_observation(
+        "execution-fixture", "UNKNOWN",
+        _classification(MT5LifecycleState.POSITION_CLOSED, "CLOSED", "", [], [], []),
+        make_snapshot(fingerprint=ACCOUNT_B),
+    )
+    MT5LifecycleJournal(cfg.lifecycle_journal_path).append_if_changed(observation)
+    result = MT5PositionLifecycleSupervisor(
+        cfg, bridge_client=FakeLifecycleClient(make_snapshot(fingerprint=ACCOUNT_B))
+    ).run_once()
+    assert result.historical_unresolved_records == 1
+
+
+@pytest.mark.parametrize("kind,reason", [("positions", "UNMATCHED_BROKER_POSITION"), ("active_orders", "UNMATCHED_BROKER_ORDER")])
+def test_foreign_history_never_hides_current_unmatched_exposure(tmp_path, kind, reason):
+    _, first = run(tmp_path, make_snapshot(recent_deals=[opening_deal(), closing_deal()]))
+    first.bridge_client = FakeLifecycleClient(make_snapshot(
+        fingerprint=ACCOUNT_B, **{kind: [open_position(tagged=False)]}
+    ))
+    result = first.run_once()
+    assert result.historical_records_excluded == 1
+    assert result.supervisor_status == "DEGRADED"
+    assert first.lifecycle_journal.observations()[-1]["discrepancy_reason"] == reason
+
+
+def test_foreign_terminal_tag_collision_remains_blocked(tmp_path):
+    _, first = run(tmp_path, make_snapshot(recent_deals=[opening_deal(), closing_deal()]))
+    first.bridge_client = FakeLifecycleClient(make_snapshot(fingerprint=ACCOUNT_B, positions=[open_position()]))
+    result = first.run_once()
+    assert result.historical_unresolved_records == 1
+    assert result.historical_records_excluded == 0
+    assert result.discrepancy_count >= 1
+
+
+@pytest.mark.parametrize("timestamp", [None, "invalid", "2000-01-01T00:00:00+00:00"])
+def test_missing_or_stale_snapshot_cannot_establish_account_health(tmp_path, timestamp):
+    snapshot = make_snapshot(fingerprint=ACCOUNT_B)
+    snapshot["snapshot_timestamp"] = timestamp
+    result, _ = run(tmp_path, snapshot)
+    assert result.supervisor_status != "HEALTHY"
+    assert result.health_reason == "SNAPSHOT_STALE"
 
 
 def test_duplicate_broker_match_is_inconsistent(tmp_path):

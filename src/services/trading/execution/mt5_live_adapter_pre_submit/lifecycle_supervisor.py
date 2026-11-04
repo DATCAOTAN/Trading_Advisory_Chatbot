@@ -40,6 +40,7 @@ DISCREPANCY_REASONS = {
     "ACCOUNT_CONTEXT_CHANGED",
     "CONFIRMED_BROKER_EVIDENCE_ABSENT",
     "UNMATCHED_BROKER_POSITION",
+    "UNMATCHED_BROKER_ORDER",
     "DUPLICATE_BROKER_MATCH",
     "CONFLICTING_VOLUME_OR_DIRECTION",
     "POSITION_CLOSED_WITHOUT_CLOSING_DEAL",
@@ -50,6 +51,7 @@ DISCREPANCY_REASONS = {
     "LIFECYCLE_JOURNAL_UNAVAILABLE",
     "BRIDGE_UNAVAILABLE",
     "SNAPSHOT_INVALID",
+    "SNAPSHOT_STALE",
     "EXECUTION_RECORD_INCOMPLETE",
 }
 
@@ -124,6 +126,8 @@ class MT5RuntimeSupervisorStatus:
     account_context_match: bool = False
     account_fingerprint_prefix: str = ""
     records_inspected: int = 0
+    historical_records_excluded: int = 0
+    historical_unresolved_records: int = 0
     observations_appended: int = 0
     active_position_count: int = 0
     trades_today: int = 0
@@ -359,8 +363,8 @@ class MT5PositionLifecycleSupervisor:
     def _run_cycle(self, started: float) -> MT5RuntimeSupervisorStatus:
         try:
             latest = self.lifecycle_journal.latest_by_execution()
-            terminal_closed_references = {
-                row["protected_execution_reference"]
+            terminal_closed_bindings = {
+                (row["protected_execution_reference"], row["account_fingerprint_hash"])
                 for row in self.lifecycle_journal.observations()
                 if row["lifecycle_state"] == MT5LifecycleState.POSITION_CLOSED.value
             }
@@ -390,18 +394,34 @@ class MT5PositionLifecycleSupervisor:
             return self._bridge_failure(started, latest, "SNAPSHOT_INVALID")
         if snapshot.get("status") != "OK" or snapshot.get("terminal_connected") is not True:
             return self._bridge_failure(started, latest, "BRIDGE_UNAVAILABLE")
+        if _is_stale(snapshot.get("snapshot_timestamp"), max(30, self.config.interval_seconds * 3)):
+            return self._bridge_failure(started, latest, "SNAPSHOT_STALE")
 
         counts: Counter[str] = Counter()
         discrepancies = 0
         appended = 0
         matched_positions: set[str] = set()
+        matched_orders: set[str] = set()
+        historical_excluded = historical_unresolved = 0
         account_matches: list[bool] = []
         for record in records:
+            fingerprint = str(record.get("account_context_fingerprint") or "")
+            account_match = hmac.compare_digest(fingerprint, snapshot["account_context_fingerprint"])
+            if _valid_hash(fingerprint) and not account_match:
+                if _terminal_account_history(record, terminal_closed_bindings, snapshot):
+                    historical_excluded += 1
+                    continue
+                # The connected account cannot resolve another account's execution.
+                historical_unresolved += 1
+                counts[MT5LifecycleState.INCONSISTENT.value] += 1
+                discrepancies += 1
+                account_matches.append(False)
+                continue
             classification = _classify_record(record, snapshot, self.config.stale_submission_seconds)
             reference = _execution_reference(record)
             previous = latest.get(reference, {}).get("lifecycle_state", MT5LifecycleState.UNKNOWN.value)
             if (
-                reference in terminal_closed_references
+                (reference, _sha256(fingerprint)) in terminal_closed_bindings
                 and classification.discrepancy == "CONFIRMED_BROKER_EVIDENCE_ABSENT"
             ):
                 classification = _classification(
@@ -419,6 +439,7 @@ class MT5PositionLifecycleSupervisor:
             counts[classification.state.value] += 1
             discrepancies += int(bool(classification.discrepancy))
             matched_positions.update(classification.matched_position_hashes)
+            matched_orders.update(classification.broker_references["orders"])
             account_matches.append(
                 hmac.compare_digest(
                     str(record.get("account_context_fingerprint", "")),
@@ -426,21 +447,26 @@ class MT5PositionLifecycleSupervisor:
                 )
             )
 
-        if not records or all(account_matches):
-            unmatched_positions = snapshot.get("positions", [])
-        else:
-            unmatched_positions = []
-        for position in unmatched_positions:
+        unmatched_rows = [
+            (row, "UNMATCHED_BROKER_POSITION", "positions")
+            for row in snapshot["positions"]
+            if row.get("broker_reference_hash") not in matched_positions
+        ] + [
+            (row, "UNMATCHED_BROKER_ORDER", "orders")
+            for row in snapshot["active_orders"]
+            if row.get("broker_reference_hash") not in matched_orders
+        ]
+        for position, discrepancy, kind in unmatched_rows:
             position_hash = str(position.get("broker_reference_hash", ""))
-            if position_hash and position_hash not in matched_positions:
+            if position_hash:
                 classification = _Classification(
                     MT5LifecycleState.INCONSISTENT,
-                    "UNMATCHED_POSITION",
-                    "UNMATCHED_BROKER_POSITION",
-                    {"orders": [], "deals": [], "positions": [position_hash]},
+                    "UNMATCHED_POSITION" if kind == "positions" else "UNMATCHED_ORDER",
+                    discrepancy,
+                    {key: [position_hash] if key == kind else [] for key in ("orders", "deals", "positions")},
                     frozenset({position_hash}),
                 )
-                reference = "unmatched_position_" + position_hash[:24]
+                reference = ("unmatched_position_" if kind == "positions" else "unmatched_order_") + position_hash[:24]
                 previous = latest.get(reference, {}).get("lifecycle_state", MT5LifecycleState.UNKNOWN.value)
                 observation = _make_observation(reference, previous, classification, snapshot)
                 if self.lifecycle_journal.append_if_changed(observation):
@@ -460,6 +486,8 @@ class MT5PositionLifecycleSupervisor:
             account_context_match=all(account_matches) if account_matches else True,
             account_fingerprint_prefix=str(snapshot.get("account_context_fingerprint", ""))[:12],
             records_inspected=len(records),
+            historical_records_excluded=historical_excluded,
+            historical_unresolved_records=historical_unresolved,
             observations_appended=appended,
             active_position_count=int(snapshot.get("active_position_count", 0)),
             trades_today=int(snapshot.get("trades_today", 0)),
@@ -508,6 +536,26 @@ class MT5PositionLifecycleSupervisor:
             health_reason=reason,
         )
         return self._status
+
+
+def _terminal_account_history(
+    record: Mapping[str, Any],
+    closed_bindings: set[tuple[str, str]],
+    snapshot: Mapping[str, Any],
+) -> bool:
+    protected = record.get("protected_execution", {})
+    tag = protected.get("correlation_tag")
+    if tag and any(
+        tag in row.get("matched_correlation_tags", [])
+        for key in ("positions", "active_orders", "recent_orders", "recent_deals")
+        for row in snapshot[key]
+    ):
+        return False
+    state = record.get("state")
+    return state == "RESULT_REJECTED" or (
+        state == "RESULT_CONFIRMED"
+        and (_execution_reference(record), _sha256(record["account_context_fingerprint"])) in closed_bindings
+    )
 
 
 def _classify_record(

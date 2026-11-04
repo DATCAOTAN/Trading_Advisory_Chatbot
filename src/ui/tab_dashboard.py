@@ -568,6 +568,10 @@ def _render_trading_runtime_controls(
         columns[2].metric("Lifecycle", lifecycle["supervisor_status"])
         columns[3].metric("Account match", str(lifecycle["account_context_match"]).lower())
         columns[4].metric("Discrepancies", lifecycle["discrepancy_count"])
+        st.caption(
+            f"Terminal history from other accounts: {lifecycle.get('historical_records_excluded', 0)} | "
+            f"Other-account executions requiring recovery: {lifecycle.get('historical_unresolved_records', 0)}"
+        )
         columns[5].metric("Unresolved", status["unresolved_execution_count"])
         st.caption(
             f"bridge_available={str(lifecycle['bridge_available']).lower()} | "

@@ -2626,3 +2626,24 @@ Commit: this commit
 - Duplicate submissions and retries were zero. Protected broker/account identifiers remain excluded from public output and documentation.
 
 ---
+
+### Fix - Account-Aware Lifecycle Recovery
+
+Date: 2026-11-03
+Verification: `FULL_REGRESSION_PASS`
+
+#### Implemented
+
+- Fixed cross-account historical executions contaminating current-account lifecycle health at the existing supervisor, without loosening `_classify_record` or rewriting journals.
+- Exclude only rejected foreign executions or confirmed foreign executions with original-account-bound closed proof; current correlation collisions and unresolved foreign executions still block.
+- Retained invalid binding, unknown-result, journal-integrity, current exposure and reconciliation safety. Detect unmatched current orders as well as positions, reject missing/stale snapshot timestamps, and expose historical/recovery counts in the existing Dashboard.
+
+#### Verified
+
+- Focused neighbors: `136 passed`; final lifecycle/release-closure tests: `51 passed`.
+- Final full regression: `3,787 passed`, `156 subtests passed`, three unchanged warnings, `168.05s`. Updated one obsolete release-closure assertion to count both account conflict and unmatched exposure after the initial regression identified it.
+- Process-local offline defaults were required; `.env` was not edited. Compileall/diff/static checks passed; one production `order_send` call-site, zero `MetaTrader5` imports under `src/`.
+- Real authenticated DEMO read-only observation: `HEALTHY`, account match true, discrepancies zero, seven terminal foreign history records, foreign unresolved zero, observations appended zero. Operator status agreed; PositionReadModel available with no positions/orders/blockers. App restart without rebuild, mounted-source verification and Streamlit `200 ok` passed.
+- No new authority, Candidate, mandate, submission, management, MT5 write or broker mutation. Historical evidence and unrelated worktree changes preserved; no push.
+
+---

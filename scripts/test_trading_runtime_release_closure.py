@@ -122,7 +122,8 @@ def test_restart_duplicate_bridge_loss_and_account_change_fail_closed(tmp_path):
     ).run_once()
     assert changed.supervisor_status == "DEGRADED"
     assert changed.account_context_match is False
-    assert changed.lifecycle_state_counts == {MT5LifecycleState.INCONSISTENT.value: 1}
+    assert changed.lifecycle_state_counts == {MT5LifecycleState.INCONSISTENT.value: 2}
+    assert changed.historical_unresolved_records == 1
 
 
 def test_timeout_auth_unknown_and_corrupt_persistence_remain_closed(tmp_path):
