@@ -14,11 +14,6 @@ class ReasoningProvider(Protocol):
         ...
 
 
-class DisabledReasoningProvider:
-    def complete(self, prompt: str, max_tokens: int, temperature: float) -> str:
-        raise RuntimeError("trading_reasoning_llm_disabled")
-
-
 class ProjectLLMReasoningProvider:
     def __init__(self, provider_name: str | None = None, *, structured_json: bool = False):
         self.provider_name = provider_name or getattr(Config, "TRADING_REASONING_LLM_PROVIDER", "") or None

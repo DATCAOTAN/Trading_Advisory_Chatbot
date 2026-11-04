@@ -75,6 +75,9 @@ tmp/
 temp/
 Trading_Advisory_Chatbot.zip
 tmp_debug_mt5_dry/
+tmp_preflight_diag/
+/diff.txt
+/log_terminal
 
 # =============================================================================
 # INGESTION STATE (auto-generated, rebuild từ PDF)

@@ -1,5 +1,37 @@
 # TRADING_ADVISORY_CHATBOT — FULL CODEBASE, RUNTIME, ROADMAP, AND AGENT HANDOFF
 
+## CURRENT READING GUIDE (2026-11-04)
+
+The reviewed code baseline is `e377ce7`, following account-aware recovery
+`0bfaa8b`. Start with sections 113-116 for the latest DEMO account recovery,
+human-confirmed execution and position/provenance acceptance. Sections 102-109
+cover sizing, conversation ownership and Draft workflows; sections 110-112
+record earlier cleanup. Source/tests/Git remain authoritative.
+
+The product goal is conversational research and controlled MT5 DEMO operation:
+typed semantics -> fresh evidence -> deterministic Draft/Candidate -> exact
+human confirmation or bounded Standing Mandate -> independent execution gates
+-> broker lifecycle, position/P&L/history reads, management, and reconciliation.
+The locked target is `docs/architecture/TRADING_CHATBOT_TARGET_ARCHITECTURE.md`.
+
+The combined worktree's Sprint 6 regression retained 3,798 tests plus 156
+subtests. Its local commits were independently checked on exact staged snapshots:
+62 recovery tests and 243 Sprint 6/neighbor/documentation tests. Full-worktree
+and isolated-commit evidence are distinct. Neither establishes today's terminal,
+feed, permissions, mandate, or Supervisor state.
+
+The remaining cleanup checkpoint and its isolated, configuration-independent
+regression are recorded in section 117. Runtime readiness requires a separate
+authoritative autonomous DEMO preflight; code verification grants no authority.
+
+**Historical scope:** sections 1-34 retain the original July snapshot and its
+then-current blockers. Sections 35-109 are chronological implementation records.
+Statements such as "not implemented" or "manual broker submission not run" in
+an older section describe that milestone, not the latest implementation.
+Use `README.md` and `docs/PROJECT_CONTEXT_FOR_AI.md` for the concise current map.
+
+### Original snapshot metadata
+
 **Handoff version:** 4.3
 **Prepared from:** the uploaded `Trading_Advisory_Chatbot.zip`, the current Codex handoff snapshot, and the reported runtime/test results.
 **Snapshot period:** 2026-07-20 to 2026-07-23
@@ -3093,6 +3125,37 @@ The existing review controls and protected confirmation journal now form the exp
 - No retry or duplicate submission occurred. The account remained `DEMO`, authoritative mode remained `human_confirmed_live`, and no protected broker/account identifiers were exposed.
 - Verification level: `FULL_REGRESSION_PASS`. Verdict: `HUMAN_CONFIRMED_DEMO_ORDER_SEND_COMPLETE`.
 
+# 110. REPOSITORY ORIENTATION AND HOUSEKEEPING
+
+- Reviewed the locked target, latest execution checkpoint, semantic/retrieval ingress, Draft/Candidate and authority wiring, completed-bar coordinator, Supervisor ownership, bridge entrypoint, and repository/configuration inventory against `88f175f`.
+- Replaced stale advisory-only README claims and the obsolete June AI context snapshot with a current product overview, production owner map, mode/authority boundaries, retained verification, and supported runbook links. Historical architecture/sprint evidence remains intact.
+- Removed only unreferenced root artifacts: the old `diff.txt` patch dump, duplicate `cmd_docker` notes, and empty `log_terminal`. Cleaned regenerable Python/pytest caches and the empty preflight diagnostic directory; retained protected debug records, ZIP backup, credentials, databases, dependencies, and `.agents/`.
+- Added explicit Docker build exclusions for local key files, agent configuration, backups, diagnostics, trading journals/protected requests, embedding cache, and knowledge catalog. Existing images were not rebuilt or sanitized; exclusions apply to future builds, while Compose retains the existing data and environment mounts.
+- Updated documentation integrity checks to assert current mode/safety semantics, project-map paths/local links, and required sensitive Docker exclusions. Focused documentation tests: `13 passed`; Compose configuration validation passed. Production source and dependency files were not changed; full regression and live acceptance were not repeated.
+- Retained implementation verification remains the preceding checkpoint's `3,769 passed` plus `156 subtests passed`. This housekeeping does not establish current runtime health or trading authority.
+- Verification level: `FOCUSED_PASS`. No provider, market, candidate, submission, or broker operation was performed.
+
+# 111. COMMIT-INFORMED DEAD-CODE CLEANUP
+
+- Reviewed the implementation history through `88f175f`, including the locked target, autonomous runtime completion, strategy completion, deterministic sizing, conversation ownership, and human-confirmed DEMO execution commits. Added a current reading guide without rewriting historical milestone evidence.
+- Deleted 20 orphan `errors.py` modules across calendar, decision, execution preparation, knowledge, market, proposal, reasoning, review, and scoring. Their exception classes had no imports, exports, raises, catches, string references, or dynamic-loading consumers in the current tracked source/tests/config/docs. Active/exported error types remain unchanged.
+- Deleted the unused `execution/receipt.py` re-export shim; `DryRunExecutionReceipt` remains in its canonical `models.py` and existing package exports. Deleted the two unreferenced root experiments `run_manual_test.py` and `test_reranker_manual.py`, then removed only their obsolete `collect_ignore` entries from root pytest bootstrap.
+- Retained the hermetic provider guards and all supported manual MT5 CLIs, production authority/execution packages, fixtures, and regression coverage. Old sprint/check filenames alone were not treated as deletion evidence.
+- Focused affected-family/documentation/hermetic tests: `262 passed`. Default full collection (`.\venv\Scripts\python.exe -m pytest -q`) passed `3,771 tests`, `156 subtests`, and three unchanged warnings in `155.77s`.
+- The final preservation check found one existing simulation test had appended a rejected, non-executed simulated receipt to the local simulation journal. The original journal byte prefix remains intact; the extra row was retained. That test now injects the existing temporary journal store. Post-fix simulator/documentation verification passed `78 tests` with no further local-journal change; production code did not change after full regression.
+- Offline verification loaded `.env.example` boolean defaults into the test process only; local `.env` and runtime permissions were not edited. Compileall, Compose configuration, and static safety checks passed: one production `.order_send(` call-site, zero `MetaTrader5` imports under `src/`.
+- No new trading behavior, dependencies, account authority, runtime restart, provider call, candidate, or broker operation was introduced. Full regression proves repository compatibility; live DEMO behavior was not rerun.
+- Verification level: `FULL_REGRESSION_PASS`. Known limit: local backup/private stores and actively exported compatibility contracts remain intentionally preserved.
+
+# 112. TARGET-ALIGNED UNUSED DEFINITION CLEANUP
+
+- Re-read the locked target and traced existing runtime/diagnostic consumers before deleting more source. Shared preflight, permission, bridge, lifecycle, and supported diagnostic workflows remain intact; age and file count are not deletion criteria.
+- Removed eight unreferenced definitions in seven existing modules: unused evidence/embedding result containers, OCR metadata helper, coordinator account-context factory, disabled reasoning provider, previous-level wrapper, and two chatbot helpers. Graph inbound references and tracked source/test/config/document references were checked before removal; no replacement abstraction was added.
+- Focused affected evidence, parser, embedding, coordinator, trigger, reasoning, conversational UI, simulation, and documentation tests: `341 passed`, two unchanged warnings. Final default full regression: `3,771 passed`, `156 subtests passed`, three unchanged warnings, `135.73s`.
+- Offline tests used process-local boolean defaults from `.env.example`; local `.env` and operating permissions were not changed. Compileall and Compose configuration passed; static invariants remain one production `.order_send(` call-site and zero `MetaTrader5` imports under `src/`.
+- Preservation checks cover 117 original private/local files. The previously recorded single simulation-only receipt append from section 111 remains retained; this verification introduced no further simulation-journal change. Embedding cache, `.agents/`, credentials, backups, and other protected records remain unchanged by this cleanup.
+- No provider, live market, candidate, submission, or broker operation was invoked. Existing running services were not restarted or rebuilt; live behavior was not reaccepted. Verification level: `FULL_REGRESSION_PASS`.
+
 # 113. ACCOUNT-AWARE LIFECYCLE RECOVERY
 
 - Root cause: `MT5PositionLifecycleSupervisor._run_cycle()` classified every account's historical execution against the connected snapshot. Six old-account confirmed executions with integrity-checked, account-bound `POSITION_CLOSED` evidence and one rejected execution therefore caused seven false current-account discrepancies.
@@ -3134,3 +3197,13 @@ The existing review controls and protected confirmation journal now form the exp
 - Final focused read-model/lifecycle/human-management/autonomous-management/thin-UI/canonical tests: 232 passed, including all 60 canonical cases. Final full regression (`.\venv\Scripts\python.exe -m pytest -q`): 3,798 passed, 156 subtests passed, three unchanged warnings, 156.70s. Tests used process-local offline boolean defaults, not edits to .env; the initial neighboring run inherited local execution flags and was blocked by the offline harness. Earlier runs preceded the browser-proven direction correction and final duplicate-ownership guard; only the result above verifies the final source.
 - Compileall and diff checks passed. Static invariants remain one production order_send call-site and zero MetaTrader5 imports under src/. Broker mutations, controlled-submit, order_send and MT5 writes performed by this sprint: zero. No Candidate, mandate, consent, autonomous runtime or management action was created. Original journals, unrelated dirty worktree, cache and .agents/ were not manually edited; no commit or push.
 - Final Ponytail review: PASS after adding the duplicate active-owner negative control. Documentation integrity: 13 passed. Verification level: `FULL_REGRESSION_PASS`. Verdict: `LIVE_POSITION_READ_AND_PROVENANCE_ACCEPTANCE_COMPLETE`. Controlled post-entry management, partial-close runtime and unknown-result recovery remain unverified by this sprint.
+
+# 117. REMAINING CLEANUP REVIEW AND SAFE CHECKPOINT
+
+- Reviewed the 44 remaining tracked changes against e377ce7: 43 understood cleanup paths and one runtime embedding-cache change. The untracked .agents/ tree, local .env and protected trading stores remain private and excluded from staging.
+- Accepted the existing 26 obsolete-file deletions, eight unused definitions in seven modules, obsolete collection-ignore removal, temporary simulation-test journal injection, Docker/Git context exclusions, and project/retention documentation. Graph callers and current source/test/config references for removed definitions were empty; canonical exports and supported operator workflows remain. Coordinator and reasoning changes remove unused helpers only, not active strategy, mandate, execution or recovery logic.
+- Corrected stale current-baseline pointers without rewriting historical cleanup entries. No production refactor, dependency, mode/mandate/permission/kill-switch change, monitor restart, Docker rebuild or broker operation was introduced.
+- Isolated full regression initially found one pre-existing observability expectation failure: blank structured provider/model configuration falls back to general provider/model in production, but the old test expected disabled/local metadata. The exact test failed on unmodified e377ce7 as well. Added explicit/fallback parameterized StaticModel fixtures in that test only; no provider was constructed or called externally for this correction.
+- Final generated Git-index snapshot, without local .env, passed 3,799 tests and 156 subtests, three unchanged warnings, 135.49s (`.\venv\Scripts\python.exe -m pytest -q`). Focused groups passed 27, 183 and 90 tests; these groups overlap and are not a unique total. The first combined focused collection exposed an unchanged embedding-test Streamlit stub dependency; splitting embedding/parser and UI groups passed without modifying that unrelated test.
+- Compileall, Compose configuration, staged diff and added-content secret checks passed. All 681 Python files in the tested snapshot matched the index after Git line-ending normalization. Static invariants remain one production order_send call-site and zero MetaTrader5 imports under src/. Final documentation-only updates are rechecked separately; no production/test changes followed the passing full run.
+- Verification level: `FULL_REGRESSION_PASS`. Cleanup is suitable as a code baseline for a separately authorized autonomous DEMO readiness preflight, not evidence of current runtime health or autonomous broker execution. Existing test-order sensitivity, unavailable authorization projection and unverified management/recovery branches remain documented; no safety gate was weakened to obtain PASS.

@@ -204,7 +204,20 @@ def test_prompt_field_and_enum_contract_matches_authoritative_validator():
     assert prompt["no_proposal_example"] == json.loads(no_proposal_output())
 
 
-def test_valid_structured_output_becomes_complete_typed_result():
+@pytest.mark.parametrize(
+    "reasoning_provider,reasoning_model,expected_provider,expected_model",
+    [
+        ("groq", "fixture-structured", "groq", "fixture-structured"),
+        ("", "", "openrouter", "fixture-router"),
+    ],
+)
+def test_valid_structured_output_becomes_complete_typed_result(
+    monkeypatch, reasoning_provider, reasoning_model, expected_provider, expected_model,
+):
+    monkeypatch.setattr(Config, "TRADING_REASONING_LLM_PROVIDER", reasoning_provider)
+    monkeypatch.setattr(Config, "TRADING_REASONING_MODEL", reasoning_model)
+    monkeypatch.setattr(Config, "LLM_PROVIDER", "openrouter")
+    monkeypatch.setattr(Config, "OPENROUTER_MODEL_NAME", "fixture-router")
     result, _model = produced()
     assert isinstance(result.order_proposal, AutonomousOrderIntentProposal)
     assert isinstance(result.order_market_snapshot, AutonomousOrderMarketSnapshot)
@@ -217,8 +230,8 @@ def test_valid_structured_output_becomes_complete_typed_result():
     assert result.provenance_hash
     assert result.observability() == {
         "provider_invoked": True,
-        "provider_name": Config.TRADING_REASONING_LLM_PROVIDER or "disabled",
-        "model_name": Config.TRADING_REASONING_MODEL or Config.LLM_MODEL_NAME,
+        "provider_name": expected_provider,
+        "model_name": expected_model,
         "attempt_count": 1,
         "retry_count": 0,
         "transport_status": "OK",

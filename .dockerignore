@@ -18,3 +18,19 @@ temp/
 data/qdrant_db/
 data/raw_pdfs/
 *.ipynb
+
+# Host-only credentials and agent configuration must never enter an image.
+*.key
+cohere_key_api.txt
+key_api_gemini.txt
+.agents/
+
+# Local backups, diagnostic output, and protected runtime state.
+Trading_Advisory_Chatbot.zip
+diff.txt
+log_terminal
+tmp_debug_mt5_dry/
+tmp_preflight_diag/
+data/trading/
+data/cache/
+data/knowledge_catalog/

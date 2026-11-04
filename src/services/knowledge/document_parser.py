@@ -1294,36 +1294,6 @@ def _manifest_prefers_mineru(metadata: Optional[Dict[str, Any]]) -> bool:
     return str(parser.get("preferred") or parser.get("preferred_parser") or "").strip().lower() == "mineru"
 
 
-def _metadata_needs_ocr(metadata: Optional[Dict[str, Any]]) -> bool:
-    if not isinstance(metadata, dict):
-        return False
-    parser = metadata.get("parser") or {}
-    candidates = [
-        metadata.get("needs_ocr"),
-        metadata.get("scanned_likelihood"),
-        metadata.get("scan_heavy"),
-        metadata.get("image_heavy"),
-        metadata.get("ocr_status"),
-    ]
-    if isinstance(parser, dict):
-        candidates.extend(
-            [
-                parser.get("needs_ocr"),
-                parser.get("scanned_likelihood"),
-                parser.get("scan_heavy"),
-                parser.get("image_heavy"),
-                parser.get("ocr_status"),
-            ]
-        )
-    for value in candidates:
-        if isinstance(value, bool) and value:
-            return True
-        text = str(value or "").strip().lower()
-        if text in {"needs_ocr", "scan", "scanned", "image", "image_heavy", "true", "yes"}:
-            return True
-    return False
-
-
 def _to_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value

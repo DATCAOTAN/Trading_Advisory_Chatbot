@@ -297,14 +297,6 @@ class TopicRepairDecision:
         return TopicRepairDecision(task_id, topic_role, answer_status, evidence_strength, True, reason)
 
 @dataclass
-class AnswerCoverageRepairResult:
-    attempt: int
-    repaired_answer: str
-    target_topics: List[str]
-    status: str
-    failure_reason: str = ""
-
-@dataclass
 class ContractEvaluationResult:
     status: str
     task_id: str = ""

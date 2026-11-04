@@ -766,10 +766,6 @@ def _latest_trading_authorization(
     return None, None
 
 
-def _latest_conversational_trading_request(messages) -> ConversationalTradingRequest | None:
-    return _latest_trading_authorization(messages)[0]
-
-
 def _latest_conversational_context(messages) -> ConversationalIntentContext | None:
     for message in reversed(messages):
         payload = message.get("conversational_context") if isinstance(message, dict) else None
@@ -1976,28 +1972,6 @@ def _check_task_coverage(answer: str, query: str, sources) -> dict:
         "missing_tasks": missing_tasks,
         "partially_answered_tasks": partial_tasks,
     }
-
-
-def _evidence_status_for_sources(sources) -> tuple[str, str]:
-    statuses = []
-    reasons = []
-    for source in sources or []:
-        metadata = source.get("metadata", {}) if isinstance(source, dict) else {}
-        evidence_status = (
-            metadata.get("evidence_status")
-            or metadata.get("evidence_sufficiency_status")
-            or metadata.get("evidence_contract_status")
-        )
-        if evidence_status:
-            statuses.append(str(evidence_status).upper())
-        reason = metadata.get("evidence_reason") or metadata.get("evidence_warning")
-        if reason:
-            reasons.append(str(reason))
-    if any(status in {"FAIL", "INSUFFICIENT", "BLOCKED"} for status in statuses):
-        return "FAIL", reasons[0] if reasons else "evidence_sufficiency_failed"
-    if any(status in {"WARN", "DEGRADED"} for status in statuses):
-        return "WARN", reasons[0] if reasons else "evidence_degraded"
-    return "PASS", ""
 
 
 def _split_query_tasks(query: str) -> list[str]:

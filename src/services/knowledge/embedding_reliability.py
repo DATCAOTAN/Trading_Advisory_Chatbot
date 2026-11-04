@@ -21,13 +21,6 @@ class EmbeddingErrorInfo:
     retry_after: Optional[float] = None
 
 
-@dataclass
-class EmbeddingBatchResult:
-    vectors: List[List[float]]
-    cache_hits: int = 0
-    cache_misses: int = 0
-
-
 class EmbeddingProviderError(RuntimeError):
     def __init__(self, info: EmbeddingErrorInfo):
         super().__init__(info.error_tail or info.category)

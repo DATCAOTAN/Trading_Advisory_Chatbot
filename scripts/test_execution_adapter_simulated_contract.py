@@ -323,9 +323,14 @@ def test_service_warns_when_journal_disabled(tmp_path):
     assert result.warning == "simulated_execution_journal_disabled"
 
 
-def test_disabled_adapter_receipt_is_not_accepted():
+def test_disabled_adapter_receipt_is_not_accepted(tmp_path):
     policy = ExecutionAdapterPolicy(adapter_type="DISABLED")
-    service = SimulatedExecutionService(policy=policy)
+    service = SimulatedExecutionService(
+        policy=policy,
+        journal=SimulatedExecutionJournalService(
+            store=SimulatedExecutionJournalStore(path=tmp_path / "simulated.jsonl")
+        ),
+    )
     assert service.run(_draft(), intent=_intent()).receipt.accepted_by_adapter is False
 
 

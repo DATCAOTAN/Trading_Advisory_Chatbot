@@ -883,19 +883,6 @@ def _future(value: str, now: datetime) -> bool:
     return parsed.astimezone(timezone.utc) > now.astimezone(timezone.utc)
 
 
-def coordinator_account_context(
-    *, account_context_fingerprint: str, account_id_hash: str, account_is_demo: bool
-) -> CoordinatorAccountContext:
-    return CoordinatorAccountContext(
-        status="OK",
-        account_context_fingerprint=account_context_fingerprint,
-        account_id_hash=account_id_hash,
-        captured_at=datetime.now(timezone.utc).isoformat(),
-        account_is_demo=account_is_demo,
-        redacted=True,
-    )
-
-
 def production_mandate_context(
     candidate: Any,
     inputs: Any,

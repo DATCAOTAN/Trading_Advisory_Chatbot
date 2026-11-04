@@ -1037,13 +1037,6 @@ def _evaluate_rule_condition(
     return False
 
 
-def _evaluate_level_rule_previous(
-    rule: StrategyRule,
-    values: Mapping[str, Mapping[str, Any]],
-) -> bool:
-    return _evaluate_rule_condition(rule, values, previous=True) is True
-
-
 def _leaf_unresolved_fields(fields: Sequence[str]) -> tuple[str, ...]:
     unique = tuple(dict.fromkeys(str(field) for field in fields if str(field).strip()))
     return tuple(

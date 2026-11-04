@@ -10,6 +10,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 REQUIRED_DOCS = [
     "README.md",
+    "docs/PROJECT_CONTEXT_FOR_AI.md",
+    "docs/architecture/TRADING_CHATBOT_TARGET_ARCHITECTURE.md",
     "docs/architecture/00_system_overview.md",
     "docs/architecture/01_rag_evidence_core.md",
     "docs/architecture/02_agent_runtime.md",
@@ -66,11 +68,44 @@ class DocumentationIntegrityTests(unittest.TestCase):
         text = read("README.md").lower()
 
         self.assertIn("execution_allowed=false", text)
-        self.assertIn("does not execute trades", text)
         self.assertIn("host-side mt5 bridge", text)
-        self.assertIn("does not perform mt5 order execution", text)
-        self.assertIn("does not place orders", text)
-        self.assertIn("does not output", text)
+        for requirement in (
+            "advisory_only", "human_confirmed_live", "autonomous_live",
+            "standing mandate", "real accounts remain hard-blocked",
+            "result_unknown", "historical results",
+        ):
+            self.assertIn(requirement, text)
+        for obsolete_claim in (
+            "this project is not a live trading bot",
+            "no mt5 or broker order integration",
+            "the bridge has no order endpoint",
+        ):
+            self.assertNotIn(obsolete_claim, text)
+
+    def test_project_map_paths_and_local_document_links_exist(self):
+        for path in ("README.md", "docs/PROJECT_CONTEXT_FOR_AI.md"):
+            text = read(path)
+            for reference in re.findall(r"`((?:src|scripts|tools)/[^`]+)`", text):
+                self.assertTrue((PROJECT_ROOT / reference).exists(), reference)
+            for link in re.findall(r"\]\(([^)]+)\)", text):
+                if "://" not in link:
+                    self.assertTrue(
+                        (PROJECT_ROOT / path).parent.joinpath(link.split("#")[0]).exists(),
+                        link,
+                    )
+
+    def test_docker_context_excludes_host_secrets_and_runtime_state(self):
+        patterns = {
+            line.strip() for line in read(".dockerignore").splitlines()
+            if line.strip() and not line.startswith("#")
+        }
+        for protected_path in (
+            ".env", ".streamlit/secrets.toml", "*.key",
+            "cohere_key_api.txt", "key_api_gemini.txt", ".agents/",
+            "Trading_Advisory_Chatbot.zip", "data/trading/",
+            "data/cache/", "data/knowledge_catalog/", "tmp_debug_mt5_dry/",
+        ):
+            self.assertIn(protected_path, patterns)
 
     def test_safety_doc_explicit_prohibitions(self):
         text = read("docs/architecture/03_safety_compliance.md").lower()
