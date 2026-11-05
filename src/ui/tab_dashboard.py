@@ -12,6 +12,7 @@ from src.config import Config
 
 
 import json
+import re
 import secrets
 from datetime import datetime, timezone
 import streamlit as st
@@ -22,7 +23,10 @@ from src.services.trading.decision.operator_candidate_generation import (
     ManualOperatorProposalInput,
     operator_timeframe_profile,
 )
-from src.services.trading.decision.autonomous_runtime import AutonomousMonitorProcess
+from src.services.trading.decision.autonomous_runtime import (
+    AutonomousMonitorProcess, supervisor_monitor_evidence,
+)
+from src.services.trading.execution.mt5_live_adapter_pre_submit.authority_runtime import MandateSetupUnavailable
 from src.services.trading.execution import (
     DryRunConfirmationService,
     ExecutionAdapterRegistry,
@@ -695,7 +699,12 @@ def _render_trading_runtime_controls(
                 )
             except Exception as exc:
                 setup = None
-                st.warning(f"Standing Mandate setup unavailable: {str(exc)}")
+                category = (
+                    str(exc) if isinstance(exc, MandateSetupUnavailable)
+                    or re.fullmatch(r"[A-Z][A-Z0-9_]{0,100}", str(exc))
+                    else type(exc).__name__
+                )
+                st.warning(f"Standing Mandate setup unavailable: {category}")
 
             if setup is not None:
                 persisted_mandate = _active_mandate_for_setup(
@@ -890,21 +899,48 @@ def _render_trading_runtime_controls(
                 disabled=process_status["running"] or monitor_mandate is None,
                 key=f"{key_prefix}start_supervisor",
             ):
-                process_status = process.start(
-                    symbol=symbol,
-                    timeframes=timeframes,
-                    mandate_id=monitor_mandate or "",
-                    trading_scope=trading_scope,
-                )
+                try:
+                    process_status = process.start(
+                        symbol=symbol,
+                        timeframes=timeframes,
+                        mandate_id=monitor_mandate or "",
+                        trading_scope=trading_scope,
+                    )
+                except Exception as exc:
+                    st.warning(f"Supervisor start failed: {type(exc).__name__}")
+                else:
+                    st.rerun()
             if stop.button(
                 "Stop Supervisor",
                 disabled=not process_status["running"],
                 key=f"{key_prefix}stop_supervisor",
             ):
-                process_status = process.stop(trading_scope)
+                try:
+                    process_status = process.stop(trading_scope)
+                except Exception as exc:
+                    st.warning(f"Supervisor stop failed: {type(exc).__name__}")
+                else:
+                    st.rerun()
             st.caption(
                 f"supervisor_running={str(process_status['running']).lower()} | "
                 f"profile={symbol}:{','.join(timeframes)}"
+            )
+            st.caption(
+                f"SUPERVISOR_{process_status.get('process_state', 'UNAVAILABLE')} | "
+                f"scope_ref={process_status.get('scope_reference') or 'UNAVAILABLE'} | "
+                f"mandate_ref={process_status.get('mandate_reference') or 'UNAVAILABLE'} | "
+                f"launch={process_status.get('launched_at') or 'UNAVAILABLE'} | "
+                f"exit_code={process_status.get('exit_code')} | "
+                f"stop_requested={process_status.get('stop_requested_at') or 'none'} | "
+                f"stop_completed={process_status.get('stop_completed_at') or 'none'}"
+            )
+            if process_status.get("failure_category"):
+                st.warning(f"Supervisor: {process_status['failure_category']}")
+            monitor_evidence = supervisor_monitor_evidence(process_status, monitor_row)
+            st.caption(
+                f"monitor_evidence={monitor_evidence['evidence_state']} | "
+                f"evaluated_at={monitor_evidence['last_evaluation_at']} | "
+                f"last_monitor_blocker={monitor_evidence['last_blocker']}"
             )
             if monitor_row:
                 st.caption(

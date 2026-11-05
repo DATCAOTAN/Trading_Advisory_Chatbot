@@ -29,7 +29,9 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.trading_authorit
     TradingAuthorityService,
     TradingAuthorityStore,
 )
-from src.services.trading.market.mt5_bridge_provider import MT5BridgeMarketDataProvider
+from src.services.trading.market.mt5_bridge_provider import (
+    MT5BridgeMarketDataProvider, connection_failure_category,
+)
 from src.services.trading.market.timeframes import broker_symbol_for
 
 
@@ -91,6 +93,10 @@ class MandateSetupProjection:
     field_sources: tuple[tuple[str, str], ...]
 
 
+class MandateSetupUnavailable(RuntimeError):
+    """Sanitized read-only setup failure; never an authority mutation retry."""
+
+
 class TradingAuthorityOperatorService:
     """Operator commands; protected stores and current account remain authoritative."""
 
@@ -135,7 +141,12 @@ class TradingAuthorityOperatorService:
             raise ValueError("MANDATE_STRATEGY_NOT_READY")
 
         generated_at = _utc(now)
-        account = self._demo_account()
+        try:
+            account = self._demo_account()
+        except OSError as exc:
+            raise MandateSetupUnavailable(
+                "ACCOUNT_CONTEXT: " + connection_failure_category(exc)
+            ) from None
         account_capture = ProtectedAccountContextCapture.from_read_only_payload(
             account, generated_at
         )
@@ -154,7 +165,16 @@ class TradingAuthorityOperatorService:
 
         canonical_symbol = str(strategy.canonical_symbol).upper()
         broker_symbol = broker_symbol_for(canonical_symbol)
-        tick = self.market_provider.get_latest_tick(canonical_symbol)
+        try:
+            tick = self.market_provider.get_latest_tick(canonical_symbol)
+        except OSError as exc:
+            raise MandateSetupUnavailable(
+                "BROKER_MARKET_EVIDENCE: " + connection_failure_category(exc)
+            ) from None
+        if getattr(self.market_provider, "last_tick_failure", ""):
+            raise MandateSetupUnavailable(
+                "BROKER_MARKET_EVIDENCE: " + self.market_provider.last_tick_failure
+            )
         volume_min = _positive_decimal_text(tick.volume_min, "BROKER_VOLUME_MIN_INVALID")
         volume_max = _positive_decimal_text(tick.volume_max, "BROKER_VOLUME_MAX_INVALID")
         volume_step = _positive_decimal_text(tick.volume_step, "BROKER_VOLUME_STEP_INVALID")

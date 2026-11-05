@@ -217,6 +217,11 @@ def test_monitor_process_starts_once_and_stops(monkeypatch, tmp_path):
     assert len(processes) == 1
     assert "--mandate-id" in processes[0].command
     assert controller.stop()["running"] is False
+    stopped = controller.status()
+    assert stopped["process_state"] == "STOPPED"
+    assert stopped["stop_requested_at"] and stopped["stop_completed_at"]
+    assert controller.stop()["stop_completed_at"] == stopped["stop_completed_at"]
+    assert AutonomousMonitorProcess(tmp_path).status()["process_state"] == "STOPPED"
 
 
 def test_monitor_processes_are_owned_by_trading_scope(monkeypatch, tmp_path):
@@ -259,6 +264,110 @@ def test_monitor_process_requires_mandate_before_start(monkeypatch, tmp_path):
         AutonomousMonitorProcess(tmp_path).start(
             symbol="XAUUSD", timeframes=("M1",), mandate_id=""
         )
+
+
+@pytest.mark.parametrize("exit_code,expected", ((0, "EXITED"), (1, "FAILED"), (-9, "FAILED")))
+def test_process_exit_is_durable_and_never_restarts(monkeypatch, tmp_path, exit_code, expected):
+    launches = []
+
+    def launch(*args, **kwargs):
+        process = SimpleNamespace(returncode=None)
+        process.poll = lambda: process.returncode
+        launches.append(process)
+        return process
+
+    monkeypatch.setattr("subprocess.Popen", launch)
+    owner = AutonomousMonitorProcess(tmp_path)
+    started = owner.start(symbol="XAUUSD", timeframes=("M1",), mandate_id="private-mandate", trading_scope="scope-a")
+    assert started["process_state"] == "RUNNING" and started["launched_at"]
+    launches[0].returncode = exit_code
+    status = owner.status("scope-a")
+    assert status["process_state"] == expected and status["exit_code"] == exit_code
+    reloaded = AutonomousMonitorProcess(tmp_path).status("scope-a")
+    assert reloaded["process_state"] == expected and reloaded["exit_code"] == exit_code
+    assert reloaded["exited_at"] == status["exited_at"]
+    assert len(launches) == 1
+    raw = next((tmp_path / "data/cache/supervisor_status").glob("*.json")).read_text()
+    assert "private-mandate" not in raw and "scope-a" not in raw
+
+
+def test_launch_failure_is_visible_and_has_no_raw_exception(monkeypatch, tmp_path):
+    def fail(*args, **kwargs):
+        raise OSError("secret-token and account-login")
+
+    monkeypatch.setattr("subprocess.Popen", fail)
+    owner = AutonomousMonitorProcess(tmp_path)
+    with pytest.raises(OSError):
+        owner.start(symbol="XAUUSD", timeframes=("M1",), mandate_id="private")
+    status = AutonomousMonitorProcess(tmp_path).status()
+    assert status["process_state"] == "FAILED"
+    assert status["failure_category"] == "PROCESS_LAUNCH_FAILED"
+    assert "secret-token" not in str(status)
+
+
+def test_lost_process_owner_does_not_launch_duplicate(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+
+    launch = Mock(return_value=SimpleNamespace(poll=lambda: None))
+    monkeypatch.setattr("subprocess.Popen", launch)
+    AutonomousMonitorProcess(tmp_path).start(symbol="XAUUSD", timeframes=("M1",), mandate_id="private")
+    recovered = AutonomousMonitorProcess(tmp_path)
+    assert recovered.status()["process_state"] == "UNKNOWN"
+    with pytest.raises(RuntimeError, match="OWNERSHIP_UNAVAILABLE"):
+        recovered.start(symbol="XAUUSD", timeframes=("M1",), mandate_id="private")
+    launch.assert_called_once()
+
+
+def test_stop_failure_keeps_owned_worker_visible(monkeypatch, tmp_path):
+    def fail():
+        raise OSError("private diagnostic")
+
+    worker = SimpleNamespace(poll=lambda: None, terminate=fail)
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: worker)
+    owner = AutonomousMonitorProcess(tmp_path)
+    owner.start(symbol="XAUUSD", timeframes=("M1",), mandate_id="private")
+    with pytest.raises(OSError):
+        owner.stop()
+    status = owner.status()
+    assert status["running"] and status["process_state"] == "RUNNING"
+    assert status["stop_requested_at"] and not status["stop_completed_at"]
+
+
+def test_diagnostic_write_failure_blocks_start_but_never_operator_stop(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+
+    process = SimpleNamespace(returncode=None)
+    process.poll = lambda: process.returncode
+    process.terminate = lambda: setattr(process, "returncode", 0)
+    process.wait = lambda **kwargs: process.returncode
+    launch = Mock(return_value=process)
+    monkeypatch.setattr("subprocess.Popen", launch)
+    owner = AutonomousMonitorProcess(tmp_path)
+    owner.start(symbol="XAUUSD", timeframes=("M1",), mandate_id="private")
+
+    def fail(*args, **kwargs):
+        raise PermissionError("private filesystem path")
+
+    monkeypatch.setattr(Path, "write_text", fail)
+    stopped = owner.stop()
+    assert stopped["process_state"] == "STOPPED" and not stopped["running"]
+    assert stopped["failure_category"] == "DIAGNOSTIC_WRITE_FAILED"
+    with pytest.raises(PermissionError):
+        owner.start(symbol="XAUUSD", timeframes=("M1",), mandate_id="private")
+    launch.assert_called_once()
+
+
+@pytest.mark.parametrize("running,age,expected", ((True, 10, "CURRENT"), (False, 10, "HISTORICAL"), (True, 100, "HISTORICAL")))
+def test_old_monitor_blocker_is_not_process_status(running, age, expected):
+    from src.services.trading.decision.autonomous_runtime import supervisor_monitor_evidence
+
+    result = supervisor_monitor_evidence(
+        {"running": running, "launched_at": (NOW - timedelta(seconds=60)).isoformat()},
+        {"created_at": (NOW - timedelta(seconds=age)).isoformat(), "blocker": "OLD_BLOCKER"},
+        now=NOW,
+    )
+    assert result["evidence_state"] == expected
+    assert result["last_blocker"] == "OLD_BLOCKER"
 
 
 def test_dashboard_controls_delegate_without_broker_mutation():

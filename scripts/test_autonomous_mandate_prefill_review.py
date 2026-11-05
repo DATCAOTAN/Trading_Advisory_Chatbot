@@ -305,6 +305,46 @@ def test_human_confirmed_mode_remains_per_trade_and_has_no_mandate_controls():
     assert autonomous["mandate_controls"] is True
 
 
+@pytest.mark.parametrize("stage", ("account", "market"))
+@pytest.mark.parametrize("kind,category", (("unreachable", "NETWORK_UNREACHABLE"), ("timeout", "TIMEOUT"), ("refused", "CONNECTION_REFUSED"), ("dns", "DNS_FAILURE"), ("http", "HTTP_ERROR")))
+def test_setup_connection_failure_is_categorized_redacted_and_recovers(tmp_path, monkeypatch, stage, kind, category):
+    import errno
+    import socket
+    from urllib.error import HTTPError, URLError
+    from src.services.trading.market.mt5_bridge_provider import MT5BridgeMarketDataProvider
+    from src.services.trading.execution.mt5_live_adapter_pre_submit.authority_runtime import MandateSetupUnavailable
+
+    errors = {
+        "unreachable": URLError(OSError(errno.ENETUNREACH, "private-token")),
+        "timeout": URLError(TimeoutError("private-token")),
+        "refused": URLError(ConnectionRefusedError(errno.ECONNREFUSED, "private-token")),
+        "dns": URLError(socket.gaierror(-2, "private-token")),
+        "http": HTTPError("http://user:private-token@host", 401, "private-token", {}, None),
+    }
+    provider = MT5BridgeMarketDataProvider()
+    adapter = AccountAdapter()
+    service = _service(tmp_path, market_provider=provider, account_adapter=adapter)
+    baseline = service.authority.store.path.read_bytes()
+
+    def fail(*args, **kwargs):
+        raise errors[kind]
+
+    monkeypatch.setattr(provider, "_get_json", lambda *a, **k: {"volume_min": 0.01, "volume_max": 200, "volume_step": 0.01})
+    if stage == "account":
+        monkeypatch.setattr(adapter, "capture_account_context", fail)
+    else:
+        monkeypatch.setattr(provider, "_get_json", fail)
+    with pytest.raises(MandateSetupUnavailable) as error:
+        _build_setup(service, _strategy(), order_family="MARKET", now=NOW)
+    assert str(error.value) == ("ACCOUNT_CONTEXT" if stage == "account" else "BROKER_MARKET_EVIDENCE") + ": " + category
+    assert "private-token" not in str(error.value)
+    assert service.authority.store.path.read_bytes() == baseline
+    monkeypatch.setattr(adapter, "capture_account_context", AccountAdapter().capture_account_context)
+    monkeypatch.setattr(provider, "_get_json", lambda *a, **k: {"volume_min": 0.01, "volume_max": 200, "volume_step": 0.01})
+    assert _build_setup(service, _strategy(), order_family="MARKET", now=NOW).volume_min == "0.01"
+    assert service.authority.store.path.read_bytes() == baseline
+
+
 def _service(tmp_path, *, market_provider=None, account_adapter=None):
     authority = TradingAuthorityService(TradingAuthorityStore(tmp_path / "authority.jsonl"))
     authority.set_mode(

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import errno
+import socket
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -19,6 +22,25 @@ from src.services.trading.market.models import (
 from src.services.trading.market.timeframes import broker_symbol_for
 
 
+def connection_failure_category(exc: Exception) -> str:
+    """Expose a bounded category, never URLs, credentials or raw exception text."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return "HTTP_ERROR"
+    reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        return "TIMEOUT"
+    if isinstance(reason, socket.gaierror):
+        return "DNS_FAILURE"
+    if isinstance(reason, ssl.SSLError):
+        return "TLS_FAILURE"
+    code = getattr(reason, "errno", None)
+    if code in {errno.ENETUNREACH, errno.EHOSTUNREACH, 10051, 10065}:
+        return "NETWORK_UNREACHABLE"
+    if code in {errno.ECONNREFUSED, 10061}:
+        return "CONNECTION_REFUSED"
+    return "DEPENDENCY_UNAVAILABLE"
+
+
 class MT5BridgeMarketDataProvider:
     provider_name = "mt5_bridge"
 
@@ -26,6 +48,7 @@ class MT5BridgeMarketDataProvider:
         self.bridge_url = (bridge_url or getattr(Config, "MT5_BRIDGE_URL", "") or _default_bridge_url()).rstrip("/")
         self.timeout_seconds = float(timeout_seconds if timeout_seconds is not None else getattr(Config, "MT5_BRIDGE_TIMEOUT_SECONDS", 3))
         self.symbol_map = {str(k).upper(): str(v) for k, v in (symbol_map or {}).items()}
+        self.last_tick_failure = ""
 
     def health_check(self) -> ProviderHealth:
         try:
@@ -82,6 +105,7 @@ class MT5BridgeMarketDataProvider:
             )
 
     def get_latest_tick(self, symbol: str) -> TickSnapshot:
+        self.last_tick_failure = ""
         normalized = self.normalize_symbol(symbol)
         try:
             data = self._get_json("/tick", {"symbol": normalized})
@@ -102,7 +126,8 @@ class MT5BridgeMarketDataProvider:
                 tick_value=_safe_float(data.get("tick_value")),
                 contract_size=_safe_float(data.get("contract_size")),
             )
-        except Exception:
+        except Exception as exc:
+            self.last_tick_failure = connection_failure_category(exc)
             return TickSnapshot(symbol=symbol.upper(), provider_name=self.provider_name)
 
     def get_positions(self, symbol: str | None = None) -> List[PositionSnapshot]:

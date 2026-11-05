@@ -1,6 +1,10 @@
 from datetime import datetime
+from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
 
 from src.services.trading.execution.mt5_live_adapter_pre_submit.authority_runtime import (
     TradingAuthorityOperatorService,
@@ -354,3 +358,154 @@ def test_dashboard_only_presents_monitor_strategy_evaluation():
     assert "rearm_state" in source
     assert "strategy_monitor_projection" not in source
     assert "_evaluate_rule" not in source
+
+
+class _SupervisorRerun(BaseException):
+    pass
+
+
+def _supervisor_controls(monkeypatch, *, running=False, failure=False):
+    from src.ui import tab_dashboard
+
+    ui = MagicMock()
+    ui.session_state = {}
+    ui.columns.side_effect = lambda count: [ui] * count
+    ui.form_submit_button.return_value = False
+    ui.checkbox.return_value = False
+    ui.selectbox.side_effect = lambda label, *_args, **_kwargs: (
+        "mandate-current" if label == "Supervisor mandate"
+        else 60 if label == "Mandate duration" else None
+    )
+    ui.rerun.side_effect = _SupervisorRerun
+    clicked = set()
+    disabled = {}
+
+    def button(label, **kwargs):
+        disabled[label] = kwargs.get("disabled", False)
+        if label in clicked and not disabled[label]:
+            clicked.remove(label)
+            return True
+        return False
+
+    ui.button.side_effect = button
+    state = {"running": running, "mandate_id": "mandate-current"}
+    process = SimpleNamespace(status=MagicMock(side_effect=lambda scope: dict(state)))
+
+    def transition(next_running):
+        if failure:
+            raise OSError("process transition failed")
+        state["running"] = next_running
+        return dict(state)
+
+    process.start = MagicMock(side_effect=lambda **kwargs: transition(True))
+    process.stop = MagicMock(side_effect=lambda scope: transition(False))
+    service = MagicMock()
+    service.status.return_value = {
+        "account_environment": "DEMO", "mode": "autonomous_live",
+        "metadata_redacted": True, "mode_integrity_valid": True,
+        "unresolved_execution_count": 0,
+        "execution_state_counts": {}, "reconciliation_state_counts": {},
+        "mandates": [_mandate()], "permission_state": defaultdict(bool),
+        "pre_submit": {"warnings": [], "latest_status": ""},
+        "lifecycle": {
+            "supervisor_status": "HEALTHY", "account_context_match": True,
+            "bridge_available": True, "discrepancy_count": 0,
+            "terminal_trade_allowed": True, "account_trade_allowed": True,
+            "active_position_count": 0, "trades_today": 0,
+        },
+    }
+    # Existing persisted selection still renders if setup cannot be rebuilt.
+    service.build_mandate_setup.side_effect = ValueError("MANDATE_SETUP_UNAVAILABLE")
+    monkeypatch.setattr(tab_dashboard, "st", ui)
+    monkeypatch.setattr(tab_dashboard, "_trading_authority_service", lambda: service)
+    monkeypatch.setattr(tab_dashboard, "_autonomous_monitor_process", lambda: process)
+    monkeypatch.setattr(
+        "subprocess.Popen", lambda *_args, **_kwargs: pytest.fail("real process forbidden")
+    )
+
+    def render():
+        return tab_dashboard._render_trading_runtime_controls(
+            "XAUUSD", ("M1",), None, requested_mode="autonomous_live",
+            key_prefix="scope-a_", strategy=SimpleNamespace(
+                trading_scope="scope-a", identity=SimpleNamespace(strategy_id="strategy-current")
+            ),
+        )
+
+    return ui, process, clicked, disabled, render
+
+
+@pytest.mark.parametrize("action", ("start", "stop"))
+@pytest.mark.parametrize("failure", (False, True))
+def test_supervisor_transition_reruns_once_and_preserves_scope(monkeypatch, action, failure):
+    ui, process, clicked, disabled, render = _supervisor_controls(
+        monkeypatch, running=action == "stop", failure=failure
+    )
+    clicked.add(f"{action.title()} Supervisor")
+    if failure:
+        render()
+        ui.rerun.assert_not_called()
+        assert any(
+            call.args == (f"Supervisor {action} failed: OSError",)
+            for call in ui.warning.call_args_list
+        )
+        ui.success.assert_not_called()
+    else:
+        with pytest.raises(_SupervisorRerun):
+            render()
+        ui.rerun.assert_called_once_with()
+
+    render()  # A rerun/refresh is not a second operator click.
+    if action == "start":
+        process.start.assert_called_once_with(
+            symbol="XAUUSD", timeframes=("M1",),
+            mandate_id="mandate-current", trading_scope="scope-a",
+        )
+        process.stop.assert_not_called()
+    else:
+        process.stop.assert_called_once_with("scope-a")
+        process.start.assert_not_called()
+    expected_running = (action == "stop") if failure else (action == "start")
+    assert disabled["Start Supervisor"] is expected_running
+    assert disabled["Stop Supervisor"] is not expected_running
+    assert all(call.args == ("scope-a",) for call in process.status.call_args_list)
+
+
+@pytest.mark.parametrize("running", (False, True))
+def test_supervisor_refresh_only_reads_process_status(monkeypatch, running):
+    ui, process, _clicked, disabled, render = _supervisor_controls(
+        monkeypatch, running=running
+    )
+    render()
+    render()
+    assert disabled["Start Supervisor"] is running
+    assert disabled["Stop Supervisor"] is not running
+    process.start.assert_not_called()
+    process.stop.assert_not_called()
+    ui.rerun.assert_not_called()
+
+
+@pytest.mark.parametrize("state", ("STOPPED", "RUNNING", "EXITED", "FAILED", "UNKNOWN"))
+def test_supervisor_process_state_is_rendered_independently(monkeypatch, state):
+    ui, process, _clicked, _disabled, render = _supervisor_controls(monkeypatch, running=False)
+    process.status.side_effect = lambda scope: {
+        "running": state == "RUNNING", "mandate_id": "mandate-current",
+        "process_state": state, "exit_code": 1 if state == "FAILED" else None,
+    }
+    render()
+    captions = "\n".join(str(call.args[0]) for call in ui.caption.call_args_list)
+    assert f"SUPERVISOR_{state}" in captions
+    assert "monitor_evidence=UNAVAILABLE" in captions
+    process.start.assert_not_called()
+    process.stop.assert_not_called()
+
+
+def test_mandate_setup_warning_does_not_expose_raw_network_exception(monkeypatch):
+    from urllib.error import URLError
+    from src.ui import tab_dashboard
+
+    ui, _process, _clicked, _disabled, render = _supervisor_controls(monkeypatch, running=False)
+    tab_dashboard._trading_authority_service().build_mandate_setup.side_effect = URLError("http://user:secret-token@private-host")
+    render()
+    warnings = "\n".join(str(call.args[0]) for call in ui.warning.call_args_list)
+    assert "Standing Mandate setup unavailable: URLError" in warnings
+    assert "secret-token" not in warnings and "private-host" not in warnings

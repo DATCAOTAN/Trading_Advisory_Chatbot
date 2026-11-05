@@ -2129,6 +2129,7 @@ def _candidate_from_protected_dict(payload: Mapping[str, Any]) -> AutonomousDeci
     if frozenset(payload) not in {
         frozenset(allowed),
         frozenset(allowed - optional_v2),
+        frozenset(allowed - {"trading_scope"}),
     }:
         raise ValueError("candidate payload fields do not match")
     values = dict(payload)

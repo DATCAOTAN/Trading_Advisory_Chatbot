@@ -254,13 +254,18 @@ class AutonomousTradingCoordinator:
             )
         opening_blocker = self._opening_lifecycle_blocker(inputs)
         if opening_blocker:
+            active_entry = opening_blocker == "ENTRY_ALREADY_ACTIVE"
             projection = self._strategy_projection(
                 getattr(inputs, "reasoning_evidence_summary", "")
             )
-            projection["opening_eligibility"] = "ENTRY_ALREADY_ACTIVE"
+            projection["opening_eligibility"] = (
+                "ENTRY_ALREADY_ACTIVE" if active_entry else "UNAVAILABLE"
+            )
             return self._result(
-                "NO_ACTION", symbol, broker_symbol, timeframes, closed_bar_time,
-                account_scope, intent="NO_ACTION", blocker=opening_blocker,
+                "NO_ACTION" if active_entry else "BLOCKED",
+                symbol, broker_symbol, timeframes, closed_bar_time,
+                account_scope, intent="NO_ACTION" if active_entry else "",
+                blocker=opening_blocker,
                 strategy_evaluation=projection,
             )
         management_result = self._handle_post_entry_management(

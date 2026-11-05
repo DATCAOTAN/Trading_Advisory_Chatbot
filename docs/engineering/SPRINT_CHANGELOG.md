@@ -2769,3 +2769,58 @@ Verification: `FULL_REGRESSION_PASS`
 - Code checkpoint is suitable for the next read-only autonomous DEMO readiness preflight. No push; runtime cache and unrelated agent state remain outside Git staging.
 
 ---
+
+### Sprint 9 Maintenance - Supervisor UI State and Risk Diagnosis
+
+Date: 2026-11-04
+Verification: `FOCUSED_PASS`
+
+- Added rerun after successful existing Start/Stop process-owner calls; refreshed disabled states use the same trading scope. Process exceptions display redacted failure types and do not trigger a success rerun. No runtime owner or authorization path was changed.
+- Six new fake-process UI cases verify one-click transitions, no repeat calls on rerun/refresh, start/stop disabled states, scope propagation and exceptions. Focused Dashboard/runtime/strategy-binding/mandate suite: 67 passed, two dependency warnings. Final child test environment used `.env.example` trading/MT5 boolean defaults; initial runs inherited incompatible local execution flags. No runtime or `.env` change.
+- Command: `.\venv\Scripts\python.exe -m pytest scripts/test_dashboard_authoritative_runtime_state.py scripts/test_autonomous_runtime_completion.py scripts/test_autonomous_supervisor_strategy_binding.py scripts/test_autonomous_mandate_prefill_review.py -q`. No full regression.
+- Actual read-only M1 evidence: ATR approximately 3.563143, SL distance 5.345, tick size/value 0.001/0.1. Risk per lot 534.5 USD; minimum 0.01 lot requires 5.345 USD nominal stop risk. A 1 USD mandate budget yields approximately 0.001870907 lot, rounded down to 0.00: `MANDATE_RISK_BUDGET_BELOW_BROKER_MINIMUM` is correct. No financial limit was changed or approved.
+- DEMO mode/mandate account binding and integrity valid; mandate kill switch engaged, expiry 07:26:17Z. No real autonomous workers, positions/orders, current discrepancies or foreign unresolved executions. Historical BLOCKED monitor status is not a running-process status.
+- App-only restart, matching mounted Dashboard hash, Streamlit HTTP 200, compile and diff checks passed. No broker mutation, order_send, controlled-submit, Candidate, mandate mutation or real process transition. Protected/unrelated work preserved; no commit/push.
+- Remaining: operator-owned risk/mandate decision and separate Gate B startup/kill-switch authorization. A successful UI test and mathematical risk diagnosis do not establish autonomous broker execution.
+
+---
+
+### Sprint 9 Maintenance - Legacy Candidate Journal Compatibility
+
+Date: 2026-11-04
+Verification: `FULL_REGRESSION_PASS`
+
+- Confirmed first blocker in four real M1 evaluations: an integrity-valid expired August Candidate lacked only trading_scope, but the deserializer accepted only the complete current set or the original all-optional-fields-absent legacy set.
+- Added exactly the observed pre-scope shape. Missing scope stays empty; no arbitrary subset acceptance, scope inheritance, journal migration, re-signing or safety bypass.
+- Unavailable Candidate state now projects BLOCKED/UNAVAILABLE with its exact blocker, not NO_ACTION/ENTRY_ALREADY_ACTIVE. Real active positions/orders/pending submissions and eligible unexpired Candidates still block duplicate entries; expired valid history no longer fails deserialization.
+- Added 12 journal cases and 10 coordinator cases using isolated files and fake runtime dependencies. Covered current/original/pre-scope shapes, immutable reads, unknown scope, malformed fields, tampering, all three correlation conflicts, expiry, active-entry protection and stopping before generation/authorization/submission.
+- Focused: 69 passed; neighboring monitor/strategy-binding/confirmation/pre-submit/read-model/mandate/Dashboard: 153 passed. Full regression: 3,827 passed, 156 subtests, three dependency warnings, 130.75s. No failing test run in this maintenance task.
+- Commands: `.\venv\Scripts\python.exe -m pytest scripts/test_autonomous_decision_orchestrator.py scripts/test_autonomous_trading_coordinator.py -q`; full `.\venv\Scripts\python.exe -m pytest -q`. Test child environments alone received .env.example trading/MT5 boolean defaults. Current worktree includes the prior uncommitted UI fix.
+- Read-only real journal reload: 67 protected Candidates loaded, one unchanged summary-only row returns None, no exceptions or decision-file byte change. Existing active-entry guard returns no blocker against current healthy closed-position evidence; no new Candidate was produced.
+- App-only restart, no rebuild. DEMO account binding valid, lifecycle POSITION_CLOSED, no discrepancies/foreign unresolved, positions/orders/trades/loss today zero; no host/container autonomous workers. Mandate v3 is expired and not reused. Final 114-file preservation check found only a normal app-generated lifecycle append with the original bytes preserved as an exact prefix; decision/authority/execution files and private environment/cache/agent files are unchanged.
+- Compileall/diff passed. One production order_send call-site; no MetaTrader5 imports under src/. No provider, trading, authority, kill-switch or protected-history mutation. Cache/.agents/.env and earlier work preserved. No commit/push.
+- Verdict: `LEGACY_CANDIDATE_RELOAD_FIXED`. Remaining: separately authorized fresh mandate/preflight and autonomous broker E2E; this maintenance is not live execution acceptance.
+
+---
+
+### Sprint 10 - Trading Runtime Reliability and Observability
+
+Date: 2026-11-05
+Verification: `FULL_REGRESSION_PASS`
+
+- Preserved the uncommitted Sprint 9 fixes. Retained later audit evidence establishes autonomous DEMO opening and DEAL_REASON_SL closure; no new trading was performed for Sprint 10.
+- Read-only baseline: no autonomous workers, one DEMO protected position, no pending orders/discrepancies/unknown results. Latest mandate v5 allowed two trades/day and expired 2026-11-04T17:20:31.118764Z; v4 and v5 were not merged. Protected submissions were before expiry.
+- Closed history projects broker SL/TP only through a unique position-linked opening deal and exact historical order reference. Missing protection stays unavailable; ambiguous/foreign-account/conflicting references fail closed. Direction, closing price, P/L and protected provenance remain intact.
+- Existing scope-owned process owner retains bounded per-scope sanitized launch/exit/stop diagnostics, without capturing raw stdout/stderr. Unexpected exits never restart. An unowned historical RUNNING/STARTING record is UNKNOWN and blocks duplicate startup, not automatically adopted authority.
+- Streamlit separates actual process state from current/historical monitor evidence. Stop remains available even if diagnostic persistence fails; launch fails closed when initial diagnostics cannot be saved.
+- Mandate setup reports bounded account-context versus broker-market failure categories. Mocked transient network failures recover on a later read without retrying authority mutation. Original incident remains HISTORICAL_CAUSE_UNCONFIRMED; current dependencies are bridge account/tick reads, not an external market/LLM service.
+- Fake-clock tests preserve expiry/revocation rejection at admission and authorization reload; later bars append no new authorization. Position/protection reads remain non-mutating after expiry. No automatic liquidation or permission change.
+- Focused: 129 passed across read-model/runtime/mandate/authority/Dashboard tests. Neighbors: 253 passed across strategy/coordinator/approval/lifecycle/management/provider/canonical tests, including all 60 canonical cases.
+- Full command `.\venv\Scripts\python.exe -m pytest -q`: 3,865 passed, 156 subtests, three unchanged warnings, 154.49s. Only test child environments received .env.example trading/MT5 boolean defaults. Initial focused failures were corrected test setup/expectations, not bypassed production checks.
+- Documentation integrity: 13 passed. Affected compileall, diff check, one production order_send call-site, zero MetaTrader5 imports under src/ and final Ponytail review passed.
+- App-only restart, no rebuild. All five changed production modules match container source; container healthy; Streamlit 200 / ok. Browser showed SUPERVISOR_STOPPED/HISTORICAL; exact closed DEMO read projected broker SL/TP and retained provenance.
+- No real Supervisor launch, Candidate creation, mandate/mode/kill-switch/permission change, provider call, controlled-submit, management write or broker mutation. Protected history/private state and prior work preserved; no commit/push.
+- Final preservation: 114 original files checked; only the app's normal lifecycle append changed, with all 3,683 original rows retained as an exact byte prefix. A standalone read-model import diagnostic hit an import-order cycle; production lifecycle-first initialization/read passed. No unrelated import refactor.
+- Verdict: SPRINT_10_RELIABILITY_PASS. Not verified: long-term unattended runtime, a real process transition in this sprint, historical network cause, or management/recovery mutation. Historical chat responses remain unchanged.
+
+---

@@ -206,7 +206,10 @@ class PositionReadModelService:
             ) for collection in (positions, orders)
         )
         history = tuple(
-            self._closed_item(row, snapshot.get("recent_deals", []), executions, lifecycle, fingerprint)
+            self._closed_item(
+                row, snapshot.get("recent_deals", []), executions, lifecycle, fingerprint,
+                snapshot.get("recent_orders", []),
+            )
             for row in snapshot.get("recent_deals", [])
             if str(row.get("entry")) in {"OUT", "INOUT"}
         )
@@ -352,20 +355,63 @@ class PositionReadModelService:
         executions: list[Mapping[str, Any]],
         lifecycle: Mapping[str, Mapping[str, Any]],
         fingerprint: str,
+        orders: list[Mapping[str, Any]],
     ) -> PositionReadItem:
         item = self._item(row, "POSITION_CLOSED", executions, lifecycle, fingerprint)
         position_reference = str(row.get("position_reference_hash") or "")
-        opening = next(
-            (
+        openings = [
                 deal for deal in deals
                 if position_reference
                 and hmac.compare_digest(
                     str(deal.get("position_reference_hash") or ""), position_reference
                 )
                 and str(deal.get("entry")) == "IN"
-            ),
-            None,
-        )
+        ]
+        opening = openings[0] if len(openings) == 1 else None
+        protection = None
+        unavailable = "HISTORICAL_PROTECTION_UNAVAILABLE"
+        if len(openings) > 1:
+            unavailable = "AMBIGUOUS_OPENING_DEAL_REFERENCE"
+        if opening:
+            opening_item = self._item(opening, "POSITION_CLOSED", executions, lifecycle, fingerprint)
+            if opening_item.state == "INCONSISTENT":
+                item = replace(item, state="INCONSISTENT", provenance=opening_item.provenance)
+            elif (
+                item.provenance.execution_reference
+                and opening_item.provenance.execution_reference
+                and item.provenance.execution_reference != opening_item.provenance.execution_reference
+            ):
+                unavailable = "AMBIGUOUS_EXECUTION_REFERENCE"
+            elif not item.provenance.execution_reference:
+                item = replace(item, provenance=opening_item.provenance)
+            order_reference = str(opening.get("order_reference_hash") or "")
+            matching_orders = [
+                order for order in orders
+                if order_reference and order.get("broker_reference_hash") == order_reference
+            ]
+            if len(matching_orders) > 1:
+                unavailable = "AMBIGUOUS_HISTORICAL_ORDER_REFERENCE"
+            elif len(matching_orders) == 1:
+                if matching_orders[0].get("position_reference_hash") != position_reference:
+                    unavailable = "HISTORICAL_ORDER_POSITION_MISMATCH"
+                else:
+                    protection = matching_orders[0]
+                    order_item = self._item(protection, "POSITION_CLOSED", executions, lifecycle, fingerprint)
+                    if order_item.state == "INCONSISTENT":
+                        item = replace(item, state="INCONSISTENT", provenance=order_item.provenance)
+                    if unavailable == "HISTORICAL_PROTECTION_UNAVAILABLE":
+                        unavailable = (
+                            "" if all(protection.get(k) is not None for k in ("stop_loss", "take_profit"))
+                            else "HISTORICAL_PROTECTION_UNAVAILABLE"
+                        )
+        if unavailable:
+            item = replace(
+                item,
+                state="INCONSISTENT" if unavailable != "HISTORICAL_PROTECTION_UNAVAILABLE" else item.state,
+                provenance=replace(
+                    item.provenance, unavailable=(*item.provenance.unavailable, unavailable),
+                ),
+            )
         return replace(
             item,
             direction=str(opening.get("direction") or "UNKNOWN") if opening else "UNKNOWN",
@@ -373,6 +419,8 @@ class PositionReadModelService:
             current_price=_number(row.get("price")),
             open_time=str(opening.get("time") or "") if opening else "",
             close_time=str(row.get("time") or ""),
+            stop_loss=_number(protection.get("stop_loss")) if protection else None,
+            take_profit=_number(protection.get("take_profit")) if protection else None,
         )
 
     def _provenance(

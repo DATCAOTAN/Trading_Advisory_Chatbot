@@ -265,6 +265,87 @@ def test_closed_history_uses_authoritative_broker_components():
     )
 
 
+@pytest.mark.parametrize("close_price", (61000.0, 64000.0))
+def test_closed_history_joins_exact_opening_order_protection(close_price):
+    opening, closing, historical = opening_deal(), closing_deal(), order()
+    opening["order_reference_hash"] = historical["broker_reference_hash"]
+    historical["position_reference_hash"] = HASH_A
+    closing["price"] = close_price
+    snap = snapshot(deals=[opening, closing])
+    snap["recent_orders"] = [historical]
+    model = service(snap).read(query_type="HISTORY")
+    item = model.history[0]
+    assert (item.stop_loss, item.take_profit) == (60500, 63500)
+    assert (item.direction, item.entry_price, item.current_price) == ("BUY", 62000, close_price)
+    assert item.realized_pnl == 97
+    assert "CONTROLLED_EXECUTION_REFERENCE" in item.provenance.unavailable
+    public = str(model.to_public_dict())
+    assert "ticket" not in public and "position_id" not in public and FINGERPRINT not in public
+
+
+@pytest.mark.parametrize("case", ("missing", "duplicate_order", "wrong_position", "duplicate_opening", "unprotected"))
+def test_closed_history_protection_never_guesses(case):
+    opening, closing, historical = opening_deal(), closing_deal(), order()
+    opening["order_reference_hash"] = historical["broker_reference_hash"]
+    historical["position_reference_hash"] = HASH_A
+    orders = [historical]
+    deals = [opening, closing]
+    if case == "missing":
+        orders = [dict(historical, broker_reference_hash="e" * 64)]
+    elif case == "duplicate_order":
+        orders.append(dict(historical))
+    elif case == "wrong_position":
+        historical["position_reference_hash"] = "e" * 64
+    elif case == "duplicate_opening":
+        deals.append(dict(opening, broker_reference_hash="e" * 64))
+    else:
+        historical.update(stop_loss=0, take_profit=0)
+    snap = snapshot(deals=deals)
+    snap["recent_orders"] = orders
+    model = service(snap).read(query_type="HISTORY")
+    item = model.history[0]
+    if case == "unprotected":
+        assert (item.stop_loss, item.take_profit) == (0, 0)
+    else:
+        assert item.stop_loss is None and item.take_profit is None
+        assert model.status == ("AVAILABLE" if case == "missing" else "BLOCKED")
+
+
+def test_closed_history_opening_execution_foreign_account_still_blocks():
+    opening = opening_deal()
+    opening["matched_correlation_tags"] = ["mt5rabc"]
+    record = execution_record()
+    record["account_context_fingerprint"] = "e" * 64
+    model = service(snapshot(deals=[opening, closing_deal()]), records=[record]).read(query_type="HISTORY")
+    assert model.blockers == ("ACCOUNT_CONTEXT_MISMATCH",)
+
+
+def test_closed_history_historical_order_foreign_execution_still_blocks():
+    opening, historical = opening_deal(), order()
+    opening["order_reference_hash"] = historical["broker_reference_hash"]
+    historical["position_reference_hash"] = HASH_A
+    historical["matched_correlation_tags"] = ["mt5rabc"]
+    snap = snapshot(deals=[opening, closing_deal()])
+    snap["recent_orders"] = [historical]
+    record = execution_record()
+    record["account_context_fingerprint"] = "e" * 64
+    assert service(snap, records=[record]).read(query_type="HISTORY").blockers == ("ACCOUNT_CONTEXT_MISMATCH",)
+
+
+def test_position_and_broker_protection_remain_visible_without_active_mandate():
+    from copy import deepcopy
+
+    before_expiry = datetime.now(timezone.utc)
+    later = before_expiry + timedelta(hours=2)
+    snap = snapshot(positions=[position()], timestamp=later.isoformat())
+    original = deepcopy(snap)
+    model = service(snap, now=later).read()
+    assert model.status == "AVAILABLE"
+    assert model.open_positions[0].state == "POSITION_OPEN"
+    assert (model.open_positions[0].stop_loss, model.open_positions[0].take_profit) == (61000, 64000)
+    assert snap == original
+
+
 def test_unique_symbol_selects_and_multiple_symbol_positions_are_ambiguous():
     one = service(snapshot(positions=[position()])).read(
         query_type="PNL", canonical_symbol="BTCUSD", singular=True

@@ -5,12 +5,16 @@ from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from scripts.test_approval_final_validation_pre_submit import (
     _capability,
     _persisted_lifecycle,
     _prepared,
 )
 from scripts.test_autonomous_candidate_monitor import FeatureService
+from scripts.test_autonomous_decision_orchestrator import _write_candidate_row
+from scripts.test_autonomous_supervisor_strategy_binding import _strategy
 from scripts.test_autonomous_execution_permission_contract import (
     _enable_execution_ready_config,
     _ready_config,
@@ -22,6 +26,7 @@ from src.services.trading.decision.autonomous_candidate_monitor import (
 from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionRunResult,
     autonomous_account_context_reference,
+    _journal_row,
 )
 from src.services.trading.decision.operator_candidate_generation import (
     OperatorCandidateInputError,
@@ -513,3 +518,117 @@ class _RecordingPolicyGate:
             ),
             journal_warning="",
         )
+
+
+def _legacy_guard_coordinator(tmp_path, *, expired=True, mutation="", lifecycle=None):
+    state = _prepared(tmp_path / "candidate", "fresh_market", confirm=False)
+    strategy = _strategy()
+    candidate = replace(
+        state["candidate"], operating_mode="autonomous_live",
+        strategy_id=strategy.identity.strategy_id,
+        strategy_version=strategy.identity.strategy_version,
+        normalized_strategy_hash=strategy.identity.normalized_strategy_hash,
+        trading_scope=strategy.trading_scope,
+    )
+    historical = replace(
+        candidate, candidate_reference="autonomous_decision_historical",
+        generated_at=(NOW - timedelta(hours=1)).isoformat(),
+        expires_at=(NOW + timedelta(minutes=-1 if expired else 1)).isoformat(),
+    )
+    row = _journal_row(historical)
+    row["protected_candidate"].pop("trading_scope")
+    if mutation == "missing":
+        row["protected_candidate"].pop("intent")
+    elif mutation == "extra":
+        row["protected_candidate"]["unknown_field"] = True
+    journal = _write_candidate_row(
+        tmp_path / "historical.jsonl", row, rehash=mutation != "tampered"
+    )
+    policy = _RecordingPolicyGate()
+    adapter = _ExecutionAdapter()
+    context_calls = []
+    coordinator, orchestrator = _coordinator(
+        tmp_path, candidate, _authority(tmp_path / "authority", "autonomous_live"),
+        lifecycle=lifecycle, policy_gate=policy, execution_adapter=adapter,
+        mandate_context_provider=lambda *_args: context_calls.append(True),
+    )
+    coordinator.strategy = strategy
+    coordinator.strategy_direction = "BUY"
+    coordinator.strategy_action = "OPEN_POSITION"
+    orchestrator.journal = journal
+    return coordinator, orchestrator, journal, policy, adapter, context_calls
+
+
+@pytest.mark.parametrize("expired", (False, True))
+def test_pre_scope_candidate_retains_active_entry_protection(tmp_path, expired):
+    coordinator, orchestrator, journal, policy, adapter, contexts = (
+        _legacy_guard_coordinator(tmp_path, expired=expired)
+    )
+    before = journal.path.read_bytes()
+    loaded = journal.load_candidate("autonomous_decision_historical")
+    assert loaded.trading_scope == ""
+    assert loaded.execution_authority is loaded.executable is False
+
+    result = coordinator.run_once(symbol="XAUUSD", timeframes=("M1",))
+
+    if expired:
+        assert result.blocker == "LATER_POLICY_BLOCKER"
+        assert orchestrator.calls == 1
+        assert policy.inputs is not None
+    else:
+        assert result.status == result.intent == "NO_ACTION"
+        assert result.blocker == "ENTRY_ALREADY_ACTIVE"
+        assert result.strategy_evaluation["opening_eligibility"] == "ENTRY_ALREADY_ACTIVE"
+        assert orchestrator.calls == 0
+        assert policy.inputs is None
+    assert journal.path.read_bytes() == before
+    assert adapter.calls == 0
+    assert contexts == []
+
+
+@pytest.mark.parametrize(
+    "active_state", ("POSITION_OPEN", "POSITION_PARTIALLY_REDUCED",
+                     "ORDER_ACTIVE", "SUBMISSION_PENDING", "POSITION_COUNT")
+)
+def test_real_active_lifecycle_still_blocks_before_generation(tmp_path, active_state):
+    lifecycle = SimpleNamespace(
+        supervisor_status="HEALTHY", bridge_available=True,
+        account_context_match=True, discrepancy_count=0,
+        active_position_count=int(active_state == "POSITION_COUNT"),
+        lifecycle_state_counts={} if active_state == "POSITION_COUNT" else {active_state: 1},
+    )
+    coordinator, orchestrator, _journal, policy, adapter, contexts = (
+        _legacy_guard_coordinator(tmp_path, lifecycle=lifecycle)
+    )
+
+    result = coordinator.run_once(symbol="XAUUSD", timeframes=("M1",))
+
+    assert result.status == result.intent == "NO_ACTION"
+    assert result.blocker == "ENTRY_ALREADY_ACTIVE"
+    assert result.strategy_evaluation["opening_eligibility"] == "ENTRY_ALREADY_ACTIVE"
+    assert orchestrator.calls == 0
+    assert policy.inputs is None
+    assert adapter.calls == 0
+    assert contexts == []
+
+
+@pytest.mark.parametrize("mutation", ("missing", "extra", "tampered"))
+def test_unavailable_candidate_state_is_blocked_not_an_active_entry(tmp_path, mutation):
+    coordinator, orchestrator, journal, policy, adapter, contexts = (
+        _legacy_guard_coordinator(tmp_path, mutation=mutation)
+    )
+    before = journal.path.read_bytes()
+
+    result = coordinator.run_once(symbol="XAUUSD", timeframes=("M1",))
+
+    assert result.status == "BLOCKED"
+    assert result.intent == ""
+    assert result.blocker == "COORDINATOR_CANDIDATE_STATE_UNAVAILABLE"
+    assert result.strategy_evaluation["opening_eligibility"] == "UNAVAILABLE"
+    assert result.strategy_evaluation["decision"] == "BLOCKED"
+    assert orchestrator.calls == 0
+    assert policy.inputs is None
+    assert adapter.calls == 0
+    assert contexts == []
+    assert [r["event_type"] for r in coordinator.authority_service.store.read_strict()] == ["MODE_SET"]
+    assert journal.path.read_bytes() == before

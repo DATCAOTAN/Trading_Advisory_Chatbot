@@ -291,6 +291,35 @@ def test_advisory_candidate_cannot_create_human_or_mandate_authority(tmp_path):
     assert "HUMAN_AUTHORIZATION_MODE_MISMATCH" in result.approval.blockers
 
 
+@pytest.mark.parametrize("revoked", (False, True))
+def test_expired_or_revoked_authority_cannot_be_reused_on_later_bars(tmp_path, revoked):
+    state = _prepared(tmp_path / "candidate", "fresh_market", confirm=False)
+    service, mandate = _authority(tmp_path / "authority")
+    candidate = _autonomous(state["candidate"])
+    authorization = _authorize(service, mandate.mandate_id, candidate)
+    if revoked:
+        service.revoke_mandate(
+            mandate.mandate_id, operator_grant=True,
+            revocation_nonce="expiry-test-revoke", now=NOW + timedelta(seconds=1),
+        )
+    baseline = service.store.path.read_bytes()
+    reason = "MANDATE_REVOKED" if revoked else "MANDATE_EXPIRED_OR_INACTIVE"
+    for minutes in (61, 62, 65):
+        later = NOW + timedelta(minutes=minutes)
+        with pytest.raises(TradingAuthorityError, match=reason):
+            _authorize(service, mandate.mandate_id, candidate, now=later)
+        blockers = service.validate_candidate_authorization(
+            authorization.authorization_id, candidate,
+            account_fingerprint="a" * 64, account_is_demo=True,
+            current_kill_switch_engaged=False, evaluated_risk_per_trade="0.5",
+            concurrent_positions=0, trades_today=0, loss_today="0", now=later,
+        )
+        assert (
+            "MANDATE_REVOKED_OR_VERSION_CHANGED" if revoked else "MANDATE_AUTHORIZATION_EXPIRED"
+        ) in blockers
+    assert service.store.path.read_bytes() == baseline
+
+
 def _authority(tmp_path):
     service = TradingAuthorityService(TradingAuthorityStore(tmp_path / "authority.jsonl"))
     service.set_mode(

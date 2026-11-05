@@ -17,6 +17,9 @@ from src.services.trading.decision.autonomous_orchestrator import (
     AutonomousDecisionJournalError,
     AutonomousDecisionOrchestrator,
     EDITABLE_TRADE_DRAFT_PROPOSAL_SOURCE,
+    _canonical_json,
+    _journal_row,
+    _sha256,
 )
 from src.services.trading.decision.models import DecisionBlocker, TradeReadinessDecision
 from src.services.trading.execution.mt5_live_adapter_pre_submit.lifecycle_supervisor import (
@@ -261,6 +264,102 @@ def test_journal_is_restart_safe_and_contains_only_redacted_references(tmp_path)
     assert len(records) == 1
     assert records[0]["metadata_redacted"] is True
     assert BROKER_HASH not in json.dumps(records[0], sort_keys=True)
+
+
+def _write_candidate_row(path, row, *, rehash=True):
+    if rehash:
+        row.pop("record_hash", None)
+        row["record_hash"] = _sha256(_canonical_json(row))
+    path.write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+    return AutonomousDecisionJournal(path)
+
+
+@pytest.mark.parametrize(
+    "missing",
+    (
+        (),
+        ("trading_scope",),
+        ("strategy_id", "strategy_version", "normalized_strategy_hash",
+         "reasoning_evidence_summary", "trading_scope"),
+    ),
+    ids=("current", "pre-scope", "original-legacy"),
+)
+def test_protected_candidate_schema_versions_reload_without_rewriting(tmp_path, missing):
+    candidate = service(tmp_path).build_candidate(
+        replace(
+            make_inputs(), strategy_id="historical-strategy", strategy_version="v2",
+            normalized_strategy_hash="a" * 64, reasoning_evidence_summary="{}",
+            trading_scope="historical-scope",
+        ),
+        now=NOW,
+    )
+    row = _journal_row(candidate)
+    for name in missing:
+        row["protected_candidate"].pop(name)
+    path = tmp_path / "historical.jsonl"
+    journal = _write_candidate_row(path, row)
+    before = path.read_bytes()
+
+    loaded = journal.load_candidate(candidate.candidate_reference)
+
+    assert loaded is not None
+    assert loaded.candidate_reference == candidate.candidate_reference
+    assert loaded.provenance_hash == candidate.provenance_hash
+    assert loaded.decision_idempotency_key == candidate.decision_idempotency_key
+    assert loaded.account_context_reference == candidate.account_context_reference
+    for name in ("strategy_id", "strategy_version", "normalized_strategy_hash",
+                 "reasoning_evidence_summary", "trading_scope"):
+        assert getattr(loaded, name) == ("" if name in missing else getattr(candidate, name))
+    assert loaded.execution_authority is loaded.executable is False
+    assert journal.records()[0]["record_hash"] == row["record_hash"]
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "missing", (("intent",), ("strategy_id",), ("strategy_version", "trading_scope"))
+)
+def test_unrecognized_missing_candidate_fields_remain_corrupt(tmp_path, missing):
+    candidate = service(tmp_path).build_candidate(make_inputs(), now=NOW)
+    row = _journal_row(candidate)
+    for name in missing:
+        row["protected_candidate"].pop(name)
+    journal = _write_candidate_row(tmp_path / "invalid.jsonl", row)
+
+    with pytest.raises(AutonomousDecisionJournalError, match="DECISION_JOURNAL_CORRUPT"):
+        journal.load_candidate(candidate.candidate_reference)
+
+
+@pytest.mark.parametrize("mutation", ("extra", "tuple", "tampered"))
+def test_invalid_or_tampered_legacy_candidate_fails_closed(tmp_path, mutation):
+    candidate = service(tmp_path).build_candidate(make_inputs(), now=NOW)
+    row = _journal_row(candidate)
+    row["protected_candidate"].pop("trading_scope")
+    if mutation == "extra":
+        row["protected_candidate"]["unexpected_field"] = "not-allowed"
+    elif mutation == "tuple":
+        row["protected_candidate"]["timeframe_profile"] = "M1"
+    journal = _write_candidate_row(
+        tmp_path / "invalid.jsonl", row, rehash=mutation != "tampered"
+    )
+    before = journal.path.read_bytes()
+
+    with pytest.raises(AutonomousDecisionJournalError, match="DECISION_JOURNAL_CORRUPT"):
+        journal.load_candidate(candidate.candidate_reference)
+    assert journal.path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "field", ("candidate_reference", "provenance_hash", "decision_idempotency_key")
+)
+def test_legacy_candidate_correlation_conflicts_remain_rejected(tmp_path, field):
+    candidate = service(tmp_path).build_candidate(make_inputs(), now=NOW)
+    row = _journal_row(candidate)
+    row["protected_candidate"].pop("trading_scope")
+    row["protected_candidate"][field] = "f" * 64
+    journal = _write_candidate_row(tmp_path / "conflict.jsonl", row)
+
+    with pytest.raises(AutonomousDecisionJournalError, match="DECISION_JOURNAL_CONFLICT"):
+        journal.load_candidate(candidate.candidate_reference)
 
 
 def test_cli_runs_once_and_prints_only_safe_summary(tmp_path, capsys):
