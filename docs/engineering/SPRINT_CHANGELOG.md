@@ -2823,4 +2823,49 @@ Verification: `FULL_REGRESSION_PASS`
 - Final preservation: 114 original files checked; only the app's normal lifecycle append changed, with all 3,683 original rows retained as an exact byte prefix. A standalone read-model import diagnostic hit an import-order cycle; production lifecycle-first initialization/read passed. No unrelated import refactor.
 - Verdict: SPRINT_10_RELIABILITY_PASS. Not verified: long-term unattended runtime, a real process transition in this sprint, historical network cause, or management/recovery mutation. Historical chat responses remain unchanged.
 
+
+---
+
+### Sprint 11A - Genuine MT5 Historical Data Foundation
+
+Date: 2026-11-05
+Verification: `FOCUSED_AND_LIVE_PASS`
+
+- Baseline b9e7d83. Operator narrowed the sprint to 11A only and declined a new simulator dependency. No simulation, strategy research results, optimization, UI or live execution change.
+- Added src/services/trading/research/historical_dataset.py and host tools/mt5_bridge/export_research_history.py. Reused existing market models/OHLC checks/timeframes and host MT5Client/_call_mt5; retrospective BacktestEvaluationAgent contract unchanged.
+- Explicit UTC, completed intervals, verified canonical/broker mapping, connected DEMO identity before/after, bounded native rates/tick reads. No symbol selection, authority or broker write operation.
+- Deterministic JSONL/checksums/content IDs and safe manifests retain raw field precision, coverage, Git/exporter provenance, current-only contract metadata and quality. Exact inter-chunk overlap is reported/deduplicated; invalid or conflicting data rejected. Existing artifacts never silently overwritten.
+- Git/Docker exclude data/research/ before acquisition. Quality/loader enforce schema, monotonicity, prices, OHLC, volume/spread, warmup and declared session coverage; primary reads reject non-VERIFIED datasets. No interpolation or fabricated prices/ticks.
+- Real hour: 2026-11-04 15:00-16:00Z, 60/60 M1 bars VERIFIED, same ID on repeat. Real week: 6,829 bars PARTIAL, 430 absent declared weekday slots and Sunday/calendar mismatch. Actual closure/session cause remains unverified. Real one-minute ticks: 338 rows PARTIAL; completeness not certified.
+- New focused command `.\venv\Scripts\python.exe -m pytest scripts/test_historical_research_dataset.py -q`: 42 passed. Market/bridge/retrospective-evaluator neighbors: 40 passed. Documentation integrity: 13 passed. Affected compileall, diff check and final Ponytail safety review passed.
+- No full regression rerun: isolated new boundary; existing shared production/indicator/execution source unchanged. No application restart/rebuild needed, no dependency installed.
+- Current read-only DEMO positions/orders, lifecycle discrepancies and RESULT_UNKNOWN zero; no autonomous workers. 114 private/protected files unchanged. Broker mutation, Candidate/authority writes and LLM calls zero. No commit/push.
+- 11A data foundation verified; full delivery verdict SPRINT_11_VERIFICATION_INCOMPLETE reflects explicitly deferred simulator/research phases. No P/L, monthly-return, drawdown or profitability claim. Next: authoritative historical session/calendar evidence before broad primary datasets; simulator requires a separate approval.
+
+---
+
+### Sprint 11A.1 - Historical Session and Data Coverage Verification
+
+Date: 2026-11-05
+Verification: `FOCUSED_AND_LIVE_PASS`
+
+- Preserved b9e7d83 and prior local 11A changes. Strictly reloaded all three original exports; raw data/manifests never changed. No simulator, dependency installation, bridge endpoint, shared live behavior change or trading operation.
+- Added read-only mt5-session-coverage/v2 reassessment using explicit aware UTC evidence intervals/source/historical validity. Internal consistency is separate from coverage. Trading schedules never substitute for quoting evidence; missing slots stay unresolved unless independent historical evidence supports closure/no quotes. No inferred holidays/DST schedule or interpolation.
+- Exporter v2 retains distinct same-millisecond ticks; identical within-chunk duplicates and conflicting ordered overlap groups fail closed. Manifest v1 reload remains byte/quality compatible. Existing bar corruption, Bid/Ask, timestamp, checksum and primary-loader gates remain intact.
+- Official dated broker DST trading notice is compatible with daily/Friday/Sunday boundaries, but does not certify this server's historical quote sessions. All five original weekday gaps (4x62+182=430 slots) remain SESSION_HISTORY_UNAVAILABLE. Week has 59 genuine Sunday bars starting 23:01Z; current schedule is not historical proof. No native quote-session snapshot acquired or MQL5 script added.
+- Real DEMO tick repeats returned 338/338 identical rows; overlapping 30 seconds matched 147. No exact/same-ms duplicates in original sample. Completeness remains PARTIAL. All three datasets internally VALID; hour retains verified slots, week/ticks remain PARTIAL. Local ignored JSON evidence includes original checksums, intervals, neighbors, sources and confidence.
+- Focused+neighbor command: `.\venv\Scripts\python.exe -m pytest scripts/test_historical_research_dataset.py scripts/test_historical_session_coverage.py scripts/test_live_ohlcv_feature_engine.py scripts/test_market_data_provider_mt5_bridge_real_boundary.py scripts/test_backtest_evaluation.py -q`: 98 passed (58 research + 40 neighbors).
+- Documentation `.\venv\Scripts\python.exe -m pytest scripts/test_documentation_integrity.py -q`: 13 passed. Affected compileall, git diff --check and final Ponytail safety review passed. Full regression not rerun; offline research-only boundary. App restart/rebuild not applicable.
+- Existing storage/runbook now compares backtesting.py, Backtrader, vectorbt and repository reuse, costs, lot mapping, MTF, intrabar ambiguity, maintenance/dependencies and licenses. Recommend separately approved pinned backtesting.py for OHLC-only baseline, not full Bid/Ask tick fidelity; no engine installed or implemented.
+- All original private/protected/research files preserved. Supervisor/provider/Candidate/authority/controlled-submit/order_send/broker mutation zero. No commit/push. Verdict SPRINT_11A_PARTIAL_EVIDENCE; historical quote completeness and research/performance remain unverified. Stop before Sprint 11B.
+
+### Recovery 01 - Isolated historical foundation checkpoint
+
+Date: 2026-11-11
+Verification: `FOCUSED_PASS`
+
+- Detached candidate based on b9e7d83 contains only 11A/11A.1 source/tests, ignore rules and scoped documentation; no shared live code changes or later milestone dependencies.
+- Offline research/session and market/bridge/evaluator neighbors: 98 passed. Documentation integrity: 13 passed. These are new candidate checks, not a rerun of historical live acceptance.
+- No broker/network acquisition, native Tester, Supervisor, authority change, Docker/WSL operation, commit or push. Main worktree and index remain untouched; historical session and tick completeness limitations remain.
+
 ---

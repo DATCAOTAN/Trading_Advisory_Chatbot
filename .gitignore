@@ -86,6 +86,9 @@ data/ingestion_state.json
 data/trading/execution_journal/*.jsonl
 data/trading/protected_requests/
 
+# Local historical research exports and manifests are not source artifacts.
+data/research/
+
 # =============================================================================
 # JUPYTER (nếu dùng notebook để thử nghiệm)
 # =============================================================================
