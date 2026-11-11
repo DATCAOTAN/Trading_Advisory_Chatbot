@@ -1,0 +1,2 @@
+# Host-side development tool only; not a Docker/Trading Core dependency.
+truststore==0.10.5; sys_platform == "win32"
