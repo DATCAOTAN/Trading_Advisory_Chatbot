@@ -17,7 +17,7 @@ for the current production owners.
 | `data/qdrant_db/`, `data/knowledge_catalog/`, MongoDB/Redis volumes | Databases and durable/local state; no blanket cleanup. |
 | `data/trading/execution_journal/`, `data/trading/protected_requests/` | Protected authority, idempotency, execution and recovery evidence; never delete to unblock trading. |
 | `data/cache/embedding_cache.sqlite` | Reusable embedding cache, currently Git-tracked; preserve user changes and avoid paid re-embedding. |
-| `data/research/mt5/` | Local historical research datasets/manifests; excluded from Git and Docker. Preserve provenance and checksums. |
+| `data/research/mt5/` | Local historical market exports and manifests; excluded from Git and Docker builds. Research artifacts are never protected trading authority or broker receipts. |
 | `.env`, local API-key files, `.agents/`, virtual environments | Local configuration, secrets, agent instructions and installed dependencies; preserve. |
 | `Trading_Advisory_Chatbot.zip`, `logs/`, `tmp_debug_mt5_dry/` | Backup/diagnostics, potentially private; retain until a separate retention review. |
 | `__pycache__/`, `*.pyc`, `.pytest_cache/` | Regenerable caches; safe to remove when no test process is using them. |
@@ -72,7 +72,6 @@ For local experiments, prefer archiving or moving generated evaluation exports a
 Do not delete Qdrant collections as part of evaluation cleanup.
 
 Do not delete `.env` or secret-bearing files through documentation workflows.
-
 
 ## Historical MT5 Research Data (Sprint 11A)
 
@@ -237,5 +236,56 @@ Pin engine/dependencies and deterministic inputs; repeated output alone is not m
 fidelity. These datasets support pipeline smoke checks, not monthly returns,
 holdout statistics, optimization or live-strategy promotion.
 
+### Sprint 11B native MT5 tester feasibility
+
+The native tester is the preferred engine direction, not yet accepted. Research
+prototype: `tools/mt5_bridge/research/StrategyParity.mq5`; Python vectors:
+`src/services/trading/research/tester_parity.py`. No live execution service imports
+or launches the EA. Never attach it to a normal chart. OnInit refuses non-tester
+and optimization contexts; virtual orders default off and have tester checks at
+the call boundary. Production permissions, Mandates and journals are not emulated.
+
+Ignored `data/research/mt5_tester/s11b` contains a separate portable copy of installed
+vendor binaries, not an installed dependency or a second operational terminal.
+No credentials/operational profile was copied. Local-only Math calculations
+(Model=3), Experts disabled, live trading disabled and DLL disabled were verified.
+The connected DEMO terminal was not restarted. Both math sessions exited.
+Keep generated binaries/logs/HTML/private evidence out of Git and Docker.
+
+Final compile: 0 errors/0 warnings. Math agent executed 58 independent MQL vectors:
+12 synthetic correctness fixtures and 46 windows from the real verified hour.
+RSI/ATR/warmup/completed timestamps/LEVEL/EDGE/volume checks match; full parity
+57/58. Double versus Python Decimal arithmetic at a half tick changes one SL,
+its RR target and risk. Comparison deliberately rejects this difference; it is
+not hidden by indicator tolerance. No historical trading pilot was run.
+Bundled vendor RSI uses recursive averaging/flat=50; Python uses a simple window
+and flat=100. Vendor ATR is an SMA-equivalent recurrence; do not assume bit identity.
+
+`feasibility_evidence.json` records build 6230, source/EX5/fixture/result/report
+checksums, requested versus actual intervals, math parameters and mismatch.
+The wrapper's 'some error after pass finished' remains unexplained even though
+the agent executed vectors and wrote Math reports. No broker history quality or
+execution realism is inferred from that report. XAUUSDm history inside the isolated
+tester, real-tick versus generated-tick quality, fees and contract settings remain
+unverified. Existing active-terminal exports do not establish tester data coverage.
+
+Native [startup configuration](https://www.metatrader5.com/en/terminal/help/start_advanced/start)
+supports local-only testing, reports, deposit/leverage, modeling mode and date range.
+[Math mode](https://www.mql5.com/en/book/automation/tester/tester_math_calc)
+does not load market ticks/history or a trading environment. Documented real-tick
+Model=4 can still [generate missing ticks](https://www.metatrader5.com/en/terminal/help/algotrading/tick_generation);
+its label alone is not a completeness certificate. Commission/spread/margin realism
+must be verified from the actual broker tester run, not assumed from UI options.
+
+| Engine direction | Benefit | Gate / cost |
+| --- | --- | --- |
+| Native MT5 | Native Bid/Ask, stops, contract/margin and report machinery; MTF possible. | Proprietary vendor environment, historical data/cost proof and duplicate-language maintenance; no trading pilot verified. |
+| backtesting.py | Small OHLC baseline, direct Python indicator reuse. | AGPL review, declared spread/commission/fill assumptions; not native broker tick fidelity. |
+| Backtrader | Python event/feed model, MTF and configurable commission/slippage. | GPL review, older dependency/compatibility burden, explicit quote/contract matching needed. |
+| Narrow hybrid (recommended) | MT5 is the only fill simulator; Python remains reference/quality/parity auditor. | First resolve numeric parity, freeze source/config/data provenance and verify a single genuine tester pilot; do not implement a second fill engine. |
+
+Verdict SPRINT_11B_PARITY_INCOMPLETE. No engine adoption, statistical performance,
+profitability, historical trade execution or production authority is established.
+Next: research-only numeric parity, then genuine XAUUSDm tester-data verification.
 
 Quarantine files preserve original hashes and safe excerpts. They can be reviewed separately from the source JSONL.

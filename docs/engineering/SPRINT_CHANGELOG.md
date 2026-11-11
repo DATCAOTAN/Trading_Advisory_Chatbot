@@ -2823,7 +2823,6 @@ Verification: `FULL_REGRESSION_PASS`
 - Final preservation: 114 original files checked; only the app's normal lifecycle append changed, with all 3,683 original rows retained as an exact byte prefix. A standalone read-model import diagnostic hit an import-order cycle; production lifecycle-first initialization/read passed. No unrelated import refactor.
 - Verdict: SPRINT_10_RELIABILITY_PASS. Not verified: long-term unattended runtime, a real process transition in this sprint, historical network cause, or management/recovery mutation. Historical chat responses remain unchanged.
 
-
 ---
 
 ### Sprint 11A - Genuine MT5 Historical Data Foundation
@@ -2859,6 +2858,8 @@ Verification: `FOCUSED_AND_LIVE_PASS`
 - Existing storage/runbook now compares backtesting.py, Backtrader, vectorbt and repository reuse, costs, lot mapping, MTF, intrabar ambiguity, maintenance/dependencies and licenses. Recommend separately approved pinned backtesting.py for OHLC-only baseline, not full Bid/Ask tick fidelity; no engine installed or implemented.
 - All original private/protected/research files preserved. Supervisor/provider/Candidate/authority/controlled-submit/order_send/broker mutation zero. No commit/push. Verdict SPRINT_11A_PARTIAL_EVIDENCE; historical quote completeness and research/performance remain unverified. Stop before Sprint 11B.
 
+---
+
 ### Recovery 01 - Isolated historical foundation checkpoint
 
 Date: 2026-11-11
@@ -2869,3 +2870,623 @@ Verification: `FOCUSED_PASS`
 - No broker/network acquisition, native Tester, Supervisor, authority change, Docker/WSL operation, commit or push. Main worktree and index remain untouched; historical session and tick completeness limitations remain.
 
 ---
+
+### Sprint 11B - Native MT5 Tester Feasibility and Python/MQL Parity
+
+Date: 2026-11-05
+Verification: `FOCUSED_PASS`
+
+- Retained b9e7d83 and prior uncommitted research work. Added research-only StrategyParity.mq5, tester_parity.py reference/audit helper and test_mt5_tester_parity.py. Live indicators, Draft, authority, execution, bridge and journals unchanged.
+- Verified installed terminal/MetaEditor/MetaTester build 6230. A separate ignored portable research copy used installed vendor binaries/license only, no credentials or operational profiles; live trading/DLL/Experts disabled, local agents only. Connected DEMO terminal was not restarted. Isolated terminal/agents exited after both math sessions.
+- Tester-only/non-optimization OnInit and call-boundary guards; SimulateOrders=false. No chart attachment, Supervisor, Candidate, Mandate, provider, virtual trade, controlled-submit or broker mutation.
+- Final MetaEditor compile 0 errors/0 warnings, 512 ms. Two Model=3 Math-calculation runs produced independent MQL output and OnTester=1. Terminal summary 'some error after pass finished' remains unresolved; agent math execution is not historical trading success.
+- Compared 12 synthetic fixtures + 46 real-bar windows. RSI/ATR/timestamp/LEVEL/EDGE/warmup/active-entry/volume checks match; full parity is 57/58. First failure: double price arithmetic rounds an exact half tick differently from Python Decimal(str(ATR)), changing one SL/TP/risk. No tolerance widening or live formula change.
+- Native bundled RSI uses recursive smoothing and flat=50, unlike Python simple-window/flat=100. Bundled ATR uses SMA-equivalent recurrence. No silent iRSI/iATR replacement. A focused negative control retains the observed half-tick mismatch.
+- Historical trading pilot zero. XAUUSDm tester history/real-tick quality, costs/margin/contracts, MTF trading, fills/SL-TP and profitability NOT VERIFIED. Existing broker DST notice/exports do not certify exact historical quoting sessions; prior PARTIAL classifications retained.
+- Focused/neighbor command `.\venv\Scripts\python.exe -m pytest scripts/test_mt5_tester_parity.py scripts/test_historical_research_dataset.py scripts/test_historical_session_coverage.py scripts/test_level_edge_trigger_semantics.py scripts/test_field_aware_editable_trade_draft.py scripts/test_live_ohlcv_feature_engine.py -q`: 135 passed, two existing protobuf warnings. Initial isolated collection hit a pre-existing package import cycle; research uses decision-first bootstrap without production refactoring.
+- Documentation integrity 13 passed; affected compileall/git diff --check passed. No full regression, dependency installation, Docker restart/rebuild, commit or push. Original protected/private/research data retained. Ponytail review blocks prototype promotion pending numeric parity and real tester evidence.
+- Ignored feasibility_evidence.json retains source/binary/config/fixture/report hashes and exact mismatch. Recommend native MT5 as sole fill-engine direction with Python reference/audit, conditional on parity/data gates. Verdict SPRINT_11B_PARITY_INCOMPLETE. Next: research-only quantization parity, then genuine tester-data provisioning and one pilot; no second simulator/optimization started.
+
+---
+
+### M0 - Unified Adaptive Trading Architecture Compatibility Audit
+
+Date: 2026-11-06
+Verification: `STATIC_ONLY`
+
+- At local `b9e7d83`, inspected source, test coverage, locked architecture and preserved Sprint 11A/11A.1/11B work. [M0 report](../architecture/M0_UNIFIED_ADAPTIVE_TRADING_AUDIT.md) records scoped verification statuses, gaps, owner/test/dependency mapping for M1-M11 and proposed minimal amendments. No changes to the locked text.
+- Goal-Driven is research-first, not a new authorization mode. Existing exact strategy/mandate binding must not authorize a new revision. First proposed M1: canonical goal intake and read-only research brief/clarification, with no trade or authority writes.
+- Quantitative ranking remains gated on historical data/cost evidence, unresolved half-tick parity and a real historical tester pilot. Retained prior test evidence is not a new test run. No runtime/tester startup, broker or authority change, new dependency, stage, commit or push. Stopped before M1.
+
+---
+
+### M1 - Goal-Only Semantic Routing and Safe Research Brief
+
+Date: 2026-11-06
+Verification: `FULL_REGRESSION_PASS`
+
+- Root cause: a structured autonomous request with DEMO and symbol, but no projected strategy, could reach `STANDING_MANDATE_CARD / REVIEW_STANDING_MANDATE`. The canonical projector now blocks missing strategy. No change to Standing Mandate, Candidate or execution authority services.
+- Optional typed `ResearchGoal` on the existing semantic contract; `STRATEGY_RESEARCH` preserves explicit objective, horizon, percentage limits, account preference and requested sources with provenance. Explicit reference-only follow-ups inherit eligible facts without reviving stale constraints or trading permission.
+- QueryPlan brief reports `RESEARCH_REQUIRED / STRATEGY_NOT_ESTABLISHED`, requested workflow separately from effective `advisory_only`, and `execution_allowed=false`. Planned capabilities are listed, not run. Static response ends before data acquisition or trading projection; chat does not display a stale trade card or chart for a research brief.
+- New tests cover Vietnamese/English/mixed wording with scripted semantic fixtures, rejected numeric/authority fields, unresolved information, explicit follow-up overrides and fail-closed projector/UI boundaries. Existing direct, partial and complete strategy, Advisory, position and authority families remain covered.
+- Focused: `.\venv\Scripts\python.exe -m pytest scripts/test_goal_only_research_brief.py scripts/test_structured_semantic_interpreter.py scripts/test_structured_semantic_query_plan.py scripts/test_trading_semantic_cutover.py scripts/test_strategy_completion_workflow.py scripts/test_60_case_product_acceptance.py scripts/test_standing_trading_mandate_authority.py -q`: 222 passed, two existing warnings.
+- Full: `.\venv\Scripts\python.exe -m pytest -q`: 3,954 passed, 156 subtests, three existing warnings, 137.75 s. Both final commands received only `TRADING_*`/`MT5_*` boolean defaults from `.env.example` in their test process environments. Earlier focused failures exposed an inheritance key mismatch and operational flags in the test environment; corrected without editing `.env`.
+- No broker mutations, live provider, live/DEMO app restart, new dependency, stage, commit or push. No real UI or provider acceptance claimed. No strategy discovery, experiment, ranking, or adaptive selector implemented. Next gated work is M2 research proposal and revision provenance.
+
+---
+
+### R1 - Research Proposal and Revision Contract
+
+Date: 2026-11-06
+Verification: `FOCUSED_PASS`
+
+- R1 covers proposal/revision and research review in the M0 audit planning row M2; original roadmap M2 remains Autonomous Reliability.
+- The canonical M1 brief feeds a strictly typed, non-executable proposal without another semantic call. Hypothesis and existing canonical strategy are optional; missing rules are not fabricated.
+- Scoped immutable revisions retain parent, author, UTC timestamp and content fingerprint. Replay checks scope, lineage and fingerprints; idempotent repeats and stale-fork rejection preserve history. Acceptance is bound to one revision and never carries forward or grants trading authority.
+- Evidence references capture stance, quality, optional UTC window and version. Validation requires a trusted owner and hypothesis binding; no private-document body or verified Tester result is admitted. Prior Tester parity is still 57/58.
+- Focused and neighbors: `.\venv\Scripts\python.exe -m pytest scripts/test_research_proposal.py scripts/test_goal_only_research_brief.py scripts/test_historical_research_dataset.py scripts/test_historical_session_coverage.py scripts/test_mt5_tester_parity.py scripts/test_reasoning_evidence_v2.py scripts/test_strategy_completion_workflow.py scripts/test_trading_semantic_cutover.py scripts/test_standing_trading_mandate_authority.py scripts/test_autonomous_supervisor_strategy_binding.py scripts/test_60_case_product_acceptance.py -q --tb=short`: 281 passed, two existing protobuf warnings. Test process used only TRADING/MT5 boolean defaults from .env.example. Documentation integrity: `.\venv\Scripts\python.exe -m pytest scripts/test_documentation_integrity.py -q`: 13 passed.
+- No new full regression because no shared production contract changed. No live provider, app restart, authority writes, broker mutation, stage, commit or push. No durable store or runtime workflow is wired. Next dependency is trusted evidence-owner integration; durable writes, when approved, need authenticated provenance and atomic head comparison.
+
+### R2 - Trusted Research Evidence Verification
+
+Date: 2026-11-06
+Verification: `FULL_REGRESSION_PASS`
+
+- Historical bar verification reuses the Sprint 11 loader (v1/v2) and requires a trusted, scoped approval and a retained manifest pin. Reports distinguish approved provenance, artifact integrity, actual declared-window coverage, claim support and strategy performance; the last two are not assessed.
+- Exact proposal/revision/fingerprint and evidence reference are checked with conversation/account scope, symbol/timeframe, UTC window and timestamp. Missing, tampered, mismatched and partial inputs cannot be used as validated R1 evidence. Explicit status updates use the existing immutable revision flow; replay rechecks the source. No review decision or execution authority is generated.
+- Read-only verification of retained local artifacts: one historical bar window verified and reloaded in R1 at READY_FOR_REVIEW; other bars and ticks limited. Current-market/RAG/Tester references stay pending in R2. No Tester parity change (57/58), historical fills, or profitability claim.
+- Focused/neighbor: `.\venv\Scripts\python.exe -m pytest scripts/test_research_evidence_verification.py scripts/test_research_proposal.py scripts/test_goal_only_research_brief.py scripts/test_historical_research_dataset.py scripts/test_historical_session_coverage.py scripts/test_mt5_tester_parity.py scripts/test_reasoning_evidence_v2.py scripts/test_strategy_completion_workflow.py scripts/test_trading_semantic_cutover.py scripts/test_standing_trading_mandate_authority.py scripts/test_autonomous_supervisor_strategy_binding.py scripts/test_60_case_product_acceptance.py scripts/test_context_acquisition_executor.py -q --tb=short`: 299 passed. The first full run exposed an R1 schema path caught by the global Pydantic guard; the guard now allows exactly that research record schema and still checks semantic ingress isolation. Targeted guard rerun passed.
+- Final full: `.\venv\Scripts\python.exe -m pytest -q --tb=short`: 3,976 passed, 156 subtests, three existing warnings. Test processes used TRADING/MT5 boolean defaults from .env.example. Documentation: `.\venv\Scripts\python.exe -m pytest scripts/test_documentation_integrity.py -q`: 13 passed.
+- Compile and diff checks passed. No live LLM, runtime authority writes, broker operations, stage, commit or push. No UI, storage or source provisioning added. R2 does not rename or replace original M2 Autonomous Reliability.
+
+### M2 - Autonomous Reliability and Recovery
+
+Date: 2026-11-06
+Verification: `FULL_REGRESSION_PASS`
+
+| Reliability family | Baseline classification | Offline evidence |
+| --- | --- | --- |
+| Process ownership and status | GAP_CONFIRMED | Same-scope concurrent launch and stale owner status blocked, stop failure retained; existing exit, orphan and historical evidence tests retained. |
+| Market and timebase | GAP_CONFIRMED | Unclosed/future bar rejected, older/equivalent bar denied after restart, and changed claimed bar denied before assembly. Existing missing, stale, unavailable and symbol-mismatch gates retained. |
+| Mode, account and mandate | ALREADY_VERIFIED | Existing binding, expiry/revocation, final reread, kill-switch, risk/capability and limit tests. No authority change. |
+| Submission and restart | GAP_CONFIRMED | Injected reserve and STARTED-write failures never reach broker. Lost response/persistence or management-reconciliation failure after broker call is unknown; repeated identity cannot submit again; watch stops. |
+| Lifecycle and reconciliation | ALREADY_VERIFIED for journal/provenance and ambiguous-state gates; PARTIALLY_VERIFIED for real partial fills | Existing restart open/pending/terminal observations, no/multiple matches, foreign account, stale/history failures and read-model redaction. Reconciliation replay is not an order retry. |
+| Real clocks, disconnect, closed session and unattended DEMO | BLOCKED_BY_EXTERNAL_ENVIRONMENT | NOT_RUN in offline M2; separate read-only then operator-approved soak gates in local runbook. |
+
+- Focused/neighbor: `.\venv\Scripts\python.exe -m pytest scripts/test_autonomous_runtime_completion.py scripts/test_autonomous_candidate_monitor.py scripts/test_autonomous_trading_coordinator.py scripts/test_autonomous_post_entry_management.py scripts/test_autonomous_supervisor_strategy_binding.py scripts/test_live_ohlcv_feature_engine.py scripts/test_mt5_controlled_execution_integration.py scripts/test_mt5_controlled_position_management.py scripts/test_mt5_reconciliation_failure_recovery.py scripts/test_mt5_position_lifecycle_supervisor.py scripts/test_position_read_model.py scripts/test_dashboard_authoritative_runtime_state.py scripts/test_standing_trading_mandate_authority.py scripts/test_60_case_product_acceptance.py scripts/test_goal_only_research_brief.py scripts/test_research_proposal.py scripts/test_research_evidence_verification.py scripts/test_operator_triggered_autonomous_candidate_generation.py scripts/test_autonomous_mandate_controlled_execution.py scripts/test_autonomous_execution_policy_gate.py scripts/test_mt5_execution_mvp_end_to_end.py scripts/test_level_edge_trigger_semantics.py -q --tb=short`: 545 passed, 2 subtests. Targeted watch test: `.\venv\Scripts\python.exe -m pytest scripts/test_autonomous_runtime_completion.py::test_watch_stops_after_unknown_without_polling_or_rearming -q --tb=short`: 1 passed.
+- Full: `.\venv\Scripts\python.exe -m pytest -q --tb=short`: 3,986 passed, 158 subtests, three existing warnings. Tests used process-local TRADING/MT5 boolean defaults from .env.example. Documentation integrity 13 passed; compile and diff checks passed.
+- Existing single production order_send call site, no MetaTrader5 import under src, and no execution/management permission change. No live worker, runtime restart, MT5 write, provider call, stage, commit or push. Offline result is not a 24/7 readiness claim.
+
+### G0 - Semantic-to-Execution Correctness Foundation
+
+Date: 2026-11-07
+Verification: `FULL_REGRESSION_PASS` (offline)
+
+- Human-Confirmed now blocks conditional Candidate creation on false, unknown, stale or unbound completed-bar evidence; direct BUY/SELL and non-executable Draft preview remain available. Autonomous LEVEL, EDGE, re-arm and deduplication remain in the existing strategy/monitor path.
+- Typed SL/TP, risk and volume keep value, unit and provenance through Draft revisions and Candidate binding. Zero, invalid and unresolved inputs do not become defaults; only compatible, explicitly referenced canonical parameters inherit. Explicit risk is checked against the Candidate quote before persistence.
+- Requested technical snapshots no longer substitute default indicators, reuse the wrong timeframe or label an open candle as fresh. Generic summaries are explicitly labeled.
+- Focused: `.\venv\Scripts\python.exe -m pytest scripts/test_g0_semantic_execution_fidelity.py scripts/test_structured_semantic_interpreter.py scripts/test_trading_semantic_cutover.py scripts/test_structured_semantic_query_plan.py scripts/test_strategy_completion_workflow.py scripts/test_editable_trade_draft_candidate_lifecycle.py scripts/test_field_aware_editable_trade_draft.py scripts/test_reasoning_evidence_v2.py scripts/test_context_acquisition_executor.py scripts/test_current_market_indicator_routing.py scripts/test_operator_triggered_autonomous_candidate_generation.py scripts/test_level_edge_trigger_semantics.py scripts/test_thin_ui_authoritative_draft_presentation.py scripts/test_deterministic_autonomous_strategy_authority.py scripts/test_60_case_product_acceptance.py -q -p no:cacheprovider --tb=short`: 392 passed.
+- Full: `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --tb=short`: 4,009 passed, 158 subtests passed, three existing deprecation warnings. Tests used process-local TRADING/MT5 boolean defaults from .env.example and the hermetic pytest bootstrap.
+- Documentation: `.\venv\Scripts\python.exe -m pytest scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 13 passed.
+- Syntax and diff checks passed. Single production order_send call site; no MetaTrader5 import under src. No app restart, live provider, MT5 calls, broker writes, permissions changes, stage, commit or push. No G1 work, generated signals or Tester runs.
+
+### G1 - Open-Ended Computational Specification
+
+Date: 2026-11-07
+Verification: `FULL_REGRESSION_PASS` (offline)
+
+- Added a versioned optional semantic specification, not a DSL or execution model. It preserves novel algorithm descriptions, ordered and stateful requirements, typed parameters/units/ranges, data windows, output validity and strategy logic. Legacy payloads serialize unchanged when the extension is absent.
+- Existing resolved-state persistence retains the spec and provenance. Explicit reference-only inheritance and trusted typed completion preserve facts without silently accepting model suggestions. Parameter and data rows retain valid siblings when a child is missing.
+- All 18 origin/mode/adaptation combinations tested as independent semantics. Requested modes map to current labels; the effective path remains read-only. No strategy hash, mandate binding, permission or execution changes.
+- Data requirements and evidence assessments are distinct. G1 performs no acquisition; status is NOT_CHECKED. Projection stops before legacy strategy, Candidate and capability acquisition even with a supported rule in the same payload.
+- Focused: `.\venv\Scripts\python.exe -m pytest scripts/test_computational_specification.py scripts/test_goal_only_research_brief.py scripts/test_structured_semantic_interpreter.py scripts/test_trading_semantic_cutover.py scripts/test_structured_semantic_query_plan.py scripts/test_strategy_completion_workflow.py scripts/test_editable_trade_draft_candidate_lifecycle.py scripts/test_field_aware_editable_trade_draft.py scripts/test_reasoning_evidence_v2.py scripts/test_context_acquisition_executor.py scripts/test_current_market_indicator_routing.py scripts/test_operator_triggered_autonomous_candidate_generation.py scripts/test_level_edge_trigger_semantics.py scripts/test_thin_ui_authoritative_draft_presentation.py scripts/test_deterministic_autonomous_strategy_authority.py scripts/test_60_case_product_acceptance.py scripts/test_g0_semantic_execution_fidelity.py -q -p no:cacheprovider --tb=short`: 437 passed.
+- Full: `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --tb=short`: 4,039 passed, 158 subtests, three existing deprecation warnings. Tests used process-local TRADING/MT5 defaults and the hermetic pytest bootstrap.
+- Documentation: `.\venv\Scripts\python.exe -m pytest scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 13 passed.
+- Scripted G1 path makes one semantic call and no rewrite call; completion cap remains 1,200 by default. For the same probe, prompt length grew from 7,969 to 9,293 characters (not a measured provider token count).
+- Syntax and diff checks passed; one production order_send call site and no MetaTrader5 import under src. No runtime restart, provider use, Tester, generated execution, broker writes, stage, commit or push.
+- Next: separate G2 approval for isolation, provenance and independent correctness checks; separate G3 Windows Tester approval. Existing pending decisions were not changed.
+
+### G2 - Trusted-Host Pilot, Isolation Approval Required
+
+Date: 2026-11-07
+Verification: `FOCUSED_PASS` for the trusted-host contract only
+
+- Added an offline research boundary for `VOLUME_WEIGHTED_CLOSE_LOCATION_V1`; no registry, Trading Core, semantic or runtime integration changes. The trusted oracle checks warm-up/nulls, exact timestamps, numeric tolerance, repeatability and prefix stability on synthetic fixtures.
+- R2 rechecked the independently retained Sprint 11A.1 pin for the 60-bar XAUUSD M1 historical window (2026-11-04 15:00-16:00 UTC). Input extraction uses only required fields and binds exact bytes; no gap filling, source substitution or historical performance claim.
+- Codegen contract: one spec-only prompt (1,141 characters on the prepared job), 1,600-token planned cap, bounded source reply, no tool call or repair path wired. A captured fixture reply is `g2-generated-source/v1 / GENERATED_UNVERIFIED`; no real generation, source execution, persisted artifact, toolchain identity or promotion. Actual token/cost data are unknown.
+- Isolation observation: WSL2 and Docker Linux are running; the app container has writable secret/code/data mounts, a network and no configured CPU/RAM limits. Hyper-V inventory denied access. No approved worker or trusted isolation probe result.
+- Proposed next gate, not implemented: dedicated offline VM with no network interface or shared host folders/clipboard, pinned image/interpreter/dependencies, unprivileged identity, verified input mounted read-only and size-limited output. Verify process limits, CPU/RAM, wall-clock timeout and forced teardown with benign probes, then obtain separate explicit permission to run generated code.
+- Focused: `.\venv\Scripts\python.exe -m pytest scripts/test_computation_pilot.py scripts/test_research_evidence_verification.py scripts/test_historical_research_dataset.py scripts/test_historical_session_coverage.py scripts/test_research_proposal.py scripts/test_computational_specification.py scripts/test_g0_semantic_execution_fidelity.py -q -p no:cacheprovider --tb=short`: 148 passed, two existing warnings. Full regression not repeated for a new isolated module without a production caller.
+- Documentation: `.\venv\Scripts\python.exe -m pytest scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 13 passed.
+- `G2_PARTIAL / G2_ISOLATION_APPROVAL_REQUIRED`; `G2_READY_FOR_G3: NO`. No live provider/MT5 call, worker startup, runtime change, broker operation, stage, commit or push.
+
+### G2.1 - Benign Isolation Acceptance Harness
+
+Date: 2026-11-09
+Verification: `FOCUSED_PASS` for the harness on Windows, not guest isolation.
+
+- Original A-H recovered from the G2.1 provision/verify brief; each probe retains its original acceptance boundary.
+- Reused operator-owned Hyper-V Verify unchanged. Reported `VERIFIED_OFF`/`Off` is host configuration evidence.
+- Reported loopback-only/no default route, inactive SSH, absent common shares, Python 3.13.5 and cgroup v2 are guest observations.
+- Scope creation and `timeout` exit 124 are not evidence of resource enforcement.
+- Added an operator-only guest harness with a synthetic read-only fixture and dedicated, capability-free worker service.
+- Harness requires observed access denials, CPU throttling, cgroup OOM kill, process admission rejection and systemd wall-time termination; unknown evidence is not PASS.
+- No actual guest probes ran in this checkpoint. B requires operator inventory; F/G/H require host-side evidence. Media transfer and destructive-test approvals remain separate.
+- Focused: `.\venv\Scripts\python.exe -m pytest scripts/test_g2_1_guest_probes.py scripts/test_computation_pilot.py -q -p no:cacheprovider --tb=short`: 35 passed, two dependency deprecation warnings.
+- Documentation: `.\venv\Scripts\python.exe -m pytest scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 13 passed. Tracked and new-file diff whitespace checks passed.
+- Windows direct invocation refused execution with `INCONCLUSIVE`, exit 2. No Docker restart or full regression: no application source changed.
+- No VM startup, settings change, provider call, generated code, MT5/broker operation, stage, commit or push.
+- `G2_1_PARTIAL`; `READY_FOR_G2_2: NO`. Operator next: approve/verify offline transfer and collect the bounded guest evidence following the handoff.
+
+### G2.1 - Offline Probe Media and Operator Runbook
+
+Date: 2026-11-09
+Verification: `FOCUSED_PASS` for Windows preparation only.
+
+- Added a host-only ISO builder using installed IMAPI2 and Windows tar; no installation or Hyper-V permissions.
+- The allowlist is the independently hash-pinned harness and `SHA256SUMS`. Host read-back verifies both payloads before publishing the ISO.
+- Two real Windows PowerShell 5.1 builds produced matching payload hashes and no boot descriptor. ISO-level metadata varied; pin each issued image individually.
+- Incorrect source pin and existing output path both failed closed. No probe media attached or mounted to the VM.
+- Runbook keeps the VM receipt, DVD count/slot, firmware and original signed ISO unchanged after restoration. The temporary data ISO cannot satisfy the existing Verify contract.
+- Host Hyper-V read access is still denied to this session. `g2worker` is unverified; operator checks in Basic Session and stops if absent or ambiguous.
+- Guest transport, A-E/H observations, and actual limit enforcement were not run. F/G remain separately gated on operator approval and disposable safeguards.
+- Focused and documentation: `.\venv\Scripts\python.exe -m pytest scripts/test_g2_1_guest_probes.py scripts/test_computation_pilot.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 48 passed, two dependency deprecation warnings. Diff checks passed.
+- No trading, generated code, Docker restart, full regression, dependency installation, commit or push.
+- `G2_1_PARTIAL`; `READY_FOR_G2_2: NO`. Next: operator-only VM preflight, temporary media transfer and evidence collection.
+
+### G2.1 - Evidence-Driven Sandbox Acceptance Checkpoint
+
+Date: 2026-11-09
+Verification: `FOCUSED_PASS` for documentation and current host Stage3 Verify only.
+
+- Preserved operator-supplied A/C/D/E/F runtime PASS; no passed probe, forced-off, RestoreG or provisioning repeated.
+- Reviewed existing clone provision/F/reboot/RestoreG receipts and the incident-pinned Stage3 procedure; PowerShell parser: 0 errors.
+- Current Stage3 Verify passed: original and clone Off, restored clone disk attached, isolation and source incident gate intact.
+- Sealed and restored images match the original sealed pin; original disk matches its separate investigated post-boot pin. No repinning or disk replacement.
+- Original owner receipt and historical image-inventory JSON match the clone provision receipt's hashes; media/harness pins also match.
+- B remains INCONCLUSIVE: host inventory PASS does not supply independent Basic Session/no-other-sharing/guest-inventory attestation.
+- H remains INCONCLUSIVE: signed media/current-image byte pins do not prove installed-image lineage.
+- Approved UAC read-only audit captured Stage3 Verify PASS; its supplemental final two-VM display failed on array input to Get-VM -Id. No VM action occurred in that audit.
+- Launched the existing BootAfterG procedure in an approved administrator window; it rechecks safety gates and waits for BOOT_RESTORED_CLONE. No boot receipt or guest evidence yet.
+- Elevated VMConnect cannot expose guest console text to the automation helper. Requested one read-only guest block; require actual Debian/absent-marker/zero-failed-unit/root-rw output.
+- G remains INCONCLUSIVE pending guest output, separately approved normal shutdown and existing Stage3 Closeout; no full acceptance claim.
+- `.\venv\Scripts\python.exe -m pytest scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 13 passed.
+- Added the acceptance report; updated only affected G2.1 handoff state. Existing unrelated work preserved; no production source edits, networking, trading, commit or push.
+- No full regression, browser acceptance or Docker restart: only evidence/documentation and the gated Hyper-V workflow are in scope.
+- `G2_1_PARTIAL`; `READY_FOR_G2_2: NO`. Next: return actual G console output, approve healthy shutdown/Closeout, then independently resolve B/H before any separate G2.2 authorization.
+
+### G2.1 - BootAfterG Completed, Guest Closeout Boundary
+
+Date: 2026-11-09
+Verification: `FOCUSED_PASS` for host BootAfterG and documentation, not full G acceptance.
+
+- The prior disconnected administrator process exited without a BootAfterG receipt. No success was inferred and no completed stage was replayed.
+- An approved read-only resume audit at 15:38:16Z confirmed both VMs Off, expected attachments/isolation and successful existing Stage3 Verify/incident pins.
+- A harmless Read-Host stdin self-check passed. Reused retained explicit BootAfterG approval through the unchanged exact-phrase gate via connected stdin; no function override or new procedure script.
+- Incident-pinned Stage3 BootAfterG completed once at 15:41:15.7316323Z, exit code 0; wrote the exact-clone `stage3_boot_after_g.json` receipt.
+- Post-boot audit at 15:41:16Z: original Off; clone Running on `runtime\worker.restored.vhdx`. Sealed/original/old-runtime disks preserved.
+- Evidence: `g21_boot_after_g_resume_audit_20261109.txt`, `g21_boot_after_g_approved_20261109.txt`, and the protected clone evidence directory. Earlier logs retained.
+- No interactive BootAfterG approval prompt remains; no F, RestoreG, provisioning or passed A-E probe repeated.
+- G remains INCONCLUSIVE until actual Debian/absent-marker/zero-failed-unit/root-rw guest output, normal shutdown and Closeout. Requested only the necessary isolated-console operation.
+- Retained stage approval permits automating host Off checks and the existing Closeout gate after actual guest evidence; no marker attestation was fabricated.
+- A/C/D/E/F remain prior runtime PASS; B/H remain INCONCLUSIVE for independent attestation and installed-image lineage.
+- `.\venv\Scripts\python.exe -m pytest scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 13 passed; tracked documentation whitespace check passed.
+- Updated acceptance report and affected G2.1 handoff only; no production code, networking, integration/sharing, generated trading code, MT5 order, commit or push.
+- Not verified: guest G proof, normal shutdown/final Off state, Closeout, B/H completion. No full regression, browser acceptance or Docker restart required for this scope.
+- `G2_1_PARTIAL`; `READY_FOR_G2_2: NO`. Next: return actual guest output and perform healthy normal shutdown; then automate protected host Closeout and reassess the final matrix.
+
+### G2.1 - Normal Shutdown Verified, Final Evidence Gap
+
+Date: 2026-11-09
+Verification: `FOCUSED_PASS` for read-only host reconciliation and documentation only.
+
+- Continued from completed BootAfterG; no VM start/stop, provisioning, restore or passed guest probe repeated.
+- Exact-clone Worker-Admin event 18508 at 15:53:26.2980266Z explicitly records shutdown by the guest OS. Both original and clone confirmed Off at 15:57:42Z.
+- Final existing Stage3 Verify passed: identity, ownership, attached restored disk, isolation, authenticated installer and protected sealed/original incident pins remain valid.
+- Original owner receipt and historical image-evidence hashes match the provision receipt; sealed/restored images are not host-mounted.
+- Preserved `g21_closeout_host_audit_20261109.txt`; appended reconciliation after an overly specific English event-text filter rejected the valid shutdown event. No evidence overwritten or VM action taken.
+- Referenced Debian guest attachment is unavailable in this session/local evidence; existing screenshot capture failed its permitted retry. Requested only existing output, not another guest run or boot.
+- G remains INCONCLUSIVE for unavailable Debian identity, marker-absence, zero-failed-unit and root-rw output. Normal shutdown and final Off state are verified.
+- Existing Closeout remains authorized but was not executed: its MARKER_ABSENT_AFTER_G_VERIFIED gate cannot truthfully attest unseen evidence. No new approval or VM operation requested.
+- A/C/D/E/F retain prior runtime PASS. B remains INCONCLUSIVE for independent Basic Session/no-other-sharing/guest-inventory attestation.
+- H remains INCONCLUSIVE for installed-image lineage; media signatures and current VHDX hashes cannot replace installation-history proof.
+- `.\venv\Scripts\python.exe -m pytest scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 13 passed.
+- Updated final acceptance report and affected handoff; existing work/evidence preserved, no production source, network, generated code, trading, commit or push.
+- Not verified: actual G guest output and independent B/H proof. Not executed: evidence-attesting Closeout. No full regression, browser check or app restart required.
+- `G2_1_PARTIAL`; not eligible for full acceptance; `READY_FOR_G2_2: NO`. Next: make existing guest evidence available, finish authorized Closeout if healthy, and independently resolve B/H.
+
+### G2.1 - Final Operator-Attested Closeout, Product Handoff
+
+Date: 2026-11-09
+Verification: `FOCUSED_PASS` for host Closeout and documentation; not full acceptance.
+
+- Operator explicitly confirmed the post-BootAfterG guest checks; G recorded OPERATOR_ATTESTED. Independent machine-readable guest evidence was not captured; no guest output or formal G PASS invented.
+- Reused unchanged incident-pinned Stage3 Closeout and its exact MARKER_ABSENT_AFTER_G_VERIFIED stdin gate under explicit authorization; no gate override.
+- Closeout completed at 16:07:49.0980135Z, exit code 0; exact-clone stage3_closeout.json written once.
+- Log: g21_operator_attested_closeout_20261109.txt. Post-Closeout original and clone Off; protected pins/isolation checked by the existing procedure.
+- Preserved both VMs, all VHDXs, sealed baseline and prior evidence. No VM state mutation, F/G replay, resource reset, new guest check or screenshot request.
+- A/C/D/E/F retain prior runtime PASS; B/H INCONCLUSIVE. Independent exposure/inventory attestation and installed-image lineage remain mandatory full-acceptance blockers.
+- G2.1 closed PARTIAL; formal independent G proof remains a qualification. No further evidence gathering scheduled without a concrete safety-critical product dependency.
+- Documentation tests: `.\venv\Scripts\python.exe -m pytest scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 13 passed.
+- Final acceptance report and affected current handoff updated. No production source change, full regression, app restart, commit or push.
+- Next proposed slice: expose existing G1 computational specification and missing/conflicting fields in the read-only orchestrator response; reuse QueryPlan/resolver and computational-specification tests, with no new semantic call/service.
+- That slice can proceed without sandbox execution approval; it must retain provenance, NOT_CHECKED data and execution_allowed=False. It is proposed, not implemented.
+- Not implemented/authorized: G2.2 generated-code execution, sandbox isolation changes, live trading. READY_FOR_G2_2: NO.
+
+### Computational Specification Review
+
+Date: 2026-11-09
+Verification: `FOCUSED_PASS`.
+
+- Reused the current typed G1 QueryPlan and semantic provenance in the orchestrator's bounded text response. No new schema, service, prompt, provider call, or authority path.
+- Confirmed fields, unconfirmed values, gaps, conflicts and unsupported requirements are separate. Clarification questions follow existing gaps and conflicts; a complete spec remains non-executable with data `NOT_CHECKED`.
+- Added a Streamlit review badge and fixed the invalid-session fallback to reload the replacement history before rendering. Scripted Streamlit tests verify no old specification or trade card is attached to a new request.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_computational_specification.py scripts/test_structured_semantic_interpreter.py scripts/test_structured_semantic_query_plan.py scripts/test_trading_semantic_cutover.py scripts/test_goal_only_research_brief.py scripts/test_thin_ui_full_conversational_integration.py scripts/test_thin_ui_authoritative_draft_presentation.py scripts/test_context_acquisition_executor.py scripts/test_60_case_product_acceptance.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 298 passed, two existing dependency warnings. Offline harness execution flags set false for pytest only; initial canonical run refused four cases under local execution flags. No `.env` edits.
+- App-only restart, mounted source hashes matched, Streamlit health HTTP 200. No live prompt, full regression, market/account reads initiated by this verification, MT5 action, VM activity, commit or push.
+- Next: explicit read-only spec field completion using the existing typed patch contract. No G2.1 reopening or G2.2 work.
+
+### Typed Computational Specification Clarification
+
+Date: 2026-11-09
+Verification: `FOCUSED_PASS`.
+
+- Added an Advisory form for one supported missing leaf in the latest computational review. Input uses typed choices or explicit scalar/text, with no semantic provider call.
+- Reused the existing semantic patch, strict specification validation and QueryPlan projection from canonical state. Rebuilt review preserves sibling facts and provenance, reports remaining gaps/conflicts and stays non-executable.
+- Conversation history conditionally appends to the exact persisted tail, without upsert or vector indexing. Stale, duplicate, cross-conversation and deleted review submissions cannot write a revision.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_computational_specification.py scripts/test_history_service_runtime_persistence.py scripts/test_structured_semantic_interpreter.py scripts/test_structured_semantic_query_plan.py scripts/test_trading_semantic_cutover.py scripts/test_goal_only_research_brief.py scripts/test_thin_ui_full_conversational_integration.py scripts/test_thin_ui_authoritative_draft_presentation.py scripts/test_context_acquisition_executor.py scripts/test_60_case_product_acceptance.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 322 passed, three existing deprecation warnings, with execution flags false for the pytest process only.
+- Streamlit AppTest verifies successful clarification, rerun, switching, and stale/deleted reviews. A real MongoDB probe used a temporary isolated collection: exactly one concurrent append succeeded, and newer, changed and deleted tails were rejected. No live conversation was used.
+- Restarted only the app. All six runtime source hashes matched the host, container health became healthy and Streamlit returned HTTP 200; checked execution flags remained disabled.
+- Fixed interim failures involving Streamlit's removed widget after rerun and validation-error ownership. Final verification had no failures. No live provider, full regression, MT5, G2.1/G2.2, commit or push.
+- Next: one typed OHLCV coverage field family; no data or execution authority change.
+
+### OHLCV Integer Clarification
+
+Date: 2026-11-09
+Verification: `FOCUSED_PASS`.
+
+- Extended existing OHLCV clarification to the missing lookback and explicitly unresolved warm-up leaves, without defaulting optional warm-up or modifying unrelated requirements.
+- Reused strict positive/nonnegative specification constraints and rejected ambiguous text, fractions, non-integer patches and BSON overflow. No relationship between the two counts was added.
+- Existing QueryPlan, conditional append, conversation scope and advisory-only behavior are unchanged. No new service, collection, acquisition or provider call.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_computational_specification.py scripts/test_history_service_runtime_persistence.py scripts/test_computation_pilot.py scripts/test_structured_semantic_interpreter.py scripts/test_structured_semantic_query_plan.py scripts/test_trading_semantic_cutover.py scripts/test_goal_only_research_brief.py scripts/test_thin_ui_full_conversational_integration.py scripts/test_thin_ui_authoritative_draft_presentation.py scripts/test_context_acquisition_executor.py scripts/test_60_case_product_acceptance.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 371 passed, three existing deprecation warnings, with offline execution flags overridden in pytest only.
+- Streamlit AppTest verified integer apply/review rerun, rejection before persistence, stale/deleted reviews and conversation switching. BSON boundary and concurrent/duplicate tests passed without writing to a live conversation or creating a collection.
+- No full regression, live provider, generated code, G2.1/G2.2 activity, broker operations, commit or push.
+- Next: one typed OHLCV freshness-tolerance field, still read-only.
+
+### OHLCV Freshness-Tolerance Clarification
+
+Date: 2026-11-09
+Verification: `FOCUSED_PASS`.
+
+- Reused the typed integer clarification path for an explicitly unresolved `max_age_seconds` on an identified OHLCV requirement. Positive integers only, bounded by signed 64-bit BSON; no optional-field default or actual freshness check.
+- The existing UI, provenance, QueryPlan and conditional history append stay in place. AppTest verifies apply/rerun, invalid input, stale review and conversation isolation; BSON and concurrent/duplicate coverage use no live conversation or new collection.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_computational_specification.py scripts/test_history_service_runtime_persistence.py scripts/test_computation_pilot.py scripts/test_structured_semantic_interpreter.py scripts/test_structured_semantic_query_plan.py scripts/test_trading_semantic_cutover.py scripts/test_goal_only_research_brief.py scripts/test_thin_ui_full_conversational_integration.py scripts/test_thin_ui_authoritative_draft_presentation.py scripts/test_context_acquisition_executor.py scripts/test_60_case_product_acceptance.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 392 passed, three existing warnings; offline execution flags overridden only in pytest.
+- No market/provider call, MT5 action, G2.2 execution, full regression, commit or push. Stop individual OHLCV widgets. Next proposed slice: project existing revision readiness and approved historical evidence verification separately, without running research.
+
+### Read-Only Research Readiness
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`.
+
+- Added an on-demand Advisory view of one operator-pinned proposal export and one explicitly approved local historical source. No chat-derived proposal, path, scope, pin, or approval.
+- Kept recorded proposal review separate from current R2 coverage, integrity and provenance. Pinned replay is display-only; normal proposal replay and approval verification are unchanged. Bad manifest pins stop before row reads.
+- Wrong scope or revision, superseded head, changed snapshot, unapproved/missing source, insufficient coverage and verifier failures fail closed. No persisted report, research run, authority write or live data call.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_research_readiness.py scripts/test_research_evidence_verification.py scripts/test_research_proposal.py scripts/test_historical_research_dataset.py scripts/test_computation_pilot.py scripts/test_computational_specification.py scripts/test_history_service_runtime_persistence.py scripts/test_structured_semantic_interpreter.py scripts/test_structured_semantic_query_plan.py scripts/test_trading_semantic_cutover.py scripts/test_goal_only_research_brief.py scripts/test_thin_ui_full_conversational_integration.py scripts/test_thin_ui_authoritative_draft_presentation.py scripts/test_context_acquisition_executor.py scripts/test_60_case_product_acceptance.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: 469 passed, three existing deprecation warnings. Execution flags were overridden only in pytest.
+- AppTest verified separate statuses, on-demand inspection, rerun and conversation isolation. Streamlit health HTTP 200. No approved binding/snapshot was present; no live review, full regression or app restart. Loaded live execution flags were left unchanged.
+- No G2.1 reopening, G2.2, MT5 action, generated code, commit or push.
+
+### R1 Immutable Research Input Package
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`.
+
+- Reused R1 pinned replay, explicit approved binding, R2 verification and historical loader; approval, revision, scope and manifest pins must pass before rows are read. No new approval, semantic or execution authority.
+- Added one input-preparation module and focused tests. Canonical `r1-research-input/v1` contains only UTC timestamp/High/Low observations plus identity, source, window and checksum metadata; no descriptive calculation.
+- Real acceptance used the exact approved revision and `research_dataset_e81f53d087563a5c1c128979`: 60 closed XAUUSDm M1 bars, 2026-11-04 15:00-16:00 UTC end-exclusive. Proposal, binding, manifest and source data bytes were preserved.
+- One content-addressed artifact under ignored `data/research/inputs/`, SHA-256 `c2f1fc8a424eec05338d19f05f2abb0bddae006edb2ae1ee59a492f4ea8d68e8`. Repeat preparation returned identical bytes and unchanged mtime without another package. Existing conflicting bytes are never overwritten; no OS-level immutability claim.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_research_input_package.py scripts/test_research_readiness.py scripts/test_research_evidence_verification.py scripts/test_research_proposal.py scripts/test_historical_research_dataset.py scripts/test_computation_pilot.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **128 passed**, two existing dependency deprecation warnings.
+- Focused coverage includes deterministic replay, exact projection/precision, unapproved or wrong revision/scope, changed export/manifest/data, incomplete/duplicate/unordered rows, symbol/timeframe mismatch and no-overwrite tamper rejection.
+- No live market access, provider call, trading, research calculation, generated code, G2.2, app restart, full regression, commit or push. Unrelated dirty worktree remains preserved.
+- Next proposed slice: independently authorized deterministic descriptive computation from the verified package; no implicit research execution approval.
+
+### R1 Controlled Descriptive Computation - Implementation
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`.
+
+- Added the pure per-bar `high - low` operation and a separately gated trusted-host entry point inside the existing research package. No new service, semantic authority, provider call or generated execution.
+- R1 `ACCEPTED_FOR_NEXT_RESEARCH_STAGE` is insufficient to execute. Exact operator approval must bind proposal/revision/scope, package hash, `HIGH_MINUS_LOW_V1` and output destination. Without that projection the entry point stops before reads/calculation.
+- Revalidate current binding and pinned proposal head before the pinned package, its metadata/row checksum and exact timestamp window. Reject invalid fields/numerics, gaps, duplicates, wrong identity and negative ranges. Check source bytes again before publication.
+- Preserve original timestamps and High/Low. Decimal arithmetic emits exact decimal-string ranges, avoiding float subtraction artifacts and process-context precision loss. Result schema `r1-descriptive-result/v1` binds input, algorithm and provenance.
+- Reused input package no-overwrite publication with a result filename prefix; unchanged input preparation remains regression-tested. Fixture repetition returns identical bytes/mtime, and tampered existing results are not replaced.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_descriptive_research_computation.py scripts/test_research_input_package.py scripts/test_research_readiness.py scripts/test_research_evidence_verification.py scripts/test_research_proposal.py scripts/test_historical_research_dataset.py scripts/test_computation_pilot.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **174 passed**, two existing dependency deprecation warnings. Includes 46 new computation cases; syntax checks pass.
+- Real package SHA-256 unchanged. No actual 60-bar calculation or result artifact yet: **AWAITING OPERATOR APPROVAL**. Fixture success is not real research acceptance.
+- No MT5, broker mutation, backtest/optimizer, app restart, G2.1 reopening, G2.2, commit or push. Unrelated dirty worktree preserved.
+- Next: separately authorize and verify only this exact bounded historical computation; no implicit follow-on execution.
+
+### R1 Controlled Descriptive Computation - Authorized Real Acceptance
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`, plus real local historical computation evidence.
+
+- Operator explicitly authorized one `HIGH_MINUS_LOW_V1` run for the exact existing revision and input SHA-256 `c2f1fc8a424eec05338d19f05f2abb0bddae006edb2ae1ee59a492f4ea8d68e8`. This was not inferred from R1 stage approval.
+- Revalidated the pinned export, approved binding, accepted current revision/scope, input identity/hash and 60-bar M1 window before the existing production entry point. Runtime call tracing recorded exactly one entry-point and one calculator call.
+- Produced one ignored `data/research/results/research_result_cbe3c90bb56aba8230a8843765e110c94e8742a21db04dfbc2a1f901a41cf0a1.json`: 5,992 bytes; filename suffix is the full-byte SHA-256. Schema `r1-descriptive-result/v1`, execution/generated-code authority false.
+- Preserved all 60 UTC timestamps/High/Low and computed only their decimal-string ranges. An independent rational oracle verified 60/60. Independent full result reconstruction and canonical reserialization reproduced exact bytes without a second production run.
+- Proposal, binding, manifest, historical data, input package and Git index remained unchanged. No production/test source changes were necessary; only current handoff and this appended entry changed.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_descriptive_research_computation.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **59 passed**. Earlier 174-case research family PASS is retained, not rerun. No full regression or live market test.
+- No MT5/provider call, order, trading authority change, app restart, G2.2, generated code, backtest/optimizer, commit or push. G2.1 remains CLOSED/PARTIAL.
+- Next proposed milestone: expose this pinned descriptive result through the existing read-only research presentation, without new calculation or implicit promotion.
+
+### R1 Verified Research Result Review
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`.
+
+- Added **Inspect verified result** inside the existing Research readiness view. Reused orchestrator/conversation identity, R1 binding and the existing descriptive module; extracted read-only input validation so review and execution share authority checks.
+- Host-only `RESEARCH_RESULT_BINDING` pins input/result SHA-256 alongside the existing readiness binding. Fixed approved local paths only; no scan, chat-provided path, stored review or automatic approval.
+- Verify actual result bytes before parsing, then schema, algorithm, approval/provenance, input and current accepted revision/scope, rows and source snapshots. Failed checks show precise blockers without a verified table. No computation, oracle rerun, statistics or artifact mutation.
+- Table displays exact text UTC timestamp, High, Low and decimal Range with objective, identity, source/window and checksum metadata. Research limitations are explicit. Click results disappear on rerun; wrong/deleted conversations and tampered files cannot reuse the table.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_research_result_review.py scripts/test_descriptive_research_computation.py scripts/test_research_input_package.py scripts/test_research_readiness.py scripts/test_research_evidence_verification.py scripts/test_research_proposal.py scripts/test_historical_research_dataset.py scripts/test_computation_pilot.py scripts/test_thin_ui_full_conversational_integration.py scripts/test_thin_ui_authoritative_draft_presentation.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **256 passed**, two existing deprecation warnings. Includes 29 review cases and Streamlit AppTest. An initial installed-Streamlit dataframe API mismatch was corrected before final PASS.
+- Real host-only review verified the existing result SHA-256 `cbe3c90bb56aba8230a8843765e110c94e8742a21db04dfbc2a1f901a41cf0a1`, exact input/revision/scope and 60 rows. Calculator/execution call counts were both zero; all six protected research artifacts remained unchanged.
+- Running app/health returned HTTP 200; live execution flags remain enabled. No restart or persistent pin configuration was performed, so deployed-browser acceptance is **NOT VERIFIED**. Host AppTest and actual local artifact inspection are separate evidence.
+- No MT5/provider call, trading mutation/authority, new research computation, G2.2, full regression, commit or push. Existing dirty worktree preserved.
+- Next: bounded typed requirements/coverage for broader historical research through existing R1/R2 contracts; acquisition and computation need their own approval.
+
+### Extended Historical Research Coverage - Local Assessment
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`.
+
+- Defined a proposed three-hour observation objective: XAUUSD/XAUUSDm M1, 2026-11-04 14:00-17:00 UTC end-exclusive, 180 contiguous closed bars. This is not a statistical sufficiency or trading-performance claim; scope still needs operator approval.
+- Restricted local discovery to the canonical MT5 research dataset root. Existing loader checks passed for three actual artifacts: 60 VERIFIED M1 bars (Nov 4 15:00-16:00), 6,829 PARTIAL M1 bars (Oct 26-Nov 2), 338 PARTIAL ticks (Nov 4 15:00-15:01). Only the 60-bar source is in the current approved binding.
+- Existing `assess_quality` found exactly 120 missing local target bars: Nov 4 14:00-15:00 and 16:00-17:00 UTC. Weekly data does not overlap and retains 430 missing weekday slots/calendar mismatch; ticks cannot replace bars. No broker-session cause or live availability was inferred.
+- Used `ResearchProposal.revise` only in memory to test the larger evidence window; `EVIDENCE_PENDING`. R2 returned `PARTIAL_OR_LIMITED / RESEARCH_COVERAGE_INSUFFICIENT`. No accepted revision, approval, source data, immutable input or result was changed.
+- Prepared an explicit `HistoricalDataRequest` and the existing exporter command in handoff section 141. One complete 180-bar-window export is proposed, preserving the current 35-record quality floor and declared weekday policy; no acquisition was executed or authorized implicitly.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_historical_research_dataset.py scripts/test_research_evidence_verification.py scripts/test_research_proposal.py scripts/test_historical_session_coverage.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **93 passed**, two existing deprecation warnings. Additional mocked mapping rejection stopped before MT5 initialization. Existing coverage contracts are adequate; no implementation fix or source/test edits needed.
+- Only current handoff and this appended entry changed. No market acquisition, new descriptive computation, proposal approval, broker action, app restart, G2.2/Hyper-V, commit or push. Unrelated dirty worktree preserved.
+- Remaining gate: explicit approval for the exact read-only Nov 4 14:00-17:00 UTC DEMO export, then manifest/coverage verification and separate source/revision review. Research execution remains a separate authorization.
+
+### Authorized Three-Hour MT5 Historical Export
+
+Date: 2026-11-10
+Verification: `FOCUSED_AND_LIVE_PASS` for read-only acquisition, not broker execution.
+
+- Explicit operator approval covered one XAUUSD/XAUUSDm M1 bars export, Nov 4 14:00-17:00 UTC end-exclusive, warmup quality floor 35, `UTC_WEEKDAYS_CONSERVATIVE_V1`.
+- Read-only preflight verified connected DEMO identity, stable fingerprint, mapping and contract metadata. Existing CLI executed exactly once, exit 0, no retry; source/configuration and execution authority were not changed.
+- Dataset `research_dataset_46c26e4f381b5e5a0cda010c`: **180/180** ordered unique closed bars, first 14:00, last 16:59 UTC, no missing timestamps, zero outside-window/additional warm-up bars. Loader integrity/identity/quality checks returned `VERIFIED`; no issues or acquisition failures.
+- Canonical manifest SHA-256 `c7d1e743204a111f48e1978593d758c5fafd2a982d3e5d5ae13d3a734cf3a76f`; data SHA-256 `785175291491edb92129ecce470a69b4c67d9c52dbd60f956e75c9f302afdff4`. Source is authenticated local MT5 DEMO with execution authority false.
+- R2 remained correctly blocked for admission: `SOURCE_UNAVAILABLE / RESEARCH_SOURCE_NOT_APPROVED` on a temporary pending revision, using only the old authorized source owner. No source registration, proposal approval, persisted revision or binding replacement occurred.
+- Original datasets, proposal, binding, immutable input/result, `.env`, Git index and unrelated worktree files preserved. Only handoff/changelog and the new ignored export artifact were written.
+- Documentation check: `.\venv\Scripts\python.exe -m pytest scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **13 passed**. The prior 93-case unchanged-source coverage family result is retained, not rerun. No production/test source change or full regression.
+- No Streamlit restart, research computation, trading, G2.2/Hyper-V, commit or push. Next: exact pinned historical source approval, followed by separately reviewed expanded revision and computation authorization.
+
+### Extended Source Admission and Pending R1 Revision
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`.
+
+- Applied explicit source-use-only approval after checking exact dataset/manifest/data pins, XAUUSD/XAUUSDm M1 mapping, DEMO/authenticated provenance and all 180 closed UTC slots from Nov 4 14:00-17:00. No new data acquisition.
+- Source is `research_dataset_46c26e4f381b5e5a0cda010c`, manifest `c7d1e743204a111f48e1978593d758c5fafd2a982d3e5d5ae13d3a734cf3a76f`, data `785175291491edb92129ecce470a69b4c67d9c52dbd60f956e75c9f302afdff4`. Reused existing trusted readiness binding and R2 source owner; no second approval system.
+- Confirmed the existing trading scope is conversation-derived, not window-derived, and its conversation still exists unambiguously. Used the existing R1 lifecycle to append `revision_c0f5efd05ced99cf0abb35a9da3d5aa70d6a45e249f5e42d45e1e0250c33a0b5` to the unchanged proposal identity; no review/acceptance call.
+- Current R1 export/binding persisted and strict replay passed. Export SHA-256 `d28a2347ef10ec530c4a518f04bb26d2301bc84fe74e650f0d1e8ef123e9998b`. New proposal status is `READY_FOR_REVIEW / RESEARCH_REVISION_NOT_ACCEPTED`; evidence separately `VERIFIED_FOR_DECLARED_SCOPE`; new review-record count zero.
+- Archived the prior proposal and binding byte-for-byte before current-head update, under ignored `data/research/readiness/archive/`. Original one-hour revision/acceptance remains in history; all datasets, input/result and trading state preserved. Old pins are not silently repointed or installed in the running app.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_research_proposal.py scripts/test_research_evidence_verification.py scripts/test_research_readiness.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **48 passed**, two existing deprecation warnings. No source/test edits or full regression.
+- No proposal approval, research computation, MT5 access, Streamlit restart, authority change, G2.2/Hyper-V, commit or push. Existing dirty worktree preserved except the explicitly authorized research state and documentation updates.
+- Stop at the exact new revision's operator review gate. Source eligibility is not revision acceptance; stage acceptance would still not authorize computation.
+
+### Three-Hour R1 Approval and Verified Input Preparation
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`.
+
+- Verified exact operator-approved pre-review export/revision/scope and existing source pins for 180 XAUUSDm M1 bars, Nov 4 14:00-17:00 UTC. Applied `ACCEPTED_FOR_NEXT_RESEARCH_STAGE` through `ResearchProposal.review` only; exactly one new review record, no revision-content change.
+- Persisted accepted export SHA-256 `e9afb513179a06b421aee2b9c020e0a5d785ebd66e82dbe2a3edb2c4d67df1f4` and updated its current research binding checksum. Pending snapshot/binding were archived byte-for-byte; historical one-hour artifacts and reviews preserved.
+- Strict reload and existing Research Readiness passed separately: proposal `ACCEPTED_FOR_NEXT_RESEARCH_STAGE`; evidence `VERIFIED_FOR_DECLARED_SCOPE`. Stage approval still grants no computation/trading authority.
+- Reused unchanged `r1-research-input/v1` preparation for only UTC timestamp/High/Low. One 10,370-byte artifact under ignored `data/research/inputs/`, full SHA-256 `f4e4fa840ccfa8f87394d41cd3525366fcebf5b200e9aadc3021aeb1c8c50741`, exactly 180 source-identical observations with full provenance/pins and execution disabled.
+- Repeated preparation returned identical bytes/hash/mtime and no second package. Protected source/export/binding stayed unchanged during preparation, original input/result preserved, calculator/execution call counts zero. No result calculation or new result file.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_research_proposal.py scripts/test_research_evidence_verification.py scripts/test_research_readiness.py scripts/test_research_input_package.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **63 passed**, two existing deprecation warnings. No production/test changes or full regression.
+- No MT5 access, acquisition, research computation, backtest/optimizer, generated execution/G2.2, Streamlit restart, trading authority/config change, commit or push. Unrelated local state preserved.
+- Remaining exact boundary: independent computation approval for the new revision/input hash, operation `HIGH_MINUS_LOW_V1` and bounded output destination; the old 60-bar execution approval is not reusable.
+
+### Authorized 180-Bar Descriptive Computation
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`, plus real local historical execution evidence.
+
+- Applied the operator's separate exact authorization for revision `revision_c0f5efd05ced99cf0abb35a9da3d5aa70d6a45e249f5e42d45e1e0250c33a0b5`, accepted export `e9afb513179a06b421aee2b9c020e0a5d785ebd66e82dbe2a3edb2c4d67df1f4`, input `f4e4fa840ccfa8f87394d41cd3525366fcebf5b200e9aadc3021aeb1c8c50741` and `HIGH_MINUS_LOW_V1` only.
+- Revalidated current identity/approval/binding/dataset/input hashes and exact 180-bar scope before one production entry-point call. Runtime tracing counted one calculator call; retries zero. No prior result existed for this input.
+- One ignored result artifact `research_result_6323aff52d368d6f97ba9aec21dbcfa953df48bb1b245eb295739acf2ed0f842.json`, 14,002 bytes; filename suffix is its full-byte SHA-256. Schema/provenance binds accepted revision/input/dataset/algorithm; execution/generated-code authority remains false.
+- All 180 ranges matched an independent exact Decimal oracle with rounding/inexact traps enabled. Complete independent artifact reconstruction and canonical reserialization reproduced identical bytes. Idempotent publication of identical bytes preserved mtime/content without rerunning production computation or creating another result.
+- First 14:00 UTC Range 2.943; last 16:59 UTC Range 2.537, Nov 4. No statistics or performance/strategy conclusions. Existing read-only result verifier also returned `VERIFIED` on the exact pins.
+- Original 60-bar result, all datasets/inputs/proposal/binding/archives and unrelated worktree state preserved. No source/test edits or persistent app configuration change; handoff/changelog and one new result are the only task writes.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_descriptive_research_computation.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **59 passed**, two existing deprecation warnings. No full regression.
+- No MT5, trading, backtest/optimizer, generated code/G2.2, app restart, authority change, commit or push. Stop after this completed bounded computation; no automatic next acquisition/revision request.
+
+### Cross-Window Consistency and Hourly Summary Implementation
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`.
+
+- Verified both actual result pins independently using archived one-hour approval versus current three-hour approval. Exact Decimal comparison found **60/60 matches**, zero High/Low/Range discrepancies, Nov 4 15:00-16:00 UTC. No old computation repeated or artifact altered.
+- Added explicit hash-pinned archive context to the existing read-only verifier, with no automatic fallback or UI input. Current execution validation remains unchanged.
+- Added `HOURLY_RANGE_SUMMARY_V1` and `r1-hourly-range-summary/v1` in the existing research package. Three consecutive UTC hours, exactly 60 M1 range observations each; count, mean, median, min/max only. Mean uses 12 decimal places/half-even; median/min/max exact Decimal; no extra dispersion or trading claims.
+- Reused typed computation approval, current result verification and no-overwrite publication. Summary permission is operation/result/revision/scope/destination-specific and cannot authorize high-minus-low, or vice versa. Schema binds original input, source result, proposal/dataset/window, algorithm and precision policy.
+- Scope remains the accepted descriptive High/Low data/window; schema requires no new revision for this derived descriptive operation. Explicit approval for the summary's scope and execution is still **PENDING**; no real aggregation or summary artifact created.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_descriptive_summary.py scripts/test_research_result_review.py scripts/test_descriptive_research_computation.py scripts/test_research_input_package.py scripts/test_research_readiness.py scripts/test_research_evidence_verification.py scripts/test_research_proposal.py scripts/test_historical_research_dataset.py scripts/test_computation_pilot.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **226 passed**, two existing dependency deprecation warnings. Includes 23 summary/archive/overlap/authority cases; syntax/diff checks pass. No full regression.
+- Actual comparison instrumentation recorded zero production high-minus-low or summary calls. Tests use controlled fixtures; protected data, snapshots, inputs/results and unrelated dirty worktree preserved.
+- No UI work, live MT5, acquisition, research execution, G2.2/Hyper-V, restart, commit or push. Next gate: one bounded operator approval for `HOURLY_RANGE_SUMMARY_V1` on source result `6323aff52d368d6f97ba9aec21dbcfa953df48bb1b245eb295739acf2ed0f842`, unchanged accepted revision, three declared groups/statistics and content-addressed result destination.
+
+### Authorized Three-Group Hourly Range Summary
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`, plus actual local descriptive aggregation evidence.
+
+- Applied exact operator authorization after rechecking current revision/review, binding, source result integrity/provenance, 180 XAUUSDm M1 observations and summary precision policy. No previous summary existed; no earlier computation repeated.
+- Production entry-point/aggregator calls **1/1**, high-minus-low calls **0**, retries **0**. Computed only the five approved statistics for each UTC hour on Nov 4, 14:00-17:00 end-exclusive.
+- Result `research_summary_10c783572d3f834945f8efb799af9137150d56eceb9f0ed7b60851beaa3c0645.json`, **2,817 bytes**, under ignored `data/research/results`; full-byte SHA-256 is its filename suffix. Schema `r1-hourly-range-summary/v1` binds source/input/revision/dataset/precision policy and explicit approval; execution/generated-code flags false.
+- Means: 2.681033333333 / 2.673366666667 / 2.539250000000; medians: 2.4035 / 2.5615 / 2.386. Each group count 60; exact min/max and full table recorded in handoff section 147. No extra statistics or performance claims.
+- Independent UTC-predicate grouping and Decimal reference verified all three groups and five statistics. Full artifact reconstruction and canonical serialization reproduced exact bytes; idempotent publication preserved bytes/mtime without production rerun or a duplicate summary.
+- All existing datasets, proposals, bindings, input packages, archives and prior results preserved. No production/test edits; only new summary artifact and handoff/changelog updates.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_descriptive_summary.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **36 passed**, two existing deprecation warnings. No full regression.
+- No MT5, trading, strategy/backtest/optimizer, generated code/G2.2, restart, authority/configuration change, commit or push. STOP at completed bounded objective; no automatic acquisition or further computation.
+
+### Strategy Research and Backtesting Readiness
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`, assessment plus static research-harness correction.
+
+- Capability matrix, data requirements and next milestone are in handoff section 148. Current R1 is descriptive-only with no strategy; observation evaluators explicitly prohibit trade simulation.
+- Fixed research EA fixture flags using Python-expected current RSI instead of native calculated RSI. CSV/previous-RSI context and Tester-only/default-no-orders protections remain unchanged. Added one static regression; application Trading Core untouched.
+- Retained native checkpoint has 57/58 math vectors, Decimal/double half-tick mismatch, zero historical simulations. Patched EA has not been compiled/run; historical source/binary/reports preserved. No tolerance weakening.
+- One next milestone: `RESEARCH_NUMERIC_PARITY_CLOSURE` using existing EA/comparator and approved exact numeric policy. Separate native research isolation/provenance approval required; no new engine or descriptive UI.
+- Full OHLCV/session/warmup plus cost/tick provenance required. Eight trading weeks with chronological development/validation/holdout is only a proposed planning horizon, not sufficient-sample evidence or acquisition approval.
+- Focused command: `.\venv\Scripts\python.exe -m pytest scripts/test_mt5_tester_parity.py scripts/test_reasoning_evidence_v2.py scripts/test_field_aware_editable_trade_draft.py scripts/test_backtest_evaluation.py scripts/test_paper_trading_evaluation.py scripts/test_historical_research_dataset.py scripts/test_research_proposal.py scripts/test_research_evidence_verification.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **177 passed**, two existing protobuf deprecation warnings. Isolated parity suite **17 passed**.
+- No full regression, actual backtest, native compile/run, MT5/acquisition/orders, G2.2, app restart, authority change, commit or push. Unrelated dirty worktree/protected evidence preserved.
+
+### Research Numeric Parity Correction; Native Gate Pending
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`; native parity verdict **INCONCLUSIVE**.
+
+- Revalidated the exact 58-vector fixture. Python remains byte-value equivalent to archived expected rows; old native CSV still fails only `real_16` SL/TP/risk. Not a rerun of updated MQL.
+- Root cause: double subtraction discards the decimal residual before half-tick rounding. Kept production formulas and strict tolerances unchanged.
+- Research EA now retains decimal input text and uses research-local bounded decimal operations, precision 28/half-even, tick half-up and volume round-down. Added independent native RSI operation order/compensated summation, BUY/SELL fixture handling and default MathOnly early return before market/order paths.
+- Extended existing Python harness with input/fixture validation, pinned Decimal context, exact diagnostic values, numeric boundaries and preparation through the existing no-overwrite publisher. No new execution engine or authority.
+- Prepared `numeric_parity_preparation_e05805d67cd2774599aa605b108f4833fdb9003753c4bec11efb20976f3cf9b5.json` under ignored `data/research/mt5_tester`: 116 proposal vectors (58 original + 58 SELL), 30 scalar checks, fixture/source hashes, Python version; native fields explicitly NOT_VERIFIED/null. Handoff section 149 contains exact pins and proposed isolated math-only procedure.
+- Focused command: `.\venv\Scripts\python.exe -m pytest scripts/test_mt5_tester_parity.py scripts/test_reasoning_evidence_v2.py scripts/test_field_aware_editable_trade_draft.py scripts/test_backtest_evaluation.py scripts/test_paper_trading_evaluation.py scripts/test_historical_research_dataset.py scripts/test_research_proposal.py scripts/test_research_evidence_verification.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **306 passed**, two existing protobuf warnings. Python syntax/diff checks pass; no full regression.
+- Native MQL compile/arithmetic correctness/output and current toolchain are NOT_VERIFIED. Blocker `NATIVE_MATH_ONLY_AUTHORIZATION_REQUIRED`; Windows research isolation/network denial must be approved and verified before invocation. Portable mode alone is not isolation proof.
+- No MT5/native invocation, acquisition, simulated-fill/backtest, orders, authority change, generated code/G2.2, app restart, commit or push. Prior artifacts and unrelated dirty state preserved. Stop at the one exact native approval boundary, not at a claimed parity PASS.
+
+### Native Math Isolation Audit Preparation
+
+Date: 2026-11-10
+Verification: new audit focused checks; isolation readiness **INCONCLUSIVE**.
+
+- Conditional operator native approval recorded; effective network isolation remains unproven. No native invocation occurred.
+- Added one read-only PowerShell operator audit with explicit ActiveStore/filter/error evidence and no self-elevation, policy changes or process launches. JSON output uses CreateNew and refuses reparse output parents; no credential/profile contents collected.
+- Known executable paths identified separately from unknown child/helper paths. Program block candidates are not labelled whole-tree PASS.
+- Non-elevated smoke audit preserved outbound/application Access denied and Sandbox-feature elevation errors, verdict INCONCLUSIVE, native count zero.
+- Windows 10 Pro build 19045 lacks Sandbox launcher; feature state UNKNOWN. Proposed offline disposable Sandbox is documented, not installed/launched. Pinned vendor build 6230 offline guest compatibility and safe artifact retrieval remain unverified.
+- Operator command/evidence requirements: `docs/operations/native_math_isolation.md`; current evidence in handoff section 150. Existing parity implementation/tests and pinned package were not repeated or changed.
+- No firewall/network/credential/trading changes, native compile/Tester, G2.1/G2.2, app restart, commit or push. Stop before native invocation.
+- Audit-tool verification `FOCUSED_PASS`: `.\venv\Scripts\python.exe -m pytest scripts/test_native_math_isolation_audit.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **25 passed** (12 audit, 13 documentation); PowerShell parsing/diff check PASS. This is not native parity or isolation PASS.
+
+### Disposable Offline Sandbox Preparation
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS` for preparation tooling; isolation remains INCONCLUSIVE.
+
+- Verified host/resource metadata read-only; Sandbox Disabled, no launcher. Hypervisor present; hardware SLAT flags inconclusive under hypervisor. Headroom/restart requirements remain operator gates.
+- Added input-only `native_math_offline.wsb` with network/clipboard/vGPU/redirection disabled, 2-GiB planned memory, no autorun/writable mapping. Not launched.
+- Staged exactly 11 allowlisted input files under ignored `data/research/mt5_tester/native_sandbox_e05805d67cd2/input`; original numeric package/source pins untouched. Manifest `f20b2dff06dd6f4c288a4a32bd91605089a17c46e7f585b671750b7659534651`.
+- Added manual guest preflight (hashes/allowlist/network/profile/process checks); no native calls. Static PE imports show Windows-system dependencies only; dynamic dependencies/offline compatibility unverified.
+- Documented operator-only feature enable with -NoRestart, guest gates and separate exact outbox approval. No outbox/ACL/writable mapping created; safe machine-readable extraction remains pending.
+- New preparation tests: `.\venv\Scripts\python.exe -m pytest scripts/test_native_math_isolation_audit.py -k sandbox -q -p no:cacheprovider --tb=short`: **6 passed, 12 deselected**. No repeated Firewall/parity suite or full regression; documentation checked separately.
+- No Windows feature/policy change, Sandbox/native invocation, MT5 orders, G2.1/G2.2, app restart, authority change, commit or push. Stop before feature change/native invocation; exact operator runbook in `docs/operations/native_math_isolation.md`.
+- Documentation integrity: `.\venv\Scripts\python.exe -m pytest scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **13 passed**; actual staged hash/allowlist helper and normal diff check PASS. Host-only preparation evidence, not guest isolation/native compatibility.
+
+### Development-Only ChatGPT Issue to Codex Bridge
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`; live transport/worker smoke NOT_VERIFIED.
+
+- Added one independent tools module, offline tests and operator runbook; no Trading Core modification. Owner/label/UUID/hash-approval gates, PENDING/RUNNING/PASS/BLOCKED/FAILED receipts and fixed GitHub API allowlist.
+- Tool-disabled, read-only Codex CLI turn over explicit local-source snapshots, not active Desktop thread/cwd. Mandatory keyring auth/private home and no inherited broker/GitHub/proxy env. No automatic privileged approval, shell/test command channel or generated-code execution.
+- Default dry-run; edit requires local flag plus delivered real smoke PASS, one narrow development target, clean pre-existing state, hashes/AST/whitespace checks and exclusive write/backup. Global mutex, durable duplicate/crash protection and uncertain-comment reconciliation prevent task replay. Desktop unsaved buffers remain outside cooperative locking.
+- Credential Manager stores separate least-privilege GitHub PAT; operator authentication and Issue-write connector capability remain prerequisites. No credential extracted from ChatGPT/gh, no listener or live smoke started. CLI validate-only checks confirmed command/app/hook tools disabled; an incompatible provider override was removed before release.
+- Verification: `.\venv\Scripts\python.exe -m pytest scripts/test_codex_issue_bridge.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **73 passed** (60 bridge + 13 docs); targeted compileall/diff check PASS. Offline fake external boundaries, not live E2E; no full regression.
+- Exact setup/activation/smoke and ChatGPT-side protocol in `docs/operations/codex_issue_bridge.md`; full boundary in handoff section 152. Codex transport retries retain installed bounded defaults under 300-second task deadline; no bridge task auto-retry.
+- No broker/MT5/research/native Tester/G2.2, authority, Docker/WSL/app restart, destructive Git operation, commit or push. Existing unrelated worktree state retained. Next step is the operator-activated non-trading dry-run smoke, not expansion of permissions.
+
+### Issue Bridge GitHub Authentication Diagnostics
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`; live authentication remains BLOCKED pending operator PAT replacement.
+
+- GET-only probe reproduced first failure: GET /repos/DATCAOTAN/Trading_Advisory_Chatbot, 401 Bad credentials, before Issue #1/tasks/comments. Network and error JSON were available; permissions were not reached/tested.
+- Stored credential contained U+0016 (Ctrl+V); old whitespace-only validation accepted it. Added shared control/ASCII validation and verify-before-store owner/read checks. No token normalization, disclosure or automatic replacement.
+- HTTP/network/request/JSON failures now emit sanitized method/endpoint/status/reason; HTTPError no longer disappears into generic URLError. No raw bodies/headers or credentials printed.
+- Added GET-only `check`, before worker/state/locks; current malformed value fails locally without HTTP. Ambiguous POST receipts/no-repost and no-retry behavior preserved.
+- Tests: `.\venv\Scripts\python.exe -m pytest scripts/test_codex_issue_bridge.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **97 passed** (84 bridge + 13 docs), no full regression. Focused error taxonomy/redaction, storage rejection/non-overwrite, read-only isolation and write-ambiguity regressions.
+- No listener, worker, GitHub mutation, credential change, Trading Core/MT5/Docker/WSL/authority action, commit or push. Next operator action: replace invalid PAT securely, then the runbook's check command; no automatic task execution.
+
+### Issue Bridge Windows GUI Credential Input
+
+Date: 2026-11-10
+Verification: `FOCUSED_PASS`; live PAT authentication/storage NOT_VERIFIED.
+
+- Added `credential --gui` with installed Tkinter, masked input and explicit clipboard button; console fallback preserved. Rejects controls, whitespace, non-text and oversized input without stripping. Cancel/window close never stores credentials.
+- Reuses shared validation, GitHub owner/read verification and Windows Credential Manager; no write before successful verification. Sanitized GUI failures suppress credential-bearing exception details. No automatic retry, clipboard mutation, listener or worker.
+- Focused command: `.\venv\Scripts\python.exe -m pytest scripts/test_codex_issue_bridge.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **119 passed** (106 bridge + 13 docs). Includes fake clipboard/vault/network and real withdrawn Tk widget checks; not live authentication evidence. No full regression.
+- Operator runbook updated; current boundary in handoff section 154. Synchronous bounded verification can temporarily block the window; existing clipboard history remains operator-managed.
+- No Trading Core, MT5, authority/configuration, Docker/WSL restart, Git commit/push or unrelated worktree edits. Next action: operator opens GUI, verifies/saves a real PAT, then runs read-only check.
+
+### Issue Bridge Native Windows TLS
+
+Date: 2026-11-10
+Verification: `FOCUSED_AND_LIVE_PASS`; Issue writes and Codex worker NOT_TESTED.
+
+- Existing urllib HTTPS handler receives explicit truststore context on Windows; CERT_REQUIRED/hostname verification preserved. No global SSL patch, insecure fallback, extra client or retry. Missing dependency fails closed; truststore 0.10.5 pinned in host-only tools requirements and installed in venv, not Docker/application requirements.
+- Verified Windows Sectigo E36 -> Root E46 chain for GitHub; no process proxy/CA overrides observed. Historical issuer error did not reproduce: standard Python HTTPS already returned 200 before edits. Exact historical missing-intermediate/cache cause remains unproven, not asserted as a confirmed fix diagnosis.
+- Exact new context public GET: HTTP 200. ONE authenticated read-only `check`: PASS, VALID Issue task, zero comments/writes/worker/state mutations; Issues Write remains NOT_TESTED. No PAT printed or changed.
+- Focused command: `.\venv\Scripts\python.exe -m pytest scripts/test_codex_issue_bridge.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **128 passed** (115 bridge + 13 docs). Context/no-global-mutation, missing dependency, certificate-error redaction and GET/POST ambiguity/no-retry checks added; existing error distinctions retained. No full regression.
+- Runbook and handoff section 155 updated. No broker/MT5, research, authority, Firewall, Docker/WSL restart, listener, commit or push. Unrelated worktree preserved; no automatic smoke execution.
+
+### Issue Bridge Uncertain Receipt Reconciliation
+
+Date: 2026-11-10
+Verification: `FOCUSED_AND_LIVE_PASS` for GET-only diagnosis; actual smoke BLOCKED.
+
+- Inspected Issue #1 protected local bridge row without open_state mutation: initial PENDING smoke receipt, attempted=1/delivered=0. Remote owner/task/operation/hash match; comments=0. The NO_REPOST error comes from a prior-write reconciliation branch, not a new POST or worker attempt.
+- Reproduced against a read-only database using existing delivery logic and GET evidence; no POST/worker, journal bytes unchanged. No once/watch process active at inspection.
+- Historical HTTP outcome is not stored in this schema; cannot prove rejection, original TLS cause or Issues Write grant. Empty GET results alone cannot authorize repost. Existing PENDING/attempt state preserved, no manual clear or bypass; exact delayed receipt is the supported delivery-acknowledgement path.
+- Added bounded tests: absent/delayed receipts across restart, exact identity/body/author, duplicates, 403 classification and no retry. No production source change or new recovery mechanism.
+- Command: `.\venv\Scripts\python.exe -m pytest scripts/test_codex_issue_bridge.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **137 passed** (124 bridge + 13 docs). No full regression; compile/diff checks separate. Runbook and handoff section 156 updated.
+- No GitHub write, task execution, credential change, broker/MT5, Docker/WSL restart, commit or push. Remaining gate: operation-bound proof of rejection or genuinely published matching receipt; otherwise stay BLOCKED.
+
+### Issue Bridge Task-Scoped Receipt Isolation
+
+Date: 2026-11-10
+Verification: `FOCUSED_AND_LIVE_PASS` for GET-only discovery/isolation, not smoke delivery.
+
+- Root cause: global undelivered-receipt sweep aborted on old Issue #1 before discovering #2. Verified #1 closed/unlabelled and uncertain PENDING; #2 open/labelled, valid smoke task, no durable row or recorded POST.
+- Existing tick now checks receipt-task admission and binding, defers withdrawn/changed tasks without mutation, and isolates active uncertain writes from independent work. Preserves no-repost, duplicate IDs, crash recovery, approval gates and one-new-task-per-poll.
+- Added sanitized task/Issue/operation/comment-hash/stage diagnostics to deferral, uncertainty and POST failures. Original HTTP evidence/outcome remains unknown; no manual clear or receipt fabrication.
+- Focused command: `.\venv\Scripts\python.exe -m pytest scripts/test_codex_issue_bridge.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **146 passed** (133 bridge + 13 docs). Covers old closed/unlabelled tasks, independent tasks, each uncertain write, delayed visibility, restart and duplicate protection. Recovery fixture now uses canonical pin rather than placeholder.
+- Live GET-only + in-memory journal probe reached #2's initial receipt boundary with a hard stop before network POST; original journal bytes/#1 row unchanged, no persistent #2 claim, zero worker calls. Does not prove write permission/smoke PASS.
+- Runbook and handoff section 157 updated. No listener, GitHub write, credentials/security/MT5/trading/Docker/WSL mutation, commit or push. Next: operator runs one once for #2, inspecting any new task-specific POST failure without blind retry.
+
+### Issue Bridge Worker Cwd Cleanup Failure
+
+Date: 2026-11-10
+Verification: `FOCUSED_AND_LIVE_PASS`; fresh GitHub E2E NOT_VERIFIED.
+
+- Preserved #2 terminal FAILED row and task journal. Reproduced exit-0/parsed-result worker failure at temporary cwd cleanup: PermissionError, errno 13, WinError 32. Old outer cleanup error escaped worker handling and became LOCAL_FAILURE_NO_RETRY. Historical traceback and handle owner remain unavailable.
+- Separated stable empty private worker cwd from disposable per-turn artifacts; reject nonempty/reparse workspaces. No sandbox/auth/tool/authority relaxation, ignored cleanup errors or worker retry. Short cleanup-wait experiment failed and was removed. Existing scratch evidence preserved.
+- Added stage/exception/returncode/errno/WinError and allowlisted stderr markers to existing FAILED result. Raw stderr omitted; secondary cleanup cannot mask original failure. Existing idempotency/no-repost/terminal-state protections retained.
+- Focused command: `.\venv\Scripts\python.exe -m pytest scripts/test_codex_issue_bridge.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **166 passed** (153 bridge + 13 docs); no full regression. Tests cover preparation, process/timeout/return code, output parsing, cleanup, workspace isolation and FAILED no-repeat.
+- Four independent diagnostic CLI calls: two cleanup failures and two PASS, including final separated-cwd run. Final worker-path run: one invocation, exit 0, BRIDGE_SMOKE_OK, edits=[], no new leftovers, original journal bytes unchanged. Subsequent diagnostic-marker-only refinement covered by focused tests; no extra provider invocation.
+- Updated runbook/handoff section 158. No GitHub write/listener, credentials, Trading Core/MT5/Docker/WSL, commit or push. Local smoke does not unlock live_smoke_pass or retry Issue #2; next step is one separately authorized fresh GitHub smoke.
+
+### Issue #5 - Watch Deferred Diagnostic Deduplication
+
+Date: 2026-11-11
+Verification: `FOCUSED_PASS`; live watch NOT_VERIFIED in this task.
+
+- Existing task admission/reconciliation worked but printed the unchanged old inactive receipt every poll. Added only per-Bridge in-memory output dedup keyed by task/operation hash/reason/stage, with safe Issue state/lock/label changes observable.
+- Latest-poll cache bounds memory and permits state reversion/recurrence logs; a new listener emits its first observation again. No persistent cache, journal/schema/authority changes, skipped checks or new retry behavior. New errors and independent tasks remain unaffected.
+- Focused command: `.\venv\Scripts\python.exe -m pytest scripts/test_codex_issue_bridge.py scripts/test_documentation_integrity.py -q -p no:cacheprovider --tb=short`: **178 passed** (165 bridge + 13 docs). Tests prove admission still occurs each poll, output dedup, changed events, reversion, restart, independent fake task, delayed reconciliation and TLS error propagation. No full regression.
+- Runbook/handoff section 159 updated; compile/diff validation separate. Baseline #3/#4 PASS states were read from local journal, not rerun. Original #1 uncertain outcome remains untouched.
+- No GitHub API requests/POST, actual worker/listener, Trading Core/MT5, credentials/Firewall, Docker/WSL restart, commit or push. Preserve all unrelated local state. Operator restart: Ctrl+C existing watch, then plain watch without --allow-edits.
+
+### Final Git Recovery - Dependency-Ordered Offline Checkpoints
+
+Date: 2026-11-11
+Verification: `FULL_REGRESSION_PASS` (offline software only)
+
+- Published Recovery 01 (`51f625c`) by normal fast-forward. Recovered remaining functional, G2, native preparation, Bridge and documentation groups in an isolated worktree without changing the original dirty checkout or index.
+- One bounded test-only correction: allow the existing strict descriptive-computation approval contract in the Pydantic owner assertion. No semantic/permission validation was relaxed. Redacted three private user-profile paths in the recovered G2 report.
+- Final full command: original Windows venv `python -m pytest -q -p no:cacheprovider --tb=short -rs`: 4,529 passed, 158 subtests passed, 60 skipped, three deprecation warnings. All skips require unavailable retained private native historical evidence; no native PASS claimed.
+- Initial full run: 1 failed, 4,528 passed, 158 subtests, 60 skipped. Focused semantic/Draft/research correction: 341 passed. G2/native/Bridge/documentation group: 317 passed, 60 skipped. Compileall and four PowerShell parser checks passed; final documentation/diff checks recorded separately.
+- Static safety: one production order_send call-site; zero MetaTrader5 imports under src. No live runtime, worker/listener, MT5, native Tester, research computation/acquisition, VM or Docker/WSL actions. Git publication does not authorize those operations.
+- Preserved/excluded: embedding cache, personal .agents rules, six raw G2 transcripts, edit_smoke, datasets, binaries, credentials and journals. G2.1 remains PARTIAL and G2.2 unauthorized. Live/deployment/native/performance acceptance was not repeated.

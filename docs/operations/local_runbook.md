@@ -68,6 +68,17 @@ Standing mandates are demo-account-bound, scoped, expiring, revocable, and integ
 
 Execution, autonomous eligibility, controlled management, submission, and `order_send` remain disabled and hard-blocked by default. Operational enablement is a separate demo-account acceptance procedure, not a startup requirement.
 
+### Read-Only DEMO Recovery Gate
+
+1. Keep existing fail-closed permissions and do not click Start. Check `docker-compose ps`, Streamlit health, bridge `GET /health` and redacted `GET /account`. Verify DEMO and compare account binding inside the existing authority reader; only publish match/mismatch. Inspect process state separately from monitor history. If ownership is UNKNOWN, verify host/container worker inventory before considering any operator action. Do not delete the launch guard, clear diagnostics, or manually start another watch process.
+2. Compare Windows and container UTC against an approved trusted clock, then compare bridge `GET /tick` and completed `GET /ohlcv` timestamps with validation UTC. Use `GET /symbols` and tick metadata to verify exact broker mapping and symbol capabilities. Missing, stale, future or mismatched evidence blocks the gate; do not change tolerances.
+3. Use the existing read-only PositionReadModel to inspect positions and active orders. It reads the authenticated lifecycle snapshot and protected journals without persisting a reconciliation result. Inspect journal integrity and reconciliation state through read methods only; do not call `/execution/reconcile` as a read-only check, since it may persist changes. Keep account, broker IDs and raw payloads out of logs.
+4. If the worker exited with RESULT_UNKNOWN, keep it stopped until the existing protected reconciliation workflow establishes the outcome or requests human resolution. A restart is not recovery evidence and must not be used to retry an order. Unavailable access or unresolved state is a blocked gate, not a reason to enable a permission.
+
+### Future Unattended DEMO Soak
+
+After a separate operator approval and successful read-only gate, record deployment identity and a supervised initial Start under one current bounded DEMO mandate. Observe completed-bar, process, authority, journal and broker-correlation health during authorized market-open and market-closed windows, a controlled disconnect/reconnect, and explicit stop/restart. Verify that expiry and revocation block new submissions and require fresh operator authority; do not extend a mandate automatically to span a window. Check a stable account fingerprint and position provenance, no duplicate submission, and matching protected journal and broker outcomes. Stop on unknown ownership, RESULT_UNKNOWN, mismatched account, unresolved exposure, or a failed safety check. Record the final process state and preserve protected evidence. A single confirmed DEMO trade or offline PASS is not soak evidence.
+
 ## Dashboard Usage
 
 Open the Evaluation Dashboard tab to inspect registry entries, detail view, chain view, replay results, persistence, human review, analytics, safe exports, and System Health / Recovery diagnostics.
