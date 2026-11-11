@@ -27,17 +27,20 @@ def declaration(indicator="EMA", parameters=None, output="value", name="feature"
     return {"name": name, "indicator_id": indicator, "parameters": parameters or {"period": 3}, "output_field": output}
 
 
-def configured(app, tmp_path, monkeypatch, *, computations=None, multi=False, costs=True, ready=True):
+def configured(app, tmp_path, monkeypatch, *, computations=None, multi=False, costs=True, ready=True, signal_rules=None, confirmed=False):
     subject, db, history = setup(app, tmp_path, monkeypatch, costs=costs)
     view = subject.inspect_goal_research("A")
     payload = specification(costs=costs)
+    if signal_rules is not None:
+        payload["signal_rules"] = signal_rules
     requirement = payload["specification"]["data_requirements"][0]
     requirement.update(fields=[], lookback_bars=None, warmup_bars=None,
                        computations=computations or [declaration()])
     if multi:
         payload["specification"]["data_requirements"].append({**copy.deepcopy(requirement),
             "timeframe": "M15", "computations": [declaration(parameters={"period": 2}, name="slow")]})
-    subject.develop_goal_research("A", view["key"], view["proposal"].head.revision_id, development_json=json.dumps(payload))
+    subject.develop_goal_research("A", view["key"], view["proposal"].head.revision_id,
+                                 development_json=json.dumps(payload), confirmed_signal_rules=confirmed)
     if ready:
         for report in subject.inspect_goal_historical_data("A")["requests"]:
             view = subject.inspect_goal_research("A")

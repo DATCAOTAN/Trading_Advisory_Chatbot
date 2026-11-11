@@ -28,7 +28,7 @@ class DescriptiveComputationApproval(BaseModel):
     revision_id: Ref
     scope: ResearchScope
     input_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    algorithm: Literal["HIGH_MINUS_LOW_V1", "HOURLY_RANGE_SUMMARY_V1", "HISTORICAL_FEATURES_V1"]
+    algorithm: Literal["HIGH_MINUS_LOW_V1", "HOURLY_RANGE_SUMMARY_V1", "HISTORICAL_FEATURES_V1", "HISTORICAL_SIGNALS_V1"]
     output_directory: str
     execution_allowed: Literal[False] = False
     generated_code_allowed: Literal[False] = False

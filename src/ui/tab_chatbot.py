@@ -578,6 +578,7 @@ def _render_goal_research(orchestrator) -> None:
                 orchestrator.develop_goal_research(session_id, key, proposal.head.revision_id,
                                                    development_json=specification_json)
                 st.rerun()
+            _render_goal_signal_rules(orchestrator, session_id, key, proposal)
             _render_goal_historical_data(orchestrator, session_id, key, proposal)
         with st.expander("Revision history"):
             for revision in proposal.revisions:
@@ -675,6 +676,69 @@ def _render_goal_historical_data(orchestrator, session_id, key, proposal) -> Non
                     orchestrator.prepare_goal_evaluation_input(session_id, key, proposal.head.revision_id, request_id, feature_only=True)
                     st.rerun()
     _render_goal_research_features(orchestrator, session_id, key, proposal.head.revision_id)
+    _render_goal_research_signals(orchestrator, session_id, key, proposal.head.revision_id)
+
+
+def _render_goal_signal_rules(orchestrator, session_id, key, proposal):
+    import json
+    from src.services.trading.reasoning.strategy_evidence import RULE_OPERATORS
+    from src.services.trading.research.historical_features import feature_plan
+    from src.services.trading.research.proposal import ResearchSignalRule
+
+    development = proposal.head.content.development
+    with st.expander("Typed historical signal rules"):
+        st.json({"feature_references": feature_plan(proposal), "supported_operators": sorted(RULE_OPERATORS),
+                 "supported_timing": ["COMPLETED_BAR_CLOSE"], "rule_schema": ResearchSignalRule.model_json_schema()}, expanded=False)
+        confirmed = st.checkbox("I confirm these typed rules for historical signals only", key=f"signal_rule_confirm_{key}_{proposal.head.revision_id}")
+        with st.form(f"signal_rules_{key}_{proposal.head.revision_id}"):
+            rules_json = st.text_area("Typed signal rules (JSON array)",
+                value=json.dumps([rule.model_dump(mode="json") for rule in development.signal_rules], indent=2), height=240)
+            save = st.form_submit_button("Save and confirm typed rule revision", disabled=not confirmed)
+        if save:
+            try:
+                rules = json.loads(rules_json)
+            except ValueError:
+                raise ValueError("RESEARCH_SIGNAL_RULE_JSON_INVALID") from None
+            payload = development.model_dump(mode="json")
+            payload["signal_rules"] = rules
+            orchestrator.develop_goal_research(session_id, key, proposal.head.revision_id,
+                development_json=json.dumps(payload), confirmed_signal_rules=confirmed)
+            st.rerun()
+
+
+def _render_goal_research_signals(orchestrator, session_id, key, revision_id):
+    from datetime import datetime, timezone
+
+    view = orchestrator.inspect_goal_research_signals(session_id)
+    with st.expander("Historical strategy signals", expanded=True):
+        st.text(view["status"])
+        st.json({"supported": view.get("supported", []), "unresolved": view.get("unresolved", [])}, expanded=False)
+        if view.get("reason"):
+            st.warning(view["reason"])
+        request = view.get("request")
+        if request:
+            st.json(request, expanded=False)
+            if view["status"] in {"READY_FOR_EXPLICIT_COMPUTATION_APPROVAL", "FAILED"}:
+                suffix = f"{key}_{revision_id}_{request['request_sha256']}"
+                approved = st.checkbox("I authorize only these pinned historical signals, not fills, P/L or trading",
+                                       key="signal_approval_" + suffix)
+                if st.button("Evaluate historical signals", disabled=not approved, key="signal_compute_" + suffix):
+                    orchestrator.evaluate_goal_research_signals(session_id, key, revision_id, request["request_sha256"],
+                                                              approved=approved, retry=view["status"] == "FAILED")
+                    st.rerun()
+        if view.get("result"):
+            result = view["result"]
+            st.json({"result_sha256": view["result_sha256"], "status": result["status"], "summary": result["summary"],
+                     "timing_semantics": result["timing_semantics"], "strategy_evaluated": False})
+            for partition, rows in result["partitions"].items():
+                st.markdown(f"**{partition} signal observations**")
+                st.dataframe([{"UTC": datetime.fromtimestamp(row["signal_time"], timezone.utc).isoformat(),
+                               "Rule": row["rule"], "Action": row["action"], "Triggered": row["triggered"],
+                               "Status": row["status"]} for row in rows], use_container_width=True)
+                if rows:
+                    index = st.number_input(f"{partition} observation details (row)", min_value=1, max_value=len(rows),
+                                            key=f"signal_detail_{partition}_{view['result_sha256']}")
+                    st.json(rows[index - 1], expanded=False)
 
 
 def _render_goal_research_features(orchestrator, session_id, key, revision_id):

@@ -3575,3 +3575,17 @@ Verification: `FULL_REGRESSION_PASS`, plus real safe-instance missing-input UI/M
 - Final full `python -m pytest -q -p no:cacheprovider --tb=short --show-capture=no -rs`: 4,698 passed, 158 subtests passed, 60 private-native-evidence skips, four warnings (protobuf, Tkinter finalizer, utcnow). Test child alone used .env.example boolean defaults. Compilation, documentation/diff and scoped secret/static checks separate.
 - Real safe port 8507/process/source-hash/health/fail-closed checks passed; browser showed dependency/UTC blockers, Mongo retained four revisions and no acquisition/review/feature-run records. No real feature computation claimed. Original dirty checkout/index and trading-enabled instances/configuration preserved.
 - Limits: 5M prefix-bar operations/100k cells fail closed; interrupted RUNNING claims remain blocked. Real approved data acceptance, distributed recovery, custom computation correctness and strategy performance not verified. No MT5, acquisition, native Tester, G2.2, Hyper-V, Bridge automation, broker or authority mutation.
+
+### Historical Strategy Signal Evaluation
+
+Date: 2026-11-11
+Verification: `FULL_REGRESSION_PASS`, plus isolated browser missing-input acceptance
+
+- Added optional R1 typed ENTRY/EXIT conditions against exact G1 feature IDs, explicit ALL/ANY, timing and timeframe. Kept free-text and legacy identity intact. Missing or unsupported definitions remain UNRESOLVED.
+- Streamlit supports rule edit/confirmation separately from pinned computation consent. A changed rule creates an immutable revision; reconfirming unchanged content preserves R2 and the current revision.
+- Adapter reuses Trading Core for LEVEL, crossings and re-arm, with past-only as-of inputs and contiguous prior clock observations across IS/OOS. Gaps and missing warmup stay UNKNOWN; no fills, P/L or simulated positions.
+- New content-addressed signal artifacts bind proposal/revision/specification, source and feature checksums, rule review, boundaries and evaluator versions. Existing approval, CAS, lock and no-overwrite mechanisms are reused; no auto-retry.
+- Focused: Windows venv `python -m pytest scripts/test_historical_signals.py scripts/test_historical_features.py scripts/test_goal_historical_data_integration.py scripts/test_goal_strategy_specification.py scripts/test_reasoning_evidence_v2.py scripts/test_research_proposal.py -q -p no:cacheprovider --tb=short --show-capture=no`: 169 passed, including AppTest.
+- Full: Windows venv `python -m pytest -q -p no:cacheprovider --tb=short --show-capture=no -rs`: 4,735 passed, 158 subtests passed, 60 private-native-evidence skips, three warnings. Test-process boolean defaults from .env.example; compileall, documentation and diff checks passed.
+- Safe Streamlit 8508 rendered typed rule editor and current blockers without evaluation or acquisition. No new signal runs, trading authority change or broker mutation; original dirty checkout preserved.
+- Real signal results remain unverified pending typed dependencies/rules, UTC/IS-OOS and approved features. Supported timing is completed-bar close; execution and unsupported custom formulas remain out of scope.

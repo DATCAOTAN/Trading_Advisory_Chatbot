@@ -119,6 +119,24 @@ class HistoricalEvaluationWindow(_Record):
         return self
 
 
+class ResearchSignalCondition(_Record):
+    """Typed operands only; unknown operators/references remain unresolved, never parsed."""
+
+    operator: Ref | None = None
+    left: Annotated[str, Field(min_length=1, max_length=120)] | None = None
+    right: Annotated[str, Field(min_length=1, max_length=120)] | None = None
+    constants: tuple[Annotated[float, Field(allow_inf_nan=False)], ...] = Field(default=(), max_length=2)
+
+
+class ResearchSignalRule(_Record):
+    name: Ref
+    action: Literal["ENTRY", "EXIT"]
+    conditions: tuple[ResearchSignalCondition, ...] = Field(default=(), max_length=16)
+    combination: Literal["ALL", "ANY"] | None = None
+    timing: Ref | None = None
+    evaluation_timeframe: Ref | None = None
+
+
 class ResearchDevelopment(_Record):
     """Inert G1 specification plus research-design fields, never an executable strategy."""
 
@@ -130,12 +148,15 @@ class ResearchDevelopment(_Record):
     rejection_criteria: tuple[SpecText, ...] = Field(default=(), max_length=12)
     missing_information: tuple[SpecText, ...] = Field(default=(), max_length=12)
     historical_window: HistoricalEvaluationWindow | None = None
+    signal_rules: tuple[ResearchSignalRule, ...] = Field(default=(), max_length=16)
 
     @model_serializer(mode="wrap")
     def preserve_legacy_identity(self, serialize):
         payload = serialize(self)
         if self.historical_window is None:
             payload.pop("historical_window", None)
+        if not self.signal_rules:
+            payload.pop("signal_rules", None)
         return payload
 
     @classmethod
@@ -150,6 +171,8 @@ class ResearchDevelopment(_Record):
                 raise ValueError(reason) from None
             if error["loc"] and error["loc"][0] == "historical_window":
                 raise ValueError("RESEARCH_HISTORICAL_WINDOW_INVALID") from None
+            if reason == "RESEARCH_SIGNAL_RULE_NAME_CONFLICT" or (error["loc"] and error["loc"][0] == "signal_rules"):
+                raise ValueError("RESEARCH_SIGNAL_RULE_DEFINITION_INVALID") from None
             raise ValueError("RESEARCH_SPECIFICATION_INVALID") from None
         except (ValueError, TypeError):
             raise ValueError("RESEARCH_SPECIFICATION_INVALID") from None
@@ -164,6 +187,8 @@ class ResearchDevelopment(_Record):
         ):
             raise ValueError("RESEARCH_SPECIFICATION_AUTHORITY_CONFLICT")
         window = self.historical_window
+        if len({rule.name for rule in self.signal_rules}) != len(self.signal_rules):
+            raise ValueError("RESEARCH_SIGNAL_RULE_NAME_CONFLICT")
         if window is not None:
             for requirement in self.specification.data_requirements:
                 step = timeframe_duration_seconds(requirement.timeframe) if requirement.timeframe else 0
