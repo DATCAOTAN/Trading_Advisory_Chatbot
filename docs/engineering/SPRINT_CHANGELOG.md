@@ -3589,3 +3589,15 @@ Verification: `FULL_REGRESSION_PASS`, plus isolated browser missing-input accept
 - Full: Windows venv `python -m pytest -q -p no:cacheprovider --tb=short --show-capture=no -rs`: 4,735 passed, 158 subtests passed, 60 private-native-evidence skips, three warnings. Test-process boolean defaults from .env.example; compileall, documentation and diff checks passed.
 - Safe Streamlit 8508 rendered typed rule editor and current blockers without evaluation or acquisition. No new signal runs, trading authority change or broker mutation; original dirty checkout preserved.
 - Real signal results remain unverified pending typed dependencies/rules, UTC/IS-OOS and approved features. Supported timing is completed-bar close; execution and unsupported custom formulas remain out of scope.
+
+### Native Tester Report Admission and Performance Review
+
+Date: 2026-11-11
+Verification: `FOCUSED_PASS`; no native execution
+
+- Added Goal-Driven readiness for approved historical signals, UTC/IS-OOS, confirmed cost inputs and native mapping/parity/isolation/run-approval requirements. No launch control or change to live trading.
+- Fixed-scope StrategyParity is not substituted for typed strategies. Retained old native CSV recheck: 57/58 pass; real_16 SL, TP and risk differ. Updated native parity remains unverified.
+- Added read-only native report admission by exact host-pinned, independently reviewed receipt. Canonical result and opaque raw report bytes are checksum-checked and bound to current R1/R2/feature/signal and attested strategy/binary identity. A file or UI action alone does not grant trust.
+- Exact partition signal comparison and bounded native trade, cost, P&L and equity reconciliation precede display. IS/OOS metrics are derived from admitted ledger values only. Native output normalization/receipt issuance are not implemented or simulated; review remains INCONCLUSIVE without approved criteria.
+- Windows venv `python -m pytest scripts/test_native_backtest.py scripts/test_historical_signals.py scripts/test_historical_features.py scripts/test_goal_historical_data_integration.py scripts/test_mt5_tester_parity.py -q -p no:cacheprovider --tb=short --show-capture=no -rs`: 216 passed, 60 skipped, two dependency warnings. AppTest uses fixtures only. Documentation integrity, compileall and diff checks run separately.
+- No Tester, compiler, MT5 activity, native performance claim or app restart. Remaining launch blockers: supported native mapping, isolation, current math parity and separately approved exact run inputs.

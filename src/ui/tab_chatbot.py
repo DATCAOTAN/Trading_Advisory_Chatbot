@@ -676,7 +676,7 @@ def _render_goal_historical_data(orchestrator, session_id, key, proposal) -> Non
                     orchestrator.prepare_goal_evaluation_input(session_id, key, proposal.head.revision_id, request_id, feature_only=True)
                     st.rerun()
     _render_goal_research_features(orchestrator, session_id, key, proposal.head.revision_id)
-    _render_goal_research_signals(orchestrator, session_id, key, proposal.head.revision_id)
+    _render_goal_research_signals(orchestrator, session_id, key, proposal)
 
 
 def _render_goal_signal_rules(orchestrator, session_id, key, proposal):
@@ -706,9 +706,10 @@ def _render_goal_signal_rules(orchestrator, session_id, key, proposal):
             st.rerun()
 
 
-def _render_goal_research_signals(orchestrator, session_id, key, revision_id):
+def _render_goal_research_signals(orchestrator, session_id, key, proposal):
     from datetime import datetime, timezone
 
+    revision_id = proposal.head.revision_id
     view = orchestrator.inspect_goal_research_signals(session_id)
     with st.expander("Historical strategy signals", expanded=True):
         st.text(view["status"])
@@ -739,6 +740,34 @@ def _render_goal_research_signals(orchestrator, session_id, key, revision_id):
                     index = st.number_input(f"{partition} observation details (row)", min_value=1, max_value=len(rows),
                                             key=f"signal_detail_{partition}_{view['result_sha256']}")
                     st.json(rows[index - 1], expanded=False)
+    _render_native_backtest(proposal, view)
+
+
+def _render_native_backtest(proposal, signals):
+    import os
+    from datetime import datetime, timezone
+    from src.services.trading.research.native_backtest import inspect_native_backtest
+
+    report = inspect_native_backtest(Config.DATA_DIR / "research", proposal, signals,
+        trusted_receipt_sha256=os.getenv("RESEARCH_NATIVE_TESTER_RECEIPT_SHA256", ""))
+    with st.expander("MT5 Strategy Tester research", expanded=True):
+        st.text(f"{report['status']} | {report['research_verdict']}")
+        for blocker in report["blockers"]:
+            st.warning(blocker)
+        if report["costs_missing"]:
+            st.text("Missing cost evidence: " + ", ".join(report["costs_missing"]))
+        if report["performance"] is not None:
+            st.text(f"Historical simulation only | Tester build {report['tester_build']} | {report['currency']} | {report['fill_model']}")
+            st.json({"confirmed_cost_assumptions": report["confirmed_cost_assumptions"]}, expanded=False)
+            for part, result in report["performance"].items():
+                st.markdown(f"**{part}**")
+                st.json({key: value for key, value in result.items() if key not in {"trades", "equity_curve"}})
+                st.dataframe([{**trade,
+                    "entry_utc": datetime.fromtimestamp(trade["entry"]["time_ms"] / 1000, timezone.utc).isoformat(),
+                    "exit_utc": datetime.fromtimestamp(trade["exit"]["time_ms"] / 1000, timezone.utc).isoformat()}
+                    for trade in result["trades"]], use_container_width=True)
+                st.dataframe(result["equity_curve"], use_container_width=True)
+            st.json(report["provenance"], expanded=False)
 
 
 def _render_goal_research_features(orchestrator, session_id, key, revision_id):
