@@ -142,17 +142,18 @@ class HistoricalEvidenceVerifier:
         if sum(first <= row["time"] < last for row in rows) != (last - first) / step:
             return limited
         if development is not None:
+            from .data_integration import resolve_data_dependencies
             requirements = tuple(item for item in development.specification.data_requirements
                                  if item.symbol == verified_source.symbol and item.timeframe == verified_source.timeframe)
             for requirement in requirements:
+                dependency = resolve_data_dependencies(requirement)
                 if (requirement.dataset != "OHLCV" or requirement.usage != "RESEARCH_ONLY"
                         or requirement.symbol != verified_source.symbol or requirement.timeframe != verified_source.timeframe
-                        or not requirement.fields or any(field not in rows[0] for field in requirement.fields)
-                        or requirement.lookback_bars is None or requirement.warmup_bars is None):
+                        or dependency["blockers"] or any(field not in rows[0] for field in dependency["raw_fields"])):
                     return replace(verified_source, reason="RESEARCH_SPECIFICATION_DATA_REQUIREMENTS_NOT_VERIFIED")
                 available = {row["time"] for row in rows}
-                if (requirement.lookback_bars > (last - first) / step or requirement.warmup_bars > len(available) or any(
-                    first - offset * step not in available for offset in range(1, requirement.warmup_bars + 1)
+                if (dependency["lookback"] > (last - first) / step or dependency["warmup"] > len(available) or any(
+                    first - offset * step not in available for offset in range(1, dependency["warmup"] + 1)
                 )):
                     return replace(limited, reason="RESEARCH_SPECIFICATION_COVERAGE_INSUFFICIENT")
             if not requirements:

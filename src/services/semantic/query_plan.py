@@ -528,6 +528,8 @@ class QueryPlanAssembler:
             if (requirement.dataset or "").upper() == "OHLCV":
                 required_fields += ("symbol", "timeframe", "lookback_bars")
             for field_name in required_fields:
+                if field_name == "fields" and requirement.computations:
+                    continue
                 if getattr(requirement, field_name) in (None, ()):
                     missing.append(f"{prefix}.data_requirements[{index}].{field_name}")
         for index, output in enumerate(spec.outputs):

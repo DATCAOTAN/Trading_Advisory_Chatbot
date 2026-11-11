@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 
 from ..market.timeframes import broker_symbol_for, timeframe_duration_seconds
 from .evidence_verification import ApprovedHistoricalSource
-from .historical_dataset import BAR_FIELDS, HistoricalDataRequest, canonical_bytes, checksum, load_dataset, utc
+from .historical_dataset import BAR_FIELDS, BAR_FIELD_TYPES, HistoricalDataRequest, canonical_bytes, checksum, load_dataset, utc
 from .input_package import _local
 from .proposal import ResearchProposal, ResearchScope
 
@@ -33,6 +33,126 @@ class RevisionHistoricalRequest:
         return checksum(canonical_bytes(asdict(self)))
 
 
+def resolve_data_dependencies(requirement) -> dict:
+    """Resolve bounded typed metadata only. Never parse expressions or compute indicators."""
+    from src.services.semantic.query_plan import QueryPlanAssembler
+    from ..reasoning.strategy_evidence import INDICATOR_REGISTRY
+
+    raw = {"time": BAR_FIELD_TYPES["time"]}
+    blockers, derived, active = [], {}, set()
+    if not requirement.fields and not requirement.computations:
+        blockers.append("fields")
+    declarations = {}
+    for item in requirement.computations:
+        if item.name in declarations or item.name in BAR_FIELD_TYPES:
+            blockers.append(f"COMPUTATION_NAME_CONFLICT:{item.name}")
+        declarations[item.name] = item
+
+    def visit(name):
+        if name in BAR_FIELD_TYPES:
+            raw[name] = BAR_FIELD_TYPES[name]
+            return {"output_type": BAR_FIELD_TYPES[name], "lookback": 0, "warmup": 0}
+        if name in active:
+            blockers.append(f"DEPENDENCY_CYCLE:{name}")
+            return None
+        if name in derived:
+            return derived[name]
+        declaration = declarations.get(name)
+        if declaration is None:
+            blockers.append(f"DEPENDENCY_DECLARATION_REQUIRED:{name}")
+            return None
+        active.add(name)
+        start = len(blockers)
+        report = {"name": name, "timeframe": declaration.timeframe or requirement.timeframe,
+                  "indicator_id": declaration.indicator_id, "output_type": declaration.output_type,
+                  "status": "DECLARED_UNVERIFIED", "lookback": declaration.lookback_bars,
+                  "warmup": declaration.warmup_bars, "inputs": []}
+        if declaration.timeframe is not None and declaration.timeframe != requirement.timeframe:
+            blockers.append(f"DEPENDENCY_TIMEFRAME_CONFLICT:{name}")
+        definition = INDICATOR_REGISTRY.get(declaration.indicator_id)
+        if definition is not None:
+            for field in definition.required_fields:
+                visit(field)
+            report["inputs"] = [{"field": field, "kind": "RAW_MT5", "data_type": BAR_FIELD_TYPES[field]}
+                                for field in definition.required_fields]
+            values = declaration.parameters
+            if set(values) != set(definition.parameters) or not QueryPlanAssembler._indicator_parameters_valid(definition.indicator_id, values):
+                blockers.append(f"INDICATOR_PARAMETERS_INVALID_OR_MISSING:{name}")
+            elif requirement.timeframe not in definition.supported_timeframes:
+                blockers.append(f"INDICATOR_TIMEFRAME_UNSUPPORTED:{name}")
+            else:
+                report.update(status="SUPPORTED_REGISTRY_CONTRACT", lookback=definition.minimum_bars,
+                              warmup=definition.warmup(values), output_type="FLOAT64", formula_version=definition.formula_version)
+                if declaration.output_type not in {None, "FLOAT64"}:
+                    blockers.append(f"DEPENDENCY_OUTPUT_TYPE_CONFLICT:{name}")
+                output = declaration.output_field or (definition.output_fields[0] if len(definition.output_fields) == 1 else None)
+                if output not in definition.output_fields:
+                    blockers.append(f"INDICATOR_OUTPUT_INVALID_OR_MISSING:{name}")
+                report["output_field"] = output
+                if declaration.inputs and (
+                    len(declaration.inputs) != len(definition.required_fields)
+                    or {item.field for item in declaration.inputs} != set(definition.required_fields)
+                    or any(item.kind != "RAW_MT5" or item.data_type != BAR_FIELD_TYPES.get(item.field) for item in declaration.inputs)
+                ):
+                    blockers.append(f"REGISTRY_INPUT_DECLARATION_CONFLICT:{name}")
+                if declaration.lookback_bars is not None and declaration.lookback_bars < report["lookback"]:
+                    blockers.append(f"DECLARED_LOOKBACK_BELOW_REQUIRED:{name}")
+                if declaration.warmup_bars is not None and declaration.warmup_bars < report["warmup"]:
+                    blockers.append(f"DECLARED_WARMUP_BELOW_REQUIRED:{name}")
+                report["lookback"] = max(report["lookback"], declaration.lookback_bars or 0)
+                report["warmup"] = max(report["warmup"], declaration.warmup_bars or 0)
+        else:
+            if not declaration.inputs or declaration.output_type is None or not declaration.definition:
+                blockers.append(f"CUSTOM_DEPENDENCY_DECLARATION_INCOMPLETE:{name}")
+            if declaration.lookback_bars is None or declaration.warmup_bars is None:
+                blockers.append(f"CUSTOM_DEPENDENCY_CONTEXT_REQUIRED:{name}")
+            for item in declaration.inputs:
+                report["inputs"].append(item.model_dump())
+                if item.kind == "RAW_MT5" and item.field not in BAR_FIELD_TYPES:
+                    blockers.append(f"RAW_MT5_FIELD_INVALID:{item.field}")
+                    continue
+                if item.kind == "DERIVED" and item.field not in declarations:
+                    blockers.append(f"DERIVED_INPUT_UNDECLARED:{item.field}")
+                    continue
+                child = visit(item.field)
+                if child is not None:
+                    if child["output_type"] != item.data_type:
+                        blockers.append(f"DEPENDENCY_INPUT_TYPE_CONFLICT:{name}:{item.field}")
+                    if (report["lookback"] is not None and child["lookback"] is not None and report["lookback"] < child["lookback"]
+                            or report["warmup"] is not None and child["warmup"] is not None and report["warmup"] < child["warmup"]):
+                        blockers.append(f"DECLARED_CONTEXT_BELOW_DEPENDENCY_MINIMUM:{name}")
+        active.remove(name)
+        if len(blockers) != start:
+            report["status"] = "BLOCKED"
+        derived[name] = report
+        return report
+
+    for field in (*requirement.fields, *declarations):
+        visit(field)
+    minimum = max((item["lookback"] or 0 for item in derived.values()), default=0)
+    context = max((item["warmup"] or 0 for item in derived.values()), default=0)
+    lookback, warmup = requirement.lookback_bars, requirement.warmup_bars
+    if lookback is None and minimum and all(item["lookback"] is not None for item in derived.values()):
+        lookback = minimum
+    elif lookback is not None and lookback < minimum:
+        blockers.append("DECLARED_LOOKBACK_BELOW_DEPENDENCY_MINIMUM")
+    if warmup is None and derived and all(item["warmup"] is not None for item in derived.values()):
+        warmup = context
+    elif warmup is not None and warmup < context:
+        blockers.append("DECLARED_WARMUP_BELOW_DEPENDENCY_MINIMUM")
+    if lookback is None:
+        blockers.append("lookback_bars")
+    if warmup is None:
+        blockers.append("warmup_bars")
+    return {"raw_fields": list(raw), "raw_types": raw, "derived_computations": list(derived.values()),
+            "lookback": lookback, "warmup": warmup, "required_lookback": minimum, "required_warmup": context,
+            "explicit_lookback": requirement.lookback_bars, "explicit_warmup": requirement.warmup_bars,
+            "blockers": list(dict.fromkeys(blockers)), "supported_raw_fields": dict(BAR_FIELD_TYPES),
+            "supported_indicators": list(INDICATOR_REGISTRY),
+            "unsupported_computations": [item["name"] for item in derived.values() if item["status"] == "DECLARED_UNVERIFIED"],
+            "execution_allowed": False}
+
+
 def historical_requests(proposal: ResearchProposal) -> tuple[list[RevisionHistoricalRequest], list[str]]:
     development = proposal.head.content.development
     if development is None:
@@ -43,41 +163,57 @@ def historical_requests(proposal: ResearchProposal) -> tuple[list[RevisionHistor
         if window is None or getattr(window, name) is None:
             missing.append("historical_window." + name)
     complete_window = not missing
-    requests = []
+    requests, groups, blocked_groups = [], {}, set()
     requirements = development.specification.data_requirements
     if not requirements:
         return [], [*missing, "specification.data_requirements"]
     for index, requirement in enumerate(requirements):
-        absent = [name for name in ("dataset", "usage", "symbol", "timeframe", "fields", "lookback_bars", "warmup_bars")
+        absent = [name for name in ("dataset", "usage", "symbol", "timeframe")
                   if getattr(requirement, name) is None or getattr(requirement, name) == ()]
+        if not requirement.fields and not requirement.computations:
+            absent.append("fields")
+        dependency = resolve_data_dependencies(requirement)
+        missing.extend(f"data_requirements[{index}].{reason}" for reason in dependency["blockers"])
         if absent:
+            blocked_groups.add((requirement.symbol, requirement.timeframe))
             missing.extend(f"data_requirements[{index}].{name}" for name in absent)
             continue
         if requirement.dataset != "OHLCV" or requirement.usage != "RESEARCH_ONLY":
+            blocked_groups.add((requirement.symbol, requirement.timeframe))
             missing.append(f"data_requirements[{index}].OHLCV_RESEARCH_ONLY_REQUIRED")
             continue
-        if not complete_window:
+        if dependency["blockers"]:
+            blocked_groups.add((requirement.symbol, requirement.timeframe))
             continue
-        step = timeframe_duration_seconds(requirement.timeframe)
+        identity = (requirement.symbol, requirement.timeframe)
+        group = groups.setdefault(identity, {"index": index, "fields": [], "lookback": 0, "warmup": 0})
+        group["fields"] = list(dict.fromkeys((*group["fields"], *dependency["raw_fields"])))
+        group["lookback"] = max(group["lookback"], dependency["lookback"])
+        group["warmup"] = max(group["warmup"], dependency["warmup"])
+    for (symbol, timeframe), group in groups.items():
+        index = group["index"]
+        if not complete_window or (symbol, timeframe) in blocked_groups:
+            continue
+        step = timeframe_duration_seconds(timeframe)
         if not step or any(bound.timestamp() % step for bound in (window.start, window.end, window.split) if bound):
             missing.append(f"data_requirements[{index}].TIMEFRAME_OR_WINDOW_ALIGNMENT_INVALID")
             continue
-        if requirement.lookback_bars > (window.end - window.start).total_seconds() / step:
+        if group["lookback"] > (window.end - window.start).total_seconds() / step:
             missing.append(f"data_requirements[{index}].LOOKBACK_EXCEEDS_DECLARED_WINDOW")
             continue
         # Exporter warmup_records is a minimum record count, not pre-window context.
         # Fetch real preceding bars explicitly; never manufacture them at session gaps.
         try:
-            exported_start = window.start - timedelta(seconds=requirement.warmup_bars * step)
-            export = HistoricalDataRequest(requirement.symbol, broker_symbol_for(requirement.symbol),
-                requirement.timeframe, exported_start.isoformat(), window.end.isoformat(),
-                "bars", max(1, requirement.lookback_bars), window.session_policy)
+            exported_start = window.start - timedelta(seconds=group["warmup"] * step)
+            export = HistoricalDataRequest(symbol, broker_symbol_for(symbol),
+                timeframe, exported_start.isoformat(), window.end.isoformat(),
+                "bars", max(1, group["lookback"]), window.session_policy)
         except (ValueError, OverflowError):
             missing.append(f"data_requirements[{index}].HISTORICAL_REQUEST_UNSUPPORTED")
             continue
         requests.append(RevisionHistoricalRequest(proposal.proposal_id, proposal.head.revision_id,
-            proposal.head.content.hypothesis_fingerprint(), index, tuple(dict.fromkeys(("time", *requirement.fields))),
-            requirement.lookback_bars, requirement.warmup_bars, window.start.isoformat(), window.end.isoformat(),
+            proposal.head.content.hypothesis_fingerprint(), index, tuple(group["fields"]),
+            group["lookback"], group["warmup"], window.start.isoformat(), window.end.isoformat(),
             window.split.isoformat() if window.split else None, export))
     return requests, missing
 

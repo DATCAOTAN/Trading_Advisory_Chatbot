@@ -633,6 +633,8 @@ def _render_goal_historical_data(orchestrator, session_id, key, proposal) -> Non
         st.rerun()
     view = orchestrator.inspect_goal_historical_data(session_id)
     st.text(f"{view['status']} | IS/OOS: {view['is_oos']}")
+    with st.expander("Raw data and derived computation dependencies", expanded=True):
+        st.json(view["dependencies"])
     st.json({"trading_cost_readiness": view["costs"]})
     for blocker in view["blockers"]:
         st.warning(blocker)

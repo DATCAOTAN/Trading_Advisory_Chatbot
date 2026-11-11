@@ -19,6 +19,7 @@ from pydantic import (
     ValidationError,
     ValidationInfo,
     field_validator,
+    model_serializer,
 )
 from pydantic_core import PydanticCustomError
 
@@ -196,6 +197,34 @@ class ComputationalParameter(_StrictSemanticPayload):
     unit: SpecLabel | None = None
 
 
+DependencyType = Literal["FLOAT64", "INT64", "UTC_SECONDS"]
+
+
+class ComputationalDependencyInput(_StrictSemanticPayload):
+    model_config = ConfigDict(frozen=True)
+
+    field: SpecLabel
+    kind: Literal["RAW_MT5", "DERIVED"]
+    data_type: DependencyType
+
+
+class ComputationalDependency(_StrictSemanticPayload):
+    """An output reference and its declared inputs, never an executable implementation."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: SpecLabel
+    indicator_id: SpecLabel | None = None
+    parameters: dict[str, StrictFiniteNumber] = Field(default_factory=dict, max_length=12)
+    inputs: tuple[ComputationalDependencyInput, ...] = Field(default=(), strict=False, max_length=16)
+    output_type: DependencyType | None = None
+    output_field: SpecLabel | None = None
+    definition: SpecText | None = None
+    timeframe: SpecLabel | None = None
+    lookback_bars: int | None = Field(default=None, gt=0, description="Declared total raw-bar minimum, including upstream dependencies; not inferred from formula")
+    warmup_bars: int | None = Field(default=None, ge=0, description="Declared total pre-window raw-bar context, including upstream dependencies; not numerical verification")
+
+
 class ComputationalDataRequirement(_StrictSemanticPayload):
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
 
@@ -208,6 +237,14 @@ class ComputationalDataRequirement(_StrictSemanticPayload):
     max_age_seconds: int | None = Field(default=None, gt=0)
     completeness: SpecText | None = None
     usage: Literal["RESEARCH_ONLY", "EXECUTION_RELEVANT"] | None = None
+    computations: tuple[ComputationalDependency, ...] = Field(default=(), strict=False, max_length=12)
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_identity(self, serialize):
+        payload = serialize(self)
+        if not self.computations:
+            payload.pop("computations", None)
+        return payload
 
 
 class ComputationalDataAssessment(_StrictSemanticPayload):

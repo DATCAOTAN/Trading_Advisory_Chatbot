@@ -284,8 +284,13 @@ def develop_research_strategy(proposal: ResearchProposal, provider) -> ResearchD
         + canonical_bytes(ResearchDevelopment.model_json_schema()).decode("utf-8")
         + " The specification object permits ONLY these keys: "
         + ", ".join(ComputationalSpecification.model_fields)
-        + ". Put market/symbol/timeframe ONLY in data_requirements objects. Indicators and custom calculations "
-        "belong in formula/steps/parameters, NOT additional indicator objects or keys. SL/TP rules belong in "
+        + ". Put market/symbol/timeframe ONLY in data_requirements objects. Describe calculations in formula/steps, "
+        "and declare derived outputs in data_requirements[].computations using the typed schema. "
+        "fields contains raw MT5 bar fields or exact declared output names, never an undeclared indicator label. "
+        "For registered indicators provide exact canonical indicator_id and explicit parameters, not defaults. "
+        "For new formulas declare typed RAW_MT5/DERIVED inputs, output type, definition and total lookback/warmup "
+        "only when known; otherwise leave unresolved. Do not infer parameters from a name or claim an implementation. "
+        "Never add unrecognized top-level indicator keys. SL/TP rules belong in "
         "exit, sizing rules in management, not separate risk/stop_loss/take_profit/sizing fields. "
         "Use the root in_sample/out_of_sample strings for split scope, root transaction_costs as an array of "
         "name/value/unit parameter objects. All rule arrays contain STRINGS, never objects. "

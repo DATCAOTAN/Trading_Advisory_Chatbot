@@ -496,7 +496,7 @@ class RAGOrchestrator:
         return self.inspect_goal_research(session_id)
 
     def inspect_goal_historical_data(self, session_id):
-        from src.services.trading.research.data_integration import historical_requests, inspect_historical_data, matching_history, cost_readiness, approved_sources
+        from src.services.trading.research.data_integration import historical_requests, inspect_historical_data, matching_history, cost_readiness, approved_sources, resolve_data_dependencies
         from src.services.trading.research.evidence_verification import HistoricalEvidenceVerifier
         _, _, _, _, scope, _, record = self._goal_research_context(session_id)
         proposal = self.inspect_goal_research(session_id)["proposal"]
@@ -529,6 +529,8 @@ class RAGOrchestrator:
             reports.append(report)
         window = proposal.head.content.development.historical_window if proposal.head.content.development else None
         return {"requests": reports, "blockers": missing, "costs": cost_readiness(proposal), "execution_allowed": False,
+                "dependencies": [{"requirement_index": index, "symbol": req.symbol, "timeframe": req.timeframe,
+                                  **resolve_data_dependencies(req)} for index, req in enumerate(proposal.head.content.development.specification.data_requirements)] if proposal.head.content.development else [],
                 "status": "HISTORICAL_ACQUISITION_PENDING_USER_INPUT" if window is None or window.start is None or window.end is None else "HISTORICAL_SCOPE_DEFINED",
                 "is_oos": "MISSING_TYPED_BOUNDARIES" if window is None or window.split is None else "BOUNDARIES_DEFINED_NOT_EVALUATED"}
 

@@ -16,6 +16,7 @@ from src.services.trading.market.timeframes import timeframe_duration_seconds
 SCHEMA = "mt5-research-dataset/v1"
 EXPORTER_VERSION = "mt5-research-export/v2"
 BAR_FIELDS = ("time", "open", "high", "low", "close", "tick_volume", "spread", "real_volume")
+BAR_FIELD_TYPES = dict(zip(BAR_FIELDS, ("UTC_SECONDS", "FLOAT64", "FLOAT64", "FLOAT64", "FLOAT64", "INT64", "INT64", "INT64")))
 TICK_FIELDS = ("time", "time_msc", "bid", "ask", "last", "flags")
 SESSION_POLICIES = {"UTC_WEEKDAYS_CONSERVATIVE_V1", "CONTINUOUS_UTC_V1"}
 
