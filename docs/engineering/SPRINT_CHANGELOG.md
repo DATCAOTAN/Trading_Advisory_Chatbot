@@ -3601,3 +3601,14 @@ Verification: `FOCUSED_PASS`; no native execution
 - Exact partition signal comparison and bounded native trade, cost, P&L and equity reconciliation precede display. IS/OOS metrics are derived from admitted ledger values only. Native output normalization/receipt issuance are not implemented or simulated; review remains INCONCLUSIVE without approved criteria.
 - Windows venv `python -m pytest scripts/test_native_backtest.py scripts/test_historical_signals.py scripts/test_historical_features.py scripts/test_goal_historical_data_integration.py scripts/test_mt5_tester_parity.py -q -p no:cacheprovider --tb=short --show-capture=no -rs`: 216 passed, 60 skipped, two dependency warnings. AppTest uses fixtures only. Documentation integrity, compileall and diff checks run separately.
 - No Tester, compiler, MT5 activity, native performance claim or app restart. Remaining launch blockers: supported native mapping, isolation, current math parity and separately approved exact run inputs.
+
+### Native Tester Signal Replay Producer
+
+Date: 2026-11-11
+Verification: `FOCUSED_PASS` / `NATIVE_RUNTIME_ACCEPTANCE_PENDING`
+
+- Preserved the existing MQL Decimal half-tick fix and unchanged expected values. Added archived real_16 regression; old native evidence remains 57/58, current Python matches 58/58. Repinned 116 vector and 30 probe package to current local sources; no native PASS.
+- Added research-only verified schedule export and Tester EA for an explicit single-market fixed-volume absolute-bracket profile. The EA is disabled by default, requires Tester-only execution and captures native signal consumption, deals, action references, quotes and equity. Unsupported management, timing and incomplete evidence fail closed.
+- Added offline normalization to the existing raw/result artifacts. The host must separately review exact schedule, source, binary and capture evidence and issue the existing trusted receipt; the producer does not issue one. UI distinguishes replay match from independent native calculation parity.
+- Windows venv `python -m pytest scripts/test_native_replay.py scripts/test_native_backtest.py scripts/test_historical_signals.py scripts/test_research_input_package.py scripts/test_mt5_tester_parity.py -q -p no:cacheprovider --tb=short --show-capture=no -rs`: 180 passed, 60 skipped, two dependency warnings. Documentation, compilation and diff checks separate. No full regression because shared live core was untouched.
+- No native compilation, Tester run, generated code, live app restart or MT5 mutation. Remaining: verified isolation, new binary math parity, approved replay policy/source and exact separately authorized native run.

@@ -155,7 +155,7 @@ def inspect_native_backtest(root, proposal, signals, *, trusted_receipt_sha256="
     report = {"status": "BLOCKED", "research_verdict": "INCONCLUSIVE", "performance": None,
               "native_launch": "UNAVAILABLE", "execution_allowed": False, **readiness(proposal, signals)}
     if not trusted_receipt_sha256:
-        report["blockers"] += ["NATIVE_STRATEGY_MAPPING_UNSUPPORTED_BY_PARITY_EA",
+        report["blockers"] += ["NATIVE_STRATEGY_MAPPING_UNSUPPORTED_BY_PARITY_EA", "NATIVE_REPLAY_PROFILE_NOT_QUALIFIED",
                                "NATIVE_NUMERIC_PARITY_NOT_VERIFIED", "WHOLE_ENVIRONMENT_ISOLATION_NOT_PROVEN",
                                "NATIVE_TESTER_RUN_APPROVAL_REQUIRED", "NATIVE_TESTER_RESULT_NOT_ATTESTED"]
     if report["blockers"]:
@@ -180,6 +180,10 @@ def inspect_native_backtest(root, proposal, signals, *, trusted_receipt_sha256="
                 or receipt.get("execution_allowed") is not False):
             raise ValueError("BACKTEST_TRUSTED_RECEIPT_INVALID")
         result = _object(root, "native_tester_result", receipt["result_sha256"])
+        mode = result.get("evaluation_mode")
+        if mode is not None and (mode != "VERIFIED_SIGNAL_REPLAY_BACKTEST" or receipt.get("evaluation_mode") != mode
+                or not _pin(result.get("run_evidence_sha256")) or result["run_evidence_sha256"] != receipt.get("run_evidence_sha256")):
+            raise ValueError("BACKTEST_REPLAY_RECEIPT_MISMATCH")
         if (result.get("schema_version") != "r1-native-tester-result/v1" or result.get("kind") != "MT5_TESTER_SIMULATION"
                 or result.get("execution_allowed") is not False or result.get("signal_sha256") != signals["result_sha256"]
                 or result.get("strategy_sha256") != receipt["strategy_sha256"]
@@ -199,7 +203,8 @@ def inspect_native_backtest(root, proposal, signals, *, trusted_receipt_sha256="
             context.prec = 64
             performance = {part: _performance(result["partitions"][part], signal["partitions"][part], first, last)
                            for part, first, last in (("IS", start, split), ("OOS", split, end))}
-        return {**report, "status": "VERIFIED_NATIVE_REPORT", "signal_parity": "MATCH",
+        return {**report, "status": "VERIFIED_NATIVE_REPORT", "signal_parity": "REPLAY_MATCH_ONLY" if mode else "MATCH",
+                "evaluation_mode": mode,
                 "performance": performance, "currency": result["currency"], "tester_build": result["tester_build"],
                 "kind": "MT5_TESTER_SIMULATION", "fill_model": result["fill_model"],
                 "confirmed_cost_assumptions": cost_readiness(proposal)["assumptions"],

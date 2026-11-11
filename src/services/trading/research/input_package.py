@@ -25,9 +25,9 @@ def _local(path: Path) -> Path:
     return path
 
 
-def _publish(directory: Path, payload: bytes, *, prefix: str = "research_input") -> Path:
+def _publish(directory: Path, payload: bytes, *, prefix: str = "research_input", suffix: str = "json") -> Path:
     _local(directory).mkdir(exist_ok=True)
-    path = directory / f"{prefix}_{checksum(payload)}.json"
+    path = directory / f"{prefix}_{checksum(payload)}.{suffix}"
     temporary = None
     try:
         with NamedTemporaryFile(dir=directory, delete=False) as stream:

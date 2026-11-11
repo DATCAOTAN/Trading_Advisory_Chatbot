@@ -757,6 +757,8 @@ def _render_native_backtest(proposal, signals):
         if report["costs_missing"]:
             st.text("Missing cost evidence: " + ", ".join(report["costs_missing"]))
         if report["performance"] is not None:
+            if report["evaluation_mode"]:
+                st.text(f"{report['evaluation_mode']} | {report['signal_parity']}")
             st.text(f"Historical simulation only | Tester build {report['tester_build']} | {report['currency']} | {report['fill_model']}")
             st.json({"confirmed_cost_assumptions": report["confirmed_cost_assumptions"]}, expanded=False)
             for part, result in report["performance"].items():

@@ -27,10 +27,11 @@ def declaration(indicator="EMA", parameters=None, output="value", name="feature"
     return {"name": name, "indicator_id": indicator, "parameters": parameters or {"period": 3}, "output_field": output}
 
 
-def configured(app, tmp_path, monkeypatch, *, computations=None, multi=False, costs=True, ready=True, signal_rules=None, confirmed=False):
+def configured(app, tmp_path, monkeypatch, *, computations=None, multi=False, costs=True, ready=True, signal_rules=None, confirmed=False, specification_updates=None):
     subject, db, history = setup(app, tmp_path, monkeypatch, costs=costs)
     view = subject.inspect_goal_research("A")
     payload = specification(costs=costs)
+    payload["specification"].update(specification_updates or {})
     if signal_rules is not None:
         payload["signal_rules"] = signal_rules
     requirement = payload["specification"]["data_requirements"][0]
