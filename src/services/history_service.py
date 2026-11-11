@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 import datetime
 import threading
@@ -211,6 +212,38 @@ class HistoryService:
         except redis.RedisError:
             pass
         return saved
+
+    def load_research_snapshot(self, session_id: str) -> Dict:
+        """Research uses persistent conversation state, never a possibly stale Redis view."""
+        if not session_id:
+            raise ValueError("RESEARCH_CONVERSATION_REQUIRED")
+        try:
+            document = self.sessions_col.find_one(
+                {"_id": session_id}, {"messages": 1, "research_proposals": 1},
+            )
+        except PyMongoError:
+            raise RuntimeError("RESEARCH_STORAGE_UNAVAILABLE") from None
+        if document is None:
+            raise ValueError("RESEARCH_CONVERSATION_UNAVAILABLE")
+        return document
+
+    def save_research_state(self, session_id, *, count, tail, key, expected, record) -> bool:
+        """CAS protects both the canonical brief and the immutable proposal head."""
+        if not re.fullmatch(r"[a-f0-9]{64}", key) or count < 1:
+            raise ValueError("RESEARCH_STORAGE_KEY_INVALID")
+        path = f"research_proposals.{key}"
+        query = {
+            "_id": session_id, f"messages.{count - 1}": {"$eq": tail},
+            f"messages.{count}": {"$exists": False},
+            path: {"$exists": False} if expected is None else {"$eq": expected},
+        }
+        try:
+            result = self.sessions_col.update_one(query, {"$set": {
+                path: record, "updated_at": datetime.datetime.now(datetime.timezone.utc),
+            }}, upsert=False)
+        except PyMongoError:
+            raise RuntimeError("RESEARCH_STORAGE_UNAVAILABLE") from None
+        return result.modified_count == 1
 
     def delete_session(self, session_id: str):
         """Xóa vĩnh viễn một phiên chat."""

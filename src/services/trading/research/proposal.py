@@ -128,6 +128,33 @@ def _fingerprint(value) -> str:
     return checksum(canonical_bytes(value))
 
 
+def generate_research_hypothesis(brief: BriefReference, provider) -> ResearchContent:
+    """One explicit suggestion call; the provider cannot supply evidence or authority."""
+    prompt = (
+        "Propose ONE bounded, falsifiable historical research hypothesis for this canonical brief. "
+        "Return only JSON with hypothesis (nonempty, at most 500 characters), timeframes (array), "
+        "and limitations (array, each at most 240 characters). Use the brief's language. "
+        "Specify an observable comparison and how it could be disproven, not a profitability promise. "
+        "No research has run. Do not claim observed prices, statistics, experiments, returns or evidence. "
+        "Preserve explicit constraints. Unknown risk, horizon or other missing facts stay unknown; "
+        "identify missing prerequisites in limitations. Any proposed timeframe is an AI suggestion. "
+        "No strategy code, trading instruction, approval, evidence record or execution authority. Brief: "
+        + canonical_bytes(brief.model_dump(mode="json")).decode("utf-8")
+    )
+    raw = provider.complete(prompt, max_tokens=1200, temperature=0.2)
+    if not isinstance(raw, str) or len(raw.encode("utf-8")) > 8192:
+        raise ValueError("RESEARCH_HYPOTHESIS_INVALID")
+    import json
+
+    payload = json.loads(raw)
+    if not isinstance(payload, dict) or set(payload) != {"hypothesis", "timeframes", "limitations"}:
+        raise ValueError("RESEARCH_HYPOTHESIS_INVALID")
+    content = ResearchContent.model_validate_json(raw)
+    if not content.hypothesis.strip():
+        raise ValueError("RESEARCH_HYPOTHESIS_EMPTY")
+    return content
+
+
 class ResearchRevision(_Record):
     execution_allowed: Literal[False] = False
     revision_id: Ref

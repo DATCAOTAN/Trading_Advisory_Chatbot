@@ -278,6 +278,7 @@ def render(orchestrator, feature_flags: dict):
             latest_trading_state,
         )
     if not user_query:
+        _render_goal_research(orchestrator)
         _render_computational_specification_completion(orchestrator)
         _render_research_readiness(orchestrator)
 
@@ -426,6 +427,8 @@ def render(orchestrator, feature_flags: dict):
             )
             if isinstance(semantic_context, dict):
                 assistant_msg["resolved_semantic_state"] = semantic_context
+            if intent == "RESEARCH_BRIEF":
+                assistant_msg["research_brief"] = runtime_artifacts["research_brief"]
         st.session_state.messages.append(assistant_msg)
         HistoryService().append_message(
             st.session_state.current_session_id,
@@ -497,6 +500,59 @@ def render(orchestrator, feature_flags: dict):
             )
         elif intent == "COMPUTATIONAL_SPECIFICATION":
             _render_computational_specification_completion(orchestrator)
+        elif intent == "RESEARCH_BRIEF":
+            _render_goal_research(orchestrator)
+
+
+def _render_goal_research(orchestrator) -> None:
+    messages = st.session_state.messages
+    session_id = st.session_state.current_session_id
+    if not session_id or not messages or messages[-1].get("intent") != "RESEARCH_BRIEF":
+        return
+    try:
+        view = orchestrator.inspect_goal_research(session_id, expected_tail=messages[-1])
+        if st.session_state.current_session_id != session_id:
+            return
+        key, proposal = view["key"], view["proposal"]
+        st.subheader("Research hypothesis")
+        if proposal is None:
+            if view["status"] == "NOT_GENERATED":
+                if st.button("Generate testable hypothesis", key=f"research_generate_{key}"):
+                    orchestrator.generate_goal_research(session_id, key)
+                    st.rerun()
+            else:
+                st.warning(f"{view['status']} | {view['reason']}")
+            return
+        proof = None
+        if st.button("Attach / check approved historical evidence", key=f"research_evidence_{key}"):
+            proof = orchestrator.attach_goal_research_evidence(session_id, key, proposal.head.revision_id)
+            if st.session_state.current_session_id != session_id:
+                return
+            proposal = orchestrator.inspect_goal_research(session_id, expected_tail=messages[-1])["proposal"]
+        st.text(f"Proposal: {proposal.proposal_id}")
+        st.text(f"Revision: {proposal.head.revision_id} | Origin: {proposal.origin}")
+        st.text(f"Review: {proposal.review_status(proposal.head.revision_id)}")
+        st.text("Evidence: EVIDENCE_PENDING (no claim support or research approval inferred)")
+        if proof:
+            st.text(f"Independent data check: {proof['outcome']} | {proof['reason']}")
+        st.caption("AI-suggested research only. Not evaluated; no trading or research execution authorization.")
+        st.json(proposal.brief.model_dump(mode="json"))
+        for limitation in proposal.head.content.limitations:
+            st.text(limitation)
+        st.text("Suggested timeframes: " + ", ".join(proposal.head.content.timeframes))
+        with st.form(f"research_revision_{key}_{proposal.head.revision_id}"):
+            hypothesis = st.text_area("Testable hypothesis", value=proposal.head.content.hypothesis, max_chars=500)
+            save = st.form_submit_button("Save hypothesis revision")
+        if save:
+            orchestrator.revise_goal_research(session_id, key, proposal.head.revision_id, hypothesis)
+            st.rerun()
+        with st.expander("Revision history"):
+            for revision in proposal.revisions:
+                st.text(f"{revision.revision_id} | {revision.author} | {proposal.review_status(revision.revision_id)}")
+                st.text(revision.content.hypothesis)
+    except (ValueError, RuntimeError) as exc:
+        reason = str(exc)
+        st.warning(reason if re.fullmatch(r"[A-Z][A-Z0-9_]{2,90}", reason) else "RESEARCH_STATE_INVALID_OR_UNAVAILABLE")
 
 
 def _render_research_readiness(orchestrator) -> None:

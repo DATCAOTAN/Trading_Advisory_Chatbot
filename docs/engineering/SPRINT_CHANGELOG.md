@@ -3490,3 +3490,15 @@ Verification: `FULL_REGRESSION_PASS` (offline software only)
 - Initial full run: 1 failed, 4,528 passed, 158 subtests, 60 skipped. Focused semantic/Draft/research correction: 341 passed. G2/native/Bridge/documentation group: 317 passed, 60 skipped. Compileall and four PowerShell parser checks passed; final documentation/diff checks recorded separately.
 - Static safety: one production order_send call-site; zero MetaTrader5 imports under src. No live runtime, worker/listener, MT5, native Tester, research computation/acquisition, VM or Docker/WSL actions. Git publication does not authorize those operations.
 - Preserved/excluded: embedding cache, personal .agents rules, six raw G2 transcripts, edit_smoke, datasets, binaries, credentials and journals. G2.1 remains PARTIAL and G2.2 unauthorized. Live/deployment/native/performance acceptance was not repeated.
+
+### Goal-Driven Research - Brief to Persistent R1 Proposal
+
+Date: 2026-11-11
+Verification: `FULL_REGRESSION_PASS` (offline application verification)
+
+- Connected existing canonical research briefs, R1 immutable proposals, Mongo conversation persistence and Streamlit Advisory. One explicit Generate action dispatches a bounded structured hypothesis call through the existing provider transport. Strict ResearchContent accepts no provider evidence, strategy code or authority fields.
+- Added durable generation claims and exact brief/count/scope/record CAS; stale/deleted conversations, duplicates, concurrent writes and stale UI views fail closed. AI_RESEARCHED origin and canonical constraints/provenance survive user-authored revisions. Refresh/switch reload from persistent conversation state; no extra collection or semantic parser.
+- Added independent R2 attach/check for the existing trusted approved binding only. Data PASS never approves the new proposal, supports its claim or grants execution. No source scanning, broker access, backtest or generated-code execution.
+- Focused command: original Windows venv `python -m pytest scripts/test_goal_research_workflow.py scripts/test_goal_only_research_brief.py scripts/test_research_proposal.py scripts/test_research_readiness.py scripts/test_computational_specification.py -q -p no:cacheprovider --tb=short`: 168 passed, including 26 new workflow/AppTest cases.
+- Final full command: `python -m pytest -q -p no:cacheprovider --tb=short -rs`: 4,555 passed, 158 subtests, 60 skips requiring retained private native evidence, three existing warnings. Compileall and scoped secret/safety checks passed. Documentation/diff checks are separate. Test child processes alone receive .env.example boolean defaults.
+- No live provider/Mongo/browser acceptance; synthetic fixtures are not broker evidence. No live-app restart, MT5/trading, Hyper-V, native Tester, Bridge runtime or G2.2. Interrupted generation remains claimed with no automatic retry; a fresh explicit brief is needed to try again. Original dirty checkout and protected data remain unchanged.

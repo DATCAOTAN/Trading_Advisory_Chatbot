@@ -313,6 +313,158 @@ class RAGOrchestrator:
     def sync_knowledge_base(self, force: bool = False) -> dict:
         return self.vector_service.sync_documents(force=force)
 
+    def _goal_research_context(self, session_id, expected_key=None):
+        from src.services.history_service import HistoryService
+        from src.services.trading.research.historical_dataset import canonical_bytes, checksum
+        from src.services.trading.research.proposal import ResearchScope
+
+        history = HistoryService()
+        snapshot = history.load_research_snapshot(session_id)
+        messages = snapshot.get("messages", [])
+        if not messages or messages[-1].get("intent") != "RESEARCH_BRIEF":
+            raise ValueError("RESEARCH_BRIEF_NOT_CURRENT")
+        tail = messages[-1]
+        state = ResolvedSemanticState.from_dict(tail.get("resolved_semantic_state"))
+        plan = self.decision_context_builder.query_plan_assembler.assemble_resolved("", state)
+        if plan.primary_intent != "strategy_research_brief":
+            raise ValueError("RESEARCH_BRIEF_INVALID")
+        brief = plan.constraints["research_brief"]
+        saved = tail.get("research_brief")
+        plan.plan_id = saved["request_id"] if saved else checksum(canonical_bytes(state.as_dict()))[:24]
+        brief["request_id"] = plan.plan_id
+        if saved is not None and saved != brief:
+            raise ValueError("RESEARCH_BRIEF_CHANGED")
+        scope = ResearchScope(trading_scope=conversation_trading_scope(session_id))
+        plan.constraints["trading_scope"] = scope.trading_scope
+        key = checksum(canonical_bytes([scope.trading_scope, len(messages), plan.plan_id, state.as_dict()]))
+        if expected_key is not None and key != expected_key:
+            raise ValueError("RESEARCH_BRIEF_STALE")
+        record = snapshot.get("research_proposals", {}).get(key)
+        return history, messages, tail, plan, scope, key, record
+
+    def inspect_goal_research(self, session_id: str, *, expected_tail=None) -> dict:
+        from src.services.trading.research.proposal import ResearchContent, ResearchProposal
+
+        _, _, tail, plan, scope, key, record = self._goal_research_context(session_id)
+        if expected_tail is not None and tail != expected_tail:
+            raise ValueError("RESEARCH_BRIEF_STALE")
+        proposal = None
+        if record and record.get("status") == "SAVED":
+            proposal = ResearchProposal.replay(record["proposal"], scope=scope)
+            expected_brief = ResearchProposal.from_plan(
+                plan, scope=scope, origin="AI_RESEARCHED", content=ResearchContent(), created_at=datetime.now(timezone.utc),
+            ).brief
+            if (proposal.brief != expected_brief or proposal.origin != "AI_RESEARCHED"
+                    or proposal.head.revision_id != record["head_revision_id"]):
+                raise ValueError("RESEARCH_PROPOSAL_BINDING_INVALID")
+        return {
+            "key": key, "brief": plan.constraints["research_brief"], "proposal": proposal,
+            "status": record["status"] if record else "NOT_GENERATED",
+            "reason": record.get("reason", "") if record else "", "execution_allowed": False,
+        }
+
+    def generate_goal_research(self, session_id: str, key: str) -> dict:
+        from src.services.trading.reasoning.llm_adapter import ProjectLLMReasoningProvider
+        from src.services.trading.research.proposal import ResearchContent, ResearchProposal, generate_research_hypothesis
+
+        history, messages, tail, plan, scope, key, record = self._goal_research_context(session_id, key)
+        if record is not None:
+            return self.inspect_goal_research(session_id)
+        brief = plan.constraints["research_brief"]
+        if not brief["goal"].get("objective") or not brief["symbols"] or plan.ambiguity:
+            raise ValueError("RESEARCH_GOAL_CLARIFICATION_REQUIRED")
+        base = ResearchProposal.from_plan(
+            plan, scope=scope, origin="AI_RESEARCHED", content=ResearchContent(), created_at=datetime.now(timezone.utc),
+        )
+        claim = {"status": "GENERATING"}
+        if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=None, record=claim):
+            raise ValueError("RESEARCH_GENERATION_ALREADY_CLAIMED")
+        try:
+            provider = getattr(self, "research_hypothesis_provider", None)
+            if provider is None:
+                if not Config.TRADING_REASONING_LLM_ENABLED:
+                    raise RuntimeError("RESEARCH_PROVIDER_UNAVAILABLE")
+                provider = ProjectLLMReasoningProvider(structured_json=True)
+            content = generate_research_hypothesis(base.brief, provider)
+            proposal = ResearchProposal.from_plan(
+                plan, scope=scope, origin="AI_RESEARCHED", content=content, created_at=datetime.now(timezone.utc),
+            )
+            updated = {"status": "SAVED", "proposal": proposal.to_json(), "head_revision_id": proposal.head.revision_id}
+        except Exception as exc:  # Untrusted provider boundary; never persist raw output or errors.
+            updated = {"status": "FAILED", "reason": (
+                "RESEARCH_HYPOTHESIS_INVALID" if isinstance(exc, (ValueError, TypeError)) else "RESEARCH_PROVIDER_UNAVAILABLE"
+            )}
+        if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=claim, record=updated):
+            raise ValueError("RESEARCH_BRIEF_STALE")
+        return self.inspect_goal_research(session_id)
+
+    def revise_goal_research(self, session_id, key, revision_id, hypothesis):
+        from src.services.trading.research.proposal import ResearchContent
+
+        history, messages, tail, _, scope, key, record = self._goal_research_context(session_id, key)
+        current = self.inspect_goal_research(session_id)["proposal"]
+        if current is None or current.head.revision_id != revision_id:
+            raise ValueError("RESEARCH_REVISION_CONFLICT")
+        if not isinstance(hypothesis, str) or not hypothesis.strip():
+            raise ValueError("RESEARCH_HYPOTHESIS_EMPTY")
+        content = ResearchContent.model_validate({**current.head.content.model_dump(), "hypothesis": hypothesis})
+        updated = current.revise(
+            scope=scope, parent_revision_id=revision_id, author="USER_AUTHORED", content=content,
+            created_at=datetime.now(timezone.utc),
+        )
+        if updated is current:
+            return self.inspect_goal_research(session_id)
+        saved = {"status": "SAVED", "proposal": updated.to_json(), "head_revision_id": updated.head.revision_id}
+        if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=record, record=saved):
+            raise ValueError("RESEARCH_REVISION_CONFLICT")
+        return self.inspect_goal_research(session_id)
+
+    def attach_goal_research_evidence(self, session_id, key, revision_id):
+        from src.services.trading.research.evidence_verification import (
+            ApprovedHistoricalSource, HistoricalEvidenceVerifier, review_research_readiness,
+        )
+        from src.services.trading.research.proposal import EvidenceReference, ResearchContent
+
+        history, messages, tail, _, scope, key, record = self._goal_research_context(session_id, key)
+        current = self.inspect_goal_research(session_id)["proposal"]
+        if current is None or current.head.revision_id != revision_id:
+            raise ValueError("RESEARCH_REVISION_CONFLICT")
+        root = Config.DATA_DIR / "research"
+        binding = os.getenv("RESEARCH_READINESS_BINDING", "")
+        readiness = review_research_readiness(
+            root=root, binding=binding, trading_scope=scope.trading_scope, now=datetime.now(timezone.utc),
+        )
+        evidence = readiness["evidence"]
+        if evidence["outcome"] != "VERIFIED_FOR_DECLARED_SCOPE":
+            return {"outcome": "EVIDENCE_PENDING", "reason": evidence["reason"]}
+        pin = json.loads(binding)
+        if pin.get("account_ref") != scope.account_ref:
+            return {"outcome": "EVIDENCE_PENDING", "reason": "RESEARCH_SCOPE_MISMATCH"}
+        reference = EvidenceReference(
+            source_ref="MT5_AUTHENTICATED_LOCAL_TERMINAL", evidence_ref=pin["dataset_id"],
+            kind="HISTORICAL_MARKET_DATA", stance="CONTEXT", status="PENDING",
+            window_start=evidence["window"][0], window_end=evidence["window"][1],
+        )
+        content = ResearchContent.model_validate({**current.head.content.model_dump(), "evidence": (reference,)})
+        updated = current.revise(
+            scope=scope, parent_revision_id=revision_id, author="USER_AUTHORED", content=content,
+            created_at=datetime.now(timezone.utc),
+        )
+        if updated is not current and not history.save_research_state(
+            session_id, count=len(messages), tail=tail, key=key, expected=record,
+            record={"status": "SAVED", "proposal": updated.to_json(), "head_revision_id": updated.head.revision_id},
+        ):
+            raise ValueError("RESEARCH_REVISION_CONFLICT")
+        owner = HistoricalEvidenceVerifier(scope, (
+            ApprovedHistoricalSource(root / "mt5" / pin["dataset_id"], pin["manifest_sha256"], scope),
+        ))
+        proof = owner.inspect(updated, revision_id=updated.head.revision_id, reference=reference, now=datetime.now(timezone.utc))
+        self._goal_research_context(session_id, key)
+        if self.inspect_goal_research(session_id)["proposal"].head.revision_id != updated.head.revision_id:
+            raise ValueError("RESEARCH_REVISION_CONFLICT")
+        return {"outcome": proof.outcome, "reason": proof.reason, "claim_support": proof.claim_support,
+                "revision_id": proof.revision_id, "execution_allowed": False}
+
     def inspect_research_readiness(self, session_id: str) -> dict:
         from src.services.trading.research.evidence_verification import review_research_readiness
 
