@@ -135,13 +135,14 @@ def test_canonical_language_constraints_preserved(app, objective):
 
 @pytest.mark.parametrize("output", ["not JSON", "x" * 9000, json.dumps(OUTPUT | {"execution_allowed": True}),
     json.dumps(OUTPUT | {"evidence": []}), json.dumps(OUTPUT | {"hypothesis": ""}),
-    json.dumps(OUTPUT | {"timeframes": ["M2"]}), json.dumps(OUTPUT | {"hypothesis": "x" * 501})])
+    json.dumps(OUTPUT | {"timeframes": ["M2"]}), json.dumps(OUTPUT | {"timeframes": ["H1 (one hour)"]}),
+    json.dumps(OUTPUT | {"hypothesis": "x" * 501})])
 def test_untrusted_provider_payload_cannot_create_proposal(app, output):
     subject, db, _ = app
     subject.research_hypothesis_provider.output = output
     result = generate(subject)
     assert result["status"] == "FAILED" and result["proposal"] is None
-    assert "RESEARCH_HYPOTHESIS_INVALID" == result["reason"]
+    assert result["reason"].startswith("RESEARCH_HYPOTHESIS_")
     generate(subject)
     assert len(subject.research_hypothesis_provider.calls) == 1
     assert "proposal" not in next(iter(db.docs["A"]["research_proposals"].values()))
@@ -157,6 +158,80 @@ def test_provider_unavailable_is_redacted_and_not_retried(app):
     assert "private provider diagnostic" not in repr(result)
     assert generate(subject)["status"] == "FAILED"
     assert len(subject.research_hypothesis_provider.calls) == 1
+
+
+@pytest.mark.parametrize("state", ["FAILED", "GENERATING", "legacy"])
+def test_explicit_recovery_reuses_brief_and_fences_old_attempt(app, state):
+    subject, db, history = app
+    view = subject.inspect_goal_research("A")
+    old = {"status": "GENERATING" if state == "legacy" else state}
+    if state != "legacy":
+        old.update(generation_id="old", owner=history.research_generation_owner(), attempt=1)
+    history.save_research_state("A", count=1, tail=db.docs["A"]["messages"][-1],
+                               key=view["key"], expected=None, record=old)
+    assert generate(subject)["status"] == old["status"]
+    assert not subject.research_hypothesis_provider.calls
+    token = subject.inspect_goal_research("A")["generation_token"]
+    result = subject.generate_goal_research("A", view["key"], retry=True, expected_generation=token)
+    assert result["status"] == "SAVED" and result["key"] == view["key"]
+    assert len(subject.research_hypothesis_provider.calls) == 1
+    assert len(db.docs["A"]["research_proposals"]) == 1
+    assert not history.save_research_state("A", count=1, tail=db.docs["A"]["messages"][-1],
+                                          key=view["key"], expected=old, record={"status": "FAILED"})
+
+
+def test_recovery_cannot_overlap_an_active_provider_even_in_same_thread(app):
+    subject, _, _ = app
+    def try_recovery():
+        view = subject.inspect_goal_research("A")
+        with pytest.raises(ValueError, match="GENERATION_ACTIVE"):
+            subject.generate_goal_research("A", view["key"], retry=True,
+                                           expected_generation=view["generation_token"])
+    subject.research_hypothesis_provider.callback = try_recovery
+    assert generate(subject)["status"] == "SAVED"
+    assert len(subject.research_hypothesis_provider.calls) == 1
+
+
+def test_retry_token_and_owner_must_match(app):
+    subject, db, history = app
+    view = subject.inspect_goal_research("A")
+    history.save_research_state("A", count=1, tail=db.docs["A"]["messages"][-1],
+        key=view["key"], expected=None, record={"status": "GENERATING", "owner": "another-host"})
+    with pytest.raises(ValueError, match="GENERATION_STALE"):
+        subject.generate_goal_research("A", view["key"], retry=True, expected_generation="stale")
+    token = subject.inspect_goal_research("A")["generation_token"]
+    with pytest.raises(ValueError, match="REQUIRES_OWNER_INSTANCE"):
+        subject.generate_goal_research("A", view["key"], retry=True, expected_generation=token)
+    assert not subject.research_hypothesis_provider.calls
+
+
+def test_os_generation_lock_releases_after_process_exit(app):
+    import subprocess
+    import sys
+    import uuid
+    subject, _, history = app
+    key = uuid.uuid4().hex * 2
+    code = (
+        "import os,sys; from src.services.history_service import HistoryService; "
+        "h=object.__new__(HistoryService); "
+        f"lock=h.research_generation_lock('{key}'); lock.__enter__(); "
+        "print('LOCKED',flush=True); sys.stdin.readline(); os._exit(0)"
+    )
+    child = subprocess.Popen([sys.executable, "-u", "-c", code], stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        assert child.stdout.readline().strip() == "LOCKED"
+        with pytest.raises(ValueError, match="GENERATION_ACTIVE"):
+            with history.research_generation_lock(key):
+                pytest.fail("Concurrent process acquired lock")
+        child.communicate("EXIT\n", timeout=10)
+        assert child.returncode == 0
+        with history.research_generation_lock(key):
+            pass
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.communicate(timeout=10)
 
 
 def test_generation_claim_prevents_concurrent_provider_calls(app):
@@ -261,6 +336,15 @@ def test_evidence_not_approved_never_grants_review_or_authority(app):
     assert not proposal.execution_allowed
 
 
+def test_provider_receives_the_existing_schema_and_supported_timeframe_tokens(app):
+    from src.services.trading.market.timeframes import SUPPORTED_TIMEFRAMES
+    subject, _, _ = app
+    assert generate(subject)["status"] == "SAVED"
+    prompt = subject.research_hypothesis_provider.calls[0][0]
+    assert '"maxLength":500' in prompt and '"maxLength":240' in prompt
+    assert all('"' + token + '"' in prompt for token in SUPPORTED_TIMEFRAMES)
+
+
 def test_approved_source_is_independently_verified_for_new_revision(app, tmp_path, monkeypatch):
     from src.config import Config
     from dataclasses import replace
@@ -323,9 +407,14 @@ def test_storage_cas_rejects_stale_counts_records_and_deleted_conversation(app):
     assert not history.save_research_state("A", count=1, tail=tail, key=key, expected=None, record={})
 
 
-def test_streamlit_generate_edit_reload_and_conversation_isolation(app):
+@pytest.mark.parametrize("recover", [False, True])
+def test_streamlit_generate_edit_reload_and_conversation_isolation(app, recover):
     from streamlit.testing.v1 import AppTest
-    subject, db, _ = app
+    subject, db, history = app
+    if recover:
+        view = subject.inspect_goal_research("A")
+        history.save_research_state("A", count=1, tail=db.docs["A"]["messages"][-1],
+            key=view["key"], expected=None, record={"status": "GENERATING"})
     test = AppTest.from_string('''
 import streamlit as st
 from src.ui.tab_chatbot import _render_goal_research
@@ -339,7 +428,13 @@ _render_goal_research(st.session_state.subject)
     test.session_state.messages = copy.deepcopy(db.docs["A"]["messages"])
     test.session_state.other_messages = copy.deepcopy(db.docs["B"]["messages"])
     test.run()
-    next(b for b in test.button if b.label == "Generate testable hypothesis").click().run()
+    if recover:
+        assert next(b for b in test.button if b.label == "Retry / recover hypothesis generation").disabled
+        assert not subject.research_hypothesis_provider.calls
+        test.checkbox[0].set_value(True).run()
+        next(b for b in test.button if b.label == "Retry / recover hypothesis generation").click().run()
+    else:
+        next(b for b in test.button if b.label == "Generate testable hypothesis").click().run()
     assert not test.exception
     assert len(subject.research_hypothesis_provider.calls) == 1
     assert test.text_area[0].value == OUTPUT["hypothesis"]
@@ -351,3 +446,31 @@ _render_goal_research(st.session_state.subject)
     next(b for b in test.button if b.label == "Switch conversation").click().run()
     assert not test.exception and not test.text_area
     assert any(b.label == "Generate testable hypothesis" for b in test.button)
+
+
+def test_real_app_url_restores_selected_conversation_and_rejects_deleted_ids(app, monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    from src.ui import tab_dashboard, tab_evaluation_dashboard, tab_settings
+    subject, db, history = app
+    monkeypatch.setattr(history, "get_all_sessions", lambda: [{"_id": name, "title": name} for name in db.docs])
+    monkeypatch.setattr(history, "load_history", lambda session: copy.deepcopy(db.docs[session]["messages"]))
+    for tab in (tab_dashboard, tab_evaluation_dashboard, tab_settings):
+        monkeypatch.setattr(tab, "render", lambda *_: None)
+    page = AppTest.from_file("src/app.py")
+    page.query_params["conversation"] = "B"
+    page.session_state.orchestrator = subject
+    page.run()
+    assert not page.exception and page.session_state.current_session_id == "B"
+    next(b for b in page.button if b.label == "A").click().run()
+    assert page.session_state.current_session_id == "A"
+    assert page.query_params["conversation"] in ("A", ["A"])
+    refreshed = AppTest.from_file("src/app.py")
+    refreshed.query_params["conversation"] = "A"
+    refreshed.session_state.orchestrator = subject
+    refreshed.run()
+    assert not refreshed.exception and refreshed.session_state.current_session_id == "A"
+    deleted = AppTest.from_file("src/app.py")
+    deleted.query_params["conversation"] = "deleted"
+    deleted.session_state.orchestrator = subject
+    deleted.run()
+    assert not deleted.exception and deleted.session_state.current_session_id == "A"

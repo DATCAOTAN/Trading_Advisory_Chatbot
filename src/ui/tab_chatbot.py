@@ -522,6 +522,16 @@ def _render_goal_research(orchestrator) -> None:
                     st.rerun()
             else:
                 st.warning(f"{view['status']} | {view['reason']}")
+                confirmed = st.checkbox(
+                    "I confirm this generation was interrupted and is not running in another instance",
+                    key=f"research_recover_confirm_{key}_{view['generation_token']}",
+                )
+                if st.button("Retry / recover hypothesis generation", disabled=not confirmed,
+                             key=f"research_retry_{key}_{view['generation_token']}"):
+                    orchestrator.generate_goal_research(
+                        session_id, key, retry=True, expected_generation=view["generation_token"],
+                    )
+                    st.rerun()
             return
         proof = None
         if st.button("Attach / check approved historical evidence", key=f"research_evidence_{key}"):

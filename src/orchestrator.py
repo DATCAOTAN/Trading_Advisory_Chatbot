@@ -22,6 +22,7 @@ import os
 import json
 import hashlib
 import re
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Iterator, List, Dict, Tuple, Optional, Any
 import time
@@ -343,6 +344,7 @@ class RAGOrchestrator:
         return history, messages, tail, plan, scope, key, record
 
     def inspect_goal_research(self, session_id: str, *, expected_tail=None) -> dict:
+        from src.services.trading.research.historical_dataset import canonical_bytes, checksum
         from src.services.trading.research.proposal import ResearchContent, ResearchProposal
 
         _, _, tail, plan, scope, key, record = self._goal_research_context(session_id)
@@ -361,23 +363,41 @@ class RAGOrchestrator:
             "key": key, "brief": plan.constraints["research_brief"], "proposal": proposal,
             "status": record["status"] if record else "NOT_GENERATED",
             "reason": record.get("reason", "") if record else "", "execution_allowed": False,
+            "generation_token": checksum(canonical_bytes(record)) if record else None,
         }
 
-    def generate_goal_research(self, session_id: str, key: str) -> dict:
+    def generate_goal_research(self, session_id: str, key: str, *, retry=False, expected_generation=None) -> dict:
+        history, _, _, _, _, _, record = self._goal_research_context(session_id, key)
+        if record is not None and not retry:
+            return self.inspect_goal_research(session_id)
+        with history.research_generation_lock(key):
+            return self._generate_goal_research_locked(session_id, key, retry, expected_generation)
+
+    def _generate_goal_research_locked(self, session_id, key, retry, expected_generation):
+        from src.services.trading.research.historical_dataset import canonical_bytes, checksum
         from src.services.trading.reasoning.llm_adapter import ProjectLLMReasoningProvider
         from src.services.trading.research.proposal import ResearchContent, ResearchProposal, generate_research_hypothesis
 
         history, messages, tail, plan, scope, key, record = self._goal_research_context(session_id, key)
         if record is not None:
-            return self.inspect_goal_research(session_id)
+            if not retry or record.get("status") == "SAVED":
+                return self.inspect_goal_research(session_id)
+            if record.get("status") not in {"FAILED", "GENERATING"} or expected_generation != checksum(canonical_bytes(record)):
+                raise ValueError("RESEARCH_GENERATION_STALE")
+            if record.get("owner") not in {None, history.research_generation_owner()}:
+                raise ValueError("RESEARCH_RECOVERY_REQUIRES_OWNER_INSTANCE")
+        elif retry:
+            raise ValueError("RESEARCH_GENERATION_STALE")
         brief = plan.constraints["research_brief"]
         if not brief["goal"].get("objective") or not brief["symbols"] or plan.ambiguity:
             raise ValueError("RESEARCH_GOAL_CLARIFICATION_REQUIRED")
         base = ResearchProposal.from_plan(
             plan, scope=scope, origin="AI_RESEARCHED", content=ResearchContent(), created_at=datetime.now(timezone.utc),
         )
-        claim = {"status": "GENERATING"}
-        if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=None, record=claim):
+        attempt = {"generation_id": uuid.uuid4().hex, "owner": history.research_generation_owner(),
+                   "attempt": record.get("attempt", 0) + 1 if record else 1}
+        claim = {"status": "GENERATING", **attempt}
+        if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=record, record=claim):
             raise ValueError("RESEARCH_GENERATION_ALREADY_CLAIMED")
         try:
             provider = getattr(self, "research_hypothesis_provider", None)
@@ -389,9 +409,10 @@ class RAGOrchestrator:
             proposal = ResearchProposal.from_plan(
                 plan, scope=scope, origin="AI_RESEARCHED", content=content, created_at=datetime.now(timezone.utc),
             )
-            updated = {"status": "SAVED", "proposal": proposal.to_json(), "head_revision_id": proposal.head.revision_id}
+            updated = {"status": "SAVED", "proposal": proposal.to_json(), "head_revision_id": proposal.head.revision_id, **attempt}
         except Exception as exc:  # Untrusted provider boundary; never persist raw output or errors.
-            updated = {"status": "FAILED", "reason": (
+            updated = {"status": "FAILED", **attempt, "reason": (
+                str(exc) if re.fullmatch(r"RESEARCH_HYPOTHESIS_[A-Z0-9_]{1,60}", str(exc)) else
                 "RESEARCH_HYPOTHESIS_INVALID" if isinstance(exc, (ValueError, TypeError)) else "RESEARCH_PROVIDER_UNAVAILABLE"
             )}
         if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=claim, record=updated):

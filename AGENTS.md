@@ -183,8 +183,8 @@ Those remain deterministic and authoritative downstream responsibilities.
 - Preserve unrelated staged, unstaged, conflicted, and untracked user work before integration.
 - Use isolated worktrees only when they materially reduce conflict or data-loss risk.
 - Do not stash, reset, restore, clean, or overwrite unrelated work to obtain a clean status.
-- Keep commits local unless the user explicitly requests a push.
-- Never run or recommend `git push origin main`.
+- Standing user authorization permits verified development commits and normal fast-forward pushes directly to `origin/main`; a task-specific prohibition overrides this authorization.
+- Fetch and verify the remote before pushing. Never force push, overwrite remote changes, or discard local work. Keep an overlapping dirty checkout intact and integrate from an isolated worktree.
 
 ## Ponytail and RTK
 

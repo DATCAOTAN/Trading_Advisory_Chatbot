@@ -130,6 +130,11 @@ def _fingerprint(value) -> str:
 
 def generate_research_hypothesis(brief: BriefReference, provider) -> ResearchContent:
     """One explicit suggestion call; the provider cannot supply evidence or authority."""
+    properties = ResearchContent.model_json_schema()["properties"]
+    schema = {"type": "object", "additionalProperties": False,
+              "required": ["hypothesis", "timeframes", "limitations"],
+              "properties": {name: properties[name] for name in ("hypothesis", "timeframes", "limitations")}}
+    schema["properties"]["timeframes"] = {"type": "array", "items": {"type": "string", "enum": sorted(SUPPORTED_TIMEFRAMES)}}
     prompt = (
         "Propose ONE bounded, falsifiable historical research hypothesis for this canonical brief. "
         "Return only JSON with hypothesis (nonempty, at most 500 characters), timeframes (array), "
@@ -138,7 +143,9 @@ def generate_research_hypothesis(brief: BriefReference, provider) -> ResearchCon
         "No research has run. Do not claim observed prices, statistics, experiments, returns or evidence. "
         "Preserve explicit constraints. Unknown risk, horizon or other missing facts stay unknown; "
         "identify missing prerequisites in limitations. Any proposed timeframe is an AI suggestion. "
-        "No strategy code, trading instruction, approval, evidence record or execution authority. Brief: "
+        "Use only the exact supported timeframe enum tokens; use [] if no timeframe is justified. "
+        "No strategy code, trading instruction, approval, evidence record or execution authority. JSON schema: "
+        + canonical_bytes(schema).decode("utf-8") + " Brief: "
         + canonical_bytes(brief.model_dump(mode="json")).decode("utf-8")
     )
     raw = provider.complete(prompt, max_tokens=1200, temperature=0.2)
@@ -149,7 +156,16 @@ def generate_research_hypothesis(brief: BriefReference, provider) -> ResearchCon
     payload = json.loads(raw)
     if not isinstance(payload, dict) or set(payload) != {"hypothesis", "timeframes", "limitations"}:
         raise ValueError("RESEARCH_HYPOTHESIS_INVALID")
-    content = ResearchContent.model_validate_json(raw)
+    try:
+        content = ResearchContent.model_validate_json(raw)
+    except ValidationError as exc:
+        error = exc.errors(include_input=False, include_url=False)[0]
+        field = error["loc"][0] if error["loc"] and error["loc"][0] in payload else "content"
+        # Schema-only diagnostics: never return input values, raw text or validator context.
+        codes = {"string_too_long": "TOO_LONG", "string_type": "TYPE", "tuple_type": "TYPE",
+                 "string_pattern_mismatch": "FORMAT", "value_error": "VALUE"}
+        code = codes.get(error["type"], "SCHEMA")
+        raise ValueError(f"RESEARCH_HYPOTHESIS_INVALID_{field.upper()}_{code}") from None
     if not content.hypothesis.strip():
         raise ValueError("RESEARCH_HYPOTHESIS_EMPTY")
     return content

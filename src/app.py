@@ -55,13 +55,17 @@ if "current_session_id" not in st.session_state:
         st.error("❌ Mất kết nối CSDL (MongoDB). Vui lòng tải lại trang sau ít phút!")
         st.stop()
     elif sessions:
-        st.session_state.current_session_id = sessions[0]["_id"]
+        requested_session = st.query_params.get("conversation")
+        valid_sessions = {session["_id"] for session in sessions}
+        st.session_state.current_session_id = requested_session if requested_session in valid_sessions else sessions[0]["_id"]
     else:
         st.session_state.current_session_id = history_svc.create_session("New Chat")
 
 if "messages" not in st.session_state:
     from src.services.history_service import HistoryService
     st.session_state.messages = HistoryService().load_history(st.session_state.current_session_id)
+
+st.query_params["conversation"] = st.session_state.current_session_id
 
 if "feature_flags" not in st.session_state:
     st.session_state.feature_flags = {
@@ -123,6 +127,7 @@ with st.sidebar:
         valid_ids = [s["_id"] for s in all_sessions]
         if st.session_state.current_session_id not in valid_ids:
             st.session_state.current_session_id = valid_ids[0]
+            st.query_params["conversation"] = valid_ids[0]
             st.session_state.messages = history_svc.load_history(st.session_state.current_session_id)
             
         for s in all_sessions:

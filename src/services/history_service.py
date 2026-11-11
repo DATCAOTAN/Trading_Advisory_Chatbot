@@ -3,6 +3,12 @@ import re
 import uuid
 import datetime
 import threading
+import hashlib
+import os
+import socket
+import tempfile
+from contextlib import contextmanager
+from pathlib import Path
 from typing import List, Dict, Optional
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
@@ -17,6 +23,8 @@ class HistoryService:
     """
     _instance = None
     _instance_lock = threading.Lock()
+    _research_active = set()
+    _research_active_lock = threading.Lock()
     
     def __new__(cls):
         with cls._instance_lock:
@@ -226,6 +234,65 @@ class HistoryService:
         if document is None:
             raise ValueError("RESEARCH_CONVERSATION_UNAVAILABLE")
         return document
+
+    @staticmethod
+    def research_generation_owner() -> str:
+        return hashlib.sha256(socket.gethostname().encode()).hexdigest()
+
+    @contextmanager
+    def research_generation_lock(self, key):
+        """OS ownership releases on crash; Mongo CAS still fences the durable attempt."""
+        if not isinstance(key, str) or not re.fullmatch(r"[a-f0-9]{64}", key):
+            raise ValueError("RESEARCH_STORAGE_KEY_INVALID")
+        with self._research_active_lock:
+            if key in self._research_active:
+                raise ValueError("RESEARCH_GENERATION_ACTIVE")
+            self._research_active.add(key)
+        try:
+            if os.name == "nt":
+                import ctypes
+                from ctypes import wintypes
+                kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+                kernel.CreateMutexW.restype = wintypes.HANDLE
+                kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+                kernel.WaitForSingleObject.restype = wintypes.DWORD
+                kernel.ReleaseMutex.argtypes = [wintypes.HANDLE]
+                kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+                handle = kernel.CreateMutexW(None, False, "Global\\TradingResearch_" + key)
+                if not handle:
+                    raise RuntimeError("RESEARCH_GENERATION_LOCK_UNAVAILABLE")
+                held = False
+                try:
+                    status = kernel.WaitForSingleObject(handle, 0)
+                    if status == 258:
+                        raise ValueError("RESEARCH_GENERATION_ACTIVE")
+                    if status not in {0, 128}:
+                        raise RuntimeError("RESEARCH_GENERATION_LOCK_UNAVAILABLE")
+                    held = True
+                    yield
+                finally:
+                    if held:
+                        kernel.ReleaseMutex(handle)
+                    kernel.CloseHandle(handle)
+            else:
+                import fcntl
+                # Keep the inode: unlinking an advisory lock permits two independent locks.
+                path = Path(tempfile.gettempdir()) / ("trading_research_" + key + ".lock")
+                fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+                try:
+                    if os.fstat(fd).st_uid != os.getuid():
+                        raise RuntimeError("RESEARCH_GENERATION_LOCK_UNAVAILABLE")
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        raise ValueError("RESEARCH_GENERATION_ACTIVE") from None
+                    yield
+                finally:
+                    os.close(fd)
+        finally:
+            with self._research_active_lock:
+                self._research_active.discard(key)
 
     def save_research_state(self, session_id, *, count, tail, key, expected, record) -> bool:
         """CAS protects both the canonical brief and the immutable proposal head."""
