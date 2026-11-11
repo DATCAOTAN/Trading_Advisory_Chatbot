@@ -121,8 +121,12 @@ class HistoricalEvidenceVerifier:
         if quality["status"] == "INVALID":
             return replace(verified_source, outcome="INVALID_OR_MISMATCHED", reason="RESEARCH_SOURCE_DATA_INVALID")
         strategy = revision.content.strategy
+        development = revision.content.development
         symbols = (strategy.canonical_symbol,) if strategy else proposal.brief.symbols
-        timeframes = strategy.timeframes if strategy else revision.content.timeframes
+        timeframes = strategy.timeframes if strategy else (
+            tuple(item.timeframe for item in development.specification.data_requirements)
+            if development is not None else revision.content.timeframes
+        )
         if not symbols or not timeframes or reference.window_start is None:
             return replace(verified_source, reason="RESEARCH_HYPOTHESIS_SCOPE_INCOMPLETE")
         if verified_source.symbol not in symbols or verified_source.timeframe not in timeframes:
@@ -137,6 +141,21 @@ class HistoricalEvidenceVerifier:
             return replace(verified_source, outcome="INVALID_OR_MISMATCHED", reason="RESEARCH_WINDOW_NOT_ALIGNED")
         if sum(first <= row["time"] < last for row in rows) != (last - first) / step:
             return limited
+        if development is not None:
+            requirements = development.specification.data_requirements
+            for requirement in requirements:
+                if (requirement.dataset != "OHLCV" or requirement.usage != "RESEARCH_ONLY"
+                        or requirement.symbol != verified_source.symbol or requirement.timeframe != verified_source.timeframe
+                        or not requirement.fields or any(field not in rows[0] for field in requirement.fields)
+                        or requirement.lookback_bars is None or requirement.warmup_bars is None):
+                    return replace(verified_source, reason="RESEARCH_SPECIFICATION_DATA_REQUIREMENTS_NOT_VERIFIED")
+                available = {row["time"] for row in rows}
+                if (requirement.lookback_bars > (last - first) / step or requirement.warmup_bars > len(available) or any(
+                    first - offset * step not in available for offset in range(1, requirement.warmup_bars + 1)
+                )):
+                    return replace(limited, reason="RESEARCH_SPECIFICATION_COVERAGE_INSUFFICIENT")
+            if not requirements:
+                return replace(verified_source, reason="RESEARCH_SPECIFICATION_DATA_REQUIREMENTS_NOT_VERIFIED")
         if reference.status == "VALIDATED" and (
             reference.data_quality != "VERIFIED" or reference.evaluation_version != HISTORICAL_EVALUATION_VERSION
         ):

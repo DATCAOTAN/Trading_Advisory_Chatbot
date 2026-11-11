@@ -428,7 +428,13 @@ class RAGOrchestrator:
             raise ValueError("RESEARCH_REVISION_CONFLICT")
         if not isinstance(hypothesis, str) or not hypothesis.strip():
             raise ValueError("RESEARCH_HYPOTHESIS_EMPTY")
-        content = ResearchContent.model_validate({**current.head.content.model_dump(), "hypothesis": hypothesis})
+        payload = {**current.head.content.model_dump(), "hypothesis": hypothesis}
+        if hypothesis != current.head.content.hypothesis and current.head.content.development is not None:
+            payload["development"] = None
+            payload["evidence"] = tuple(item.model_copy(update={
+                "status": "PENDING", "data_quality": "UNKNOWN", "evaluation_version": None,
+            }) for item in current.head.content.evidence)
+        content = ResearchContent.model_validate(payload)
         updated = current.revise(
             scope=scope, parent_revision_id=revision_id, author="USER_AUTHORED", content=content,
             created_at=datetime.now(timezone.utc),
@@ -438,6 +444,48 @@ class RAGOrchestrator:
         saved = {"status": "SAVED", "proposal": updated.to_json(), "head_revision_id": updated.head.revision_id}
         if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=record, record=saved):
             raise ValueError("RESEARCH_REVISION_CONFLICT")
+        return self.inspect_goal_research(session_id)
+
+    def develop_goal_research(self, session_id, key, revision_id, *, development_json=None):
+        from src.services.trading.reasoning.llm_adapter import ProjectLLMReasoningProvider
+        from src.services.trading.research.proposal import ResearchContent, ResearchDevelopment, develop_research_strategy
+
+        history, _, _, _, _, _, _ = self._goal_research_context(session_id, key)
+        with history.research_generation_lock(key):
+            history, messages, tail, _, scope, key, record = self._goal_research_context(session_id, key)
+            current = self.inspect_goal_research(session_id)["proposal"]
+            if current is None or current.head.revision_id != revision_id:
+                raise ValueError("RESEARCH_REVISION_CONFLICT")
+            if development_json is None:
+                provider = getattr(self, "research_hypothesis_provider", None)
+                if provider is None:
+                    if not Config.TRADING_REASONING_LLM_ENABLED:
+                        raise RuntimeError("RESEARCH_PROVIDER_UNAVAILABLE")
+                    provider = ProjectLLMReasoningProvider(structured_json=True)
+                development = develop_research_strategy(current, provider)
+                author = "AI_SUGGESTED"
+            else:
+                try:
+                    development = ResearchDevelopment.model_validate_json(development_json)
+                except (ValueError, TypeError):
+                    raise ValueError("RESEARCH_SPECIFICATION_INVALID") from None
+                author = "USER_AUTHORED"
+            payload = current.head.content.model_dump()
+            payload["development"] = development
+            # A new specification changes the evidence claim; retain references, not old validation.
+            payload["evidence"] = tuple(item.model_copy(update={
+                "status": "PENDING", "data_quality": "UNKNOWN", "evaluation_version": None,
+            }) for item in current.head.content.evidence)
+            content = ResearchContent.model_validate(payload)
+            updated = current.revise(scope=scope, parent_revision_id=revision_id, author=author,
+                                     content=content, created_at=datetime.now(timezone.utc))
+            if updated is current:
+                return self.inspect_goal_research(session_id)
+            saved = {**record, "status": "SAVED", "proposal": updated.to_json(),
+                     "head_revision_id": updated.head.revision_id}
+            if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key,
+                                              expected=record, record=saved):
+                raise ValueError("RESEARCH_REVISION_CONFLICT")
         return self.inspect_goal_research(session_id)
 
     def attach_goal_research_evidence(self, session_id, key, revision_id):

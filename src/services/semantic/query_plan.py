@@ -503,12 +503,10 @@ class QueryPlanAssembler:
         return plan
 
     @staticmethod
-    def _computational_plan(
-        query: str, task_id: str, state: ResolvedSemanticState, spec: ComputationalSpecification,
-    ) -> QueryPlan:
+    def computational_requirements(spec: ComputationalSpecification) -> tuple[list[str], list[str]]:
+        """Shared G1 completeness/range checks for canonical plans and inert R1 revisions."""
         prefix = COMPUTATIONAL_SPEC_FIELD
-        sources = dict(state.field_sources)
-        missing = list(state.unresolved_fields)
+        missing = []
         if not (spec.formula or spec.steps):
             missing.append(f"{prefix}.formula_or_steps")
         for section in ("objective", "algorithm", "data_requirements", "outputs"):
@@ -535,6 +533,16 @@ class QueryPlanAssembler:
         for index, output in enumerate(spec.outputs):
             if not output.name:
                 missing.append(f"{prefix}.outputs[{index}].name")
+        return missing, conflicts
+
+    @staticmethod
+    def _computational_plan(
+        query: str, task_id: str, state: ResolvedSemanticState, spec: ComputationalSpecification,
+    ) -> QueryPlan:
+        prefix = COMPUTATIONAL_SPEC_FIELD
+        sources = dict(state.field_sources)
+        required, conflicts = QueryPlanAssembler.computational_requirements(spec)
+        missing = list(state.unresolved_fields) + required
         config = spec.configuration
         mode_path = f"{prefix}.configuration.authorization_mode"
         requested_mode = ""

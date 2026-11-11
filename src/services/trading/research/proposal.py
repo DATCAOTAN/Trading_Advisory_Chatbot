@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Callable, Literal, Protocol, TYPE_CHECKING, runtime_checkable
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, ValidationError, ValidationInfo, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, ValidationError, ValidationInfo, model_serializer, model_validator
 
-from src.services.semantic.structured_semantics import ResearchGoal
+from src.services.semantic.structured_semantics import ComputationalParameter, ComputationalSpecification, ResearchGoal, SpecText
 from ..market.timeframes import SUPPORTED_TIMEFRAMES
 from ..reasoning.strategy_evidence import ConversationalStrategyRequest, validate_strategy
 from .historical_dataset import canonical_bytes, checksum, utc
@@ -102,12 +102,70 @@ StrategySpec = Annotated[
 ]
 
 
+class ResearchDevelopment(_Record):
+    """Inert G1 specification plus research-design fields, never an executable strategy."""
+
+    specification: ComputationalSpecification
+    in_sample: SpecText | None = None
+    out_of_sample: SpecText | None = None
+    transaction_costs: tuple[ComputationalParameter, ...] = Field(default=(), max_length=12)
+    evaluation_criteria: tuple[SpecText, ...] = Field(default=(), max_length=12)
+    rejection_criteria: tuple[SpecText, ...] = Field(default=(), max_length=12)
+    missing_information: tuple[SpecText, ...] = Field(default=(), max_length=12)
+
+    @model_validator(mode="after")
+    def check_authority(self):
+        config = self.specification.configuration
+        if config is not None and (
+            config.strategy_origin not in {None, "AI_RESEARCHED"}
+            or config.authorization_mode not in {None, "ADVISORY"}
+            or config.adaptation_policy is not None
+        ):
+            raise ValueError("RESEARCH_SPECIFICATION_AUTHORITY_CONFLICT")
+        return self
+
+    def review(self) -> dict:
+        from src.services.semantic.query_plan import QueryPlanAssembler
+
+        spec = self.specification
+        required, conflicts = QueryPlanAssembler.computational_requirements(spec)
+        missing = [*self.missing_information, *required]
+        for name in ("entry", "exit"):
+            if not getattr(spec, name):
+                missing.append("specification." + name)
+        for index, data in enumerate(spec.data_requirements):
+            for field in ("dataset", "symbol", "timeframe", "lookback_bars", "warmup_bars", "completeness"):
+                if getattr(data, field) is None:
+                    missing.append(f"data_requirements[{index}].{field}")
+            if data.usage != "RESEARCH_ONLY":
+                missing.append(f"data_requirements[{index}].research_only_usage")
+        for name in ("in_sample", "out_of_sample", "transaction_costs", "evaluation_criteria", "rejection_criteria"):
+            if not getattr(self, name):
+                missing.append(name)
+        for index, cost in enumerate(self.transaction_costs):
+            if cost.name is None or cost.value is None or cost.unit is None:
+                missing.append(f"transaction_costs[{index}].name_value_unit")
+        return {"status": "NEEDS_CLARIFICATION" if missing or conflicts or spec.conflicts else "NEEDS_REVIEW",
+                "missing_information": list(dict.fromkeys(missing)), "conflicts": [*conflicts, *spec.conflicts],
+                "unsupported": list(spec.unsupported), "data_status": "NOT_CHECKED",
+                "execution_allowed": False, "runtime_status": "UNSUPPORTED_DYNAMIC_COMPUTATION"}
+
+
 class ResearchContent(_Record):
     hypothesis: str = Field(default="", max_length=500)
     strategy: StrategySpec | None = None
     timeframes: tuple[Ref, ...] = ()
     evidence: tuple[EvidenceReference, ...] = ()
     limitations: tuple[Annotated[str, Field(max_length=240)], ...] = ()
+    development: ResearchDevelopment | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_identity(self, serialize):
+        payload = serialize(self)
+        # Existing pinned R1 hashes must not change when this optional field is absent.
+        if self.development is None:
+            payload.pop("development", None)
+        return payload
 
     @model_validator(mode="after")
     def check_content(self):
@@ -169,6 +227,48 @@ def generate_research_hypothesis(brief: BriefReference, provider) -> ResearchCon
     if not content.hypothesis.strip():
         raise ValueError("RESEARCH_HYPOTHESIS_EMPTY")
     return content
+
+
+def develop_research_strategy(proposal: ResearchProposal, provider) -> ResearchDevelopment:
+    """One explicit provider suggestion, validated as inert G1/R1 content only."""
+    prompt = (
+        "Develop this saved research hypothesis into ONE testable, non-executable specification. "
+        "Return ONLY JSON matching this schema: "
+        + canonical_bytes(ResearchDevelopment.model_json_schema()).decode("utf-8")
+        + " The specification object permits ONLY these keys: "
+        + ", ".join(ComputationalSpecification.model_fields)
+        + ". Put market/symbol/timeframe ONLY in data_requirements objects. Indicators and custom calculations "
+        "belong in formula/steps/parameters, NOT additional indicator objects or keys. SL/TP rules belong in "
+        "exit, sizing rules in management, not separate risk/stop_loss/take_profit/sizing fields. "
+        "Use the root in_sample/out_of_sample strings for split scope, root transaction_costs as an array of "
+        "name/value/unit parameter objects. All rule arrays contain STRINGS, never objects. "
+        "Keep the entire response concise, below 3000 tokens. "
+        "Use formula/steps, parameters, entry/exit, reentry/management and temporal_requirements for "
+        "explicitly defined calculations and rules. Preserve custom formulas as inert text; list unsupported "
+        "runtime requirements. Specify needed data fields, symbol, timeframe, lookback, warmup, completeness, "
+        "RESEARCH_ONLY usage; never claim data is available. Specify chronological disjoint IS/OOS scopes, "
+        "cost definitions/units and falsifiable evaluation/rejection criteria only when justified. "
+        "Unknown values remain null or empty and must be listed in missing_information. No invented market "
+        "observations, results, profitability, evidence or approval. Preserve the canonical goal constraints; "
+        "risk/sizing budgets belong ONLY to the immutable brief, not new numeric parameter suggestions. "
+        "SL/TP and sizing rules may reference those constraints, but never invent unknown risk or broker values. "
+        "All new rules are AI suggestions, not confirmed user facts. Configuration may only be AI_RESEARCHED/ADVISORY "
+        "with adaptation_policy=null, never execution permission. No code. Develop the current revision, "
+        "preserving existing user edits unless explicitly identified as conflicting. Brief: "
+        + canonical_bytes(proposal.brief.model_dump(mode="json")).decode("utf-8")
+        + " Current revision: " + canonical_bytes(proposal.head.content.model_dump(mode="json")).decode("utf-8")
+    )
+    raw = provider.complete(prompt, max_tokens=5000, temperature=0.2)
+    if not isinstance(raw, str) or len(raw.encode("utf-8")) > 48000:
+        raise ValueError("RESEARCH_SPECIFICATION_INVALID")
+    try:
+        return ResearchDevelopment.model_validate_json(raw)
+    except ValidationError as exc:
+        error = exc.errors(include_input=False, include_url=False)[0]
+        field = error["loc"][0] if error["loc"] and error["loc"][0] in ResearchDevelopment.model_fields else "content"
+        codes = {"string_too_long": "TOO_LONG", "tuple_type": "TYPE", "model_type": "TYPE",
+                 "literal_error": "VALUE", "extra_forbidden": "EXTRA", "json_invalid": "JSON"}
+        raise ValueError(f"RESEARCH_SPECIFICATION_INVALID_{field.upper()}_{codes.get(error['type'], 'SCHEMA')}") from None
 
 
 class ResearchRevision(_Record):
@@ -296,6 +396,12 @@ class ResearchProposal(_Record):
             if parent and (revision.created_at < parent.created_at or revision.content == parent.content):
                 raise ValueError("RESEARCH_REVISION_CONFLICT")
             strategy = revision.content.strategy
+            development = revision.content.development
+            if development is not None and any(
+                data.symbol is not None and self.brief.symbols and data.symbol not in self.brief.symbols
+                for data in development.specification.data_requirements
+            ):
+                raise ValueError("RESEARCH_SPECIFICATION_SCOPE_CONFLICT")
             if strategy is not None and (
                 strategy.trading_scope != self.scope.trading_scope
                 or strategy.requested_mode != "advisory_only" or strategy.confirmation_policy != "NO_EXECUTION"

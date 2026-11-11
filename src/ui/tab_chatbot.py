@@ -556,10 +556,33 @@ def _render_goal_research(orchestrator) -> None:
         if save:
             orchestrator.revise_goal_research(session_id, key, proposal.head.revision_id, hypothesis)
             st.rerun()
+        if st.button("Develop testable strategy", key=f"research_develop_{key}_{proposal.head.revision_id}"):
+            orchestrator.develop_goal_research(session_id, key, proposal.head.revision_id)
+            st.rerun()
+        development = proposal.head.content.development
+        if development is not None:
+            st.subheader("Strategy specification and test plan")
+            review = development.review()
+            st.text(f"{review['status']} | NON_EXECUTABLE | Data: {review['data_status']}")
+            st.caption("Revision authorship applies to these proposed rules. Canonical user constraints above remain unchanged.")
+            st.json(development.model_dump(mode="json"))
+            for label in ("missing_information", "conflicts", "unsupported"):
+                if review[label]:
+                    st.warning(label.replace("_", " ").capitalize() + ": " + "; ".join(review[label]))
+            with st.form(f"research_specification_{key}_{proposal.head.revision_id}"):
+                specification_json = st.text_area("Edit structured specification and test plan (JSON)",
+                    value=development.model_dump_json(indent=2), height=320)
+                save_specification = st.form_submit_button("Save specification revision")
+            if save_specification:
+                orchestrator.develop_goal_research(session_id, key, proposal.head.revision_id,
+                                                   development_json=specification_json)
+                st.rerun()
         with st.expander("Revision history"):
             for revision in proposal.revisions:
                 st.text(f"{revision.revision_id} | {revision.author} | {proposal.review_status(revision.revision_id)}")
                 st.text(revision.content.hypothesis)
+                if revision.content.development is not None:
+                    st.json(revision.content.development.model_dump(mode="json"))
     except (ValueError, RuntimeError) as exc:
         reason = str(exc)
         st.warning(reason if re.fullmatch(r"[A-Z][A-Z0-9_]{2,90}", reason) else "RESEARCH_STATE_INVALID_OR_UNAVAILABLE")
