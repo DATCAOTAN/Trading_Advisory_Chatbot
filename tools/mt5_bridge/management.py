@@ -285,7 +285,13 @@ class ControlledMT5ManagementService:
                 )
                 return _blocked("ACCOUNT_CONTEXT_CHANGED", intent=request.management_intent), 409
             self.journal.transition_management(request.idempotency_key, "MANAGEMENT_STARTED")
-            return self._submit_and_reconcile(request, mapped, target, execution)
+            try:
+                return self._submit_and_reconcile(request, mapped, target, execution)
+            except Exception:
+                return _receipt(
+                    "UNKNOWN", request.management_intent, "RESULT_UNKNOWN",
+                    reconciliation_required=True, reason="BROKER_RESULT_UNVERIFIED",
+                ), 200
         except ProtectedExecutionJournalError as exc:
             return _blocked(str(exc)), 409
         except (TypeError, ValueError, RuntimeError) as exc:

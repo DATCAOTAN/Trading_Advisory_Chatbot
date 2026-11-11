@@ -30,7 +30,9 @@ from src.services.semantic.resolved_semantics import (
     SemanticCompletionPatch,
     apply_semantic_completion,
 )
-from src.services.semantic.structured_semantics import SEMANTIC_SCHEMA_VERSION
+from src.services.semantic.structured_semantics import (
+    COMPUTATIONAL_SPEC_FIELD, COMPUTATIONAL_SPEC_REFERENCE, SEMANTIC_SCHEMA_VERSION, TradeParameters,
+)
 
 
 TRADING_MODES = {"advisory_only", "human_confirmed_live", "autonomous_live"}
@@ -56,6 +58,8 @@ class ConversationalTradingRequest:
     blockers: tuple[str, ...] = ()
     strategy: ConversationalStrategyRequest | None = None
     trading_scope: str = ""
+    trade_parameters: TradeParameters | None = None
+    trade_parameter_sources: tuple[tuple[str, str], ...] = ()
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +82,10 @@ class ConversationalTradingRequest:
             "blockers": list(self.blockers),
             "strategy": self.strategy.as_dict() if self.strategy else None,
             "trading_scope": self.trading_scope,
+            **({
+                "trade_parameters": self.trade_parameters.as_dict(),
+                "trade_parameter_sources": dict(self.trade_parameter_sources),
+            } if self.trade_parameters is not None else {}),
             "execution_authority": False,
             "executable": False,
             "metadata_redacted": True,
@@ -150,6 +158,10 @@ class ConversationalTradingRequest:
             blockers=blockers,
             strategy=strategy,
             trading_scope=trading_scope,
+            trade_parameters=(
+                TradeParameters.model_validate(payload["trade_parameters"]) if "trade_parameters" in payload else None
+            ),
+            trade_parameter_sources=tuple(sorted(dict(payload.get("trade_parameter_sources") or {}).items())),
         )
 
 
@@ -419,8 +431,15 @@ def project_conversational_trading_request(
     semantic = semantic_context.get("input") if isinstance(semantic_context, Mapping) else None
     if not isinstance(semantic, Mapping) or semantic.get("schema_version") != SEMANTIC_SCHEMA_VERSION:
         return None
+    if (
+        query_plan.computational_specification is not None or COMPUTATIONAL_SPEC_FIELD in semantic
+        or COMPUTATIONAL_SPEC_REFERENCE in (semantic.get("context_references") or ())
+    ):
+        return None
     primary_intent = str(semantic.get("primary_intent") or "")
     action = str(semantic.get("action") or "")
+    if primary_intent == "STRATEGY_RESEARCH":
+        return None
     if primary_intent not in {"STRATEGY", "TRADE_LIFECYCLE", "POSITION_MANAGEMENT"} and action not in {
         "OPEN_POSITION",
         "CLOSE_POSITION",
@@ -465,6 +484,7 @@ def project_conversational_trading_request(
         f"SEMANTIC_UNRESOLVED:{value}"
         for value in semantic_context.get("unresolved_fields", ())
         if str(value).strip()
+        and not TradeParameters.owns_path(str(value))
         and (strategy_unresolved is None or value in strategy_unresolved)
     )
     blockers: list[str] = list(semantic_unresolved)
@@ -489,6 +509,8 @@ def project_conversational_trading_request(
             # Never publish a strategy that the strict public reload will reject.
             strategy = None
 
+    if requested_mode == "autonomous_live" and strategy is None:
+        blockers.append("STRATEGY_NOT_ESTABLISHED")
     blockers = list(dict.fromkeys(blockers))
     response_format = (
         "STRATEGY_COMPLETION_REQUIRED_CARD"
@@ -533,4 +555,14 @@ def project_conversational_trading_request(
         blockers=tuple(blockers),
         strategy=strategy,
         trading_scope=trading_scope,
+        trade_parameters=(
+            TradeParameters.model_validate(semantic["trade_parameters"])
+            if strategy is None and "trade_parameters" in semantic else None
+        ),
+        trade_parameter_sources=(
+            tuple(sorted(
+                (name, source) for name, source in semantic_context.get("field_sources", {}).items()
+                if name.startswith("trade_parameters.")
+            )) if strategy is None else ()
+        ),
     )

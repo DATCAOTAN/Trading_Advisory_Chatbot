@@ -117,15 +117,57 @@ class StructuredSemanticInterpreter:
             "unresolved_fields": ["field paths that remain incomplete"],
             "negated": False,
             "hypothetical": False,
+            "trade_parameters": {"stop_loss": {"value": "2350.20", "unit": "PRICE"}},
+            "research_goal": {
+                "objective": "short user objective",
+                "horizon": "user's stated evaluation horizon",
+                "max_risk_per_trade_pct": 1,
+                "max_drawdown_pct": 5,
+            },
         }
         return (
             "Return one JSON object only. Interpret meaning but never validate broker, market, account, "
             "pricing, permissions, or execution. Do not include any execution-authority field. "
             "Keep missing child fields in unresolved_fields while preserving explicit sibling facts. "
+            "For a novel computation or a rule not expressible by the legacy schema, emit optional "
+            "computational_specification (schema_version computational-specification/v1); never replace it with a familiar rule. "
+            "Use the optional object even when incomplete, and do not put novel names or rules in legacy indicators or conditions. "
+            "Use objective, algorithm, formula, steps[], temporal_requirements[], parameters[{name,definition,value,minimum,maximum,unit}], "
+            "data_requirements[{dataset,fields[],symbol,timeframe,lookback_bars,warmup_bars,max_age_seconds,completeness,usage}], "
+            "outputs[{name,unit,validity}], entry[], exit[], reentry[], management[], conflicts[], unsupported[]. "
+            "Data usage is RESEARCH_ONLY or EXECUTION_RELEVANT; never report evidence availability. Keep formulas and rules as text, not code. "
+            "Optional configuration axes: strategy_origin USER_DEFINED/AI_RESEARCHED; authorization_mode "
+            "ADVISORY/HUMAN_CONFIRMED/AUTONOMOUS; adaptation_policy FIXED/ADAPTIVE_WITHIN_SCOPE/RESEARCH_AND_REQUEST_APPROVAL. "
+            "Do not infer one axis from another or claim confirmation. Mark explicit computational_specification leaf paths "
+            "or a section only when all supplied children are explicit; "
+            "omit ambiguous axes and mark unresolved. Use previous_computational_specification only on explicit reference. "
+            "Omit the spec on ordinary legacy requests. "
+            "Use STRATEGY_RESEARCH with action ANALYZE when the user wants a profitability or strategy research "
+            "goal addressed without giving entry/exit rules, including when they explicitly want eventual "
+            "autonomous trading. Preserve that requested_mode as intent, not permission. Do not invent rules, "
+            "direction, indicators, or indicator completion fields for delegated research. "
+            "Include research_goal only for STRATEGY_RESEARCH. Include only its explicitly stated leaves and "
+            "mark their paths in explicit_fields (e.g. research_goal.horizon). Risk and drawdown limits use "
+            "percentage points, e.g. 1 for 1%; omit ambiguous units and mark the leaf unresolved. "
+            "Summarize the objective without copying private documents, credentials, or account identifiers. "
+            "Use market_data, private_knowledge, and general_knowledge in requested_data only for sources "
+            "the user requests and mark requested_data in explicit_fields. Mark account_scope if explicit. "
+            "For an explicit follow-up to a previous research goal, use STRATEGY_RESEARCH with "
+            "previous_research_goal in context_references, including only new explicit facts. "
+            "Do not use STRATEGY_RESEARCH for a direct order, position management, ordinary market analysis, "
+            "or a specified trading rule even if some parameters of that rule are missing. "
             "Classify definitions, explanations, or comparisons of financial concepts and indicators as "
             "KNOWLEDGE with action EXPLAIN; an indicator name alone does not make the request position management. "
             "Classify a direct instruction to open, buy, sell, or define a conditional entry as STRATEGY or "
             "TRADE_LIFECYCLE with action OPEN_POSITION, preserving explicit direction and incomplete fields. "
+            "For OPEN_POSITION only, put explicitly supplied SL, TP, risk and volume in trade_parameters "
+            "as stop_loss, take_profit, risk, volume with value and unit. Use decimal strings to preserve "
+            "precision, PRICE for absolute SL/TP, PERCENT or FRACTION for risk, LOT for lots. Preserve other "
+            "stated units for validation, never guess units or calculate values. Mark each supplied leaf in "
+            "explicit_fields (e.g. trade_parameters.risk); mark missing or ambiguous requested values in "
+            "unresolved_fields. Omit unspecified leaves. Use previous_trade_parameters only when the user "
+            "explicitly refers to prior trade parameters. If an entry condition cannot be represented, "
+            "mark conditions unresolved; do not present it as an unconditional order. "
             "When the user explicitly asks the system to trade autonomously or continue trading without "
             "per-trade confirmation, set requested_mode to autonomous_live and include requested_mode in "
             "explicit_fields. For a direct trade instruction without that autonomous request, set "

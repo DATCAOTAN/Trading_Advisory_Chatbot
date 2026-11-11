@@ -6,6 +6,7 @@ import threading
 import hashlib
 import json
 import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,20 @@ class AutonomousMonitorProcess:
             hashlib.sha256(scope.encode()).hexdigest() + ".json"
         )
 
+    @contextmanager
+    def _launch_lock(self, scope: str):
+        path = self._diagnostic_path(scope).with_suffix(".lock")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except OSError as exc:
+            raise RuntimeError("SUPERVISOR_LAUNCH_LOCK_UNAVAILABLE") from exc
+        try:
+            yield
+        finally:
+            os.close(fd)
+            path.unlink()
+
     def start(
         self,
         *,
@@ -48,10 +63,13 @@ class AutonomousMonitorProcess:
     ) -> dict[str, Any]:
         if not str(mandate_id).strip():
             raise ValueError("SUPERVISOR_MANDATE_REQUIRED")
-        with self._lock:
+        with self._lock, self._launch_lock(trading_scope):
             previous = self.status(trading_scope)
             if previous["running"]:
                 return previous
+            if self._processes.pop(trading_scope, None) is not None:
+                self._profiles.pop(trading_scope, None)
+                previous = self.status(trading_scope)
             if previous["process_state"] == "UNKNOWN":
                 raise RuntimeError("SUPERVISOR_PROCESS_OWNERSHIP_UNAVAILABLE")
             command = [
@@ -100,36 +118,48 @@ class AutonomousMonitorProcess:
                 diagnostic = self._diagnostics[trading_scope]
                 diagnostic["stop_requested_at"] = datetime.now(timezone.utc).isoformat()
                 self._save(trading_scope)
-                process.terminate()
                 try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+                except (OSError, subprocess.SubprocessError):
+                    diagnostic["failure_category"] = "PROCESS_STOP_FAILED"
+                    self._save(trading_scope)
+                    raise
                 diagnostic.update(
                     process_state="STOPPED", exit_code=process.poll(),
-                    stop_completed_at=datetime.now(timezone.utc).isoformat(),
+                    stop_completed_at=datetime.now(timezone.utc).isoformat(), failure_category="",
                 )
                 self._save(trading_scope)
             else:
                 self.status(trading_scope)  # Retain an unexpected exit rather than erasing it.
+            stopped = self.status(trading_scope)
             self._processes.pop(trading_scope, None)
             self._profiles.pop(trading_scope, None)
-            return self.status(trading_scope)
+            return {**stopped, "symbol": "", "timeframes": [], "mandate_id": ""}
 
     def status(self, trading_scope: str = "legacy") -> dict[str, Any]:
         with self._lock:
-            if trading_scope not in self._diagnostics:
+            if trading_scope not in self._processes:
                 path = self._diagnostic_path(trading_scope)
-                if path.exists():
+                try:
                     try:
-                        if path.stat().st_size > 4096:
+                        size = path.stat().st_size
+                    except FileNotFoundError:
+                        self._diagnostics.pop(trading_scope, None)
+                    else:
+                        if size > 4096:
                             raise ValueError("supervisor diagnostic too large")
                         saved = json.loads(path.read_text(encoding="utf-8"))
                         # Diagnostic files are never process or trading authority.
                         if (
                             saved.get("process_state") not in {"STARTING", "RUNNING", "STOPPED", "EXITED", "FAILED"}
-                            or saved.get("failure_category") not in {"", "PROCESS_LAUNCH_FAILED", "DIAGNOSTIC_WRITE_FAILED"}
+                            or saved.get("failure_category") not in {
+                                "", "PROCESS_LAUNCH_FAILED", "PROCESS_STOP_FAILED", "DIAGNOSTIC_WRITE_FAILED",
+                            }
                             or any(not isinstance(saved.get(k, ""), str) for k in (
                                 "launched_at", "stop_requested_at", "stop_completed_at", "exited_at",
                             ))
@@ -148,10 +178,10 @@ class AutonomousMonitorProcess:
                                 "stop_completed_at", "exited_at", "exit_code", "failure_category", "mandate_reference",
                             )
                         }
-                    except (OSError, ValueError, AttributeError):
-                        self._diagnostics[trading_scope] = {
-                            "process_state": "UNKNOWN", "failure_category": "DIAGNOSTIC_UNAVAILABLE",
-                        }
+                except (OSError, ValueError, AttributeError):
+                    self._diagnostics[trading_scope] = {
+                        "process_state": "UNKNOWN", "failure_category": "DIAGNOSTIC_UNAVAILABLE",
+                    }
             diagnostic = dict(self._diagnostics.get(trading_scope, {"process_state": "STOPPED"}))
             process = self._processes.get(trading_scope)
             running = self._running(trading_scope)

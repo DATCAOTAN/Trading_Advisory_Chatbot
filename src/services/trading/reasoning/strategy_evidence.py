@@ -12,6 +12,9 @@ from statistics import mean
 from typing import Any, Iterable, Mapping, Sequence
 
 from src.services.semantic.resolved_semantics import FIELD_SOURCES
+from src.services.semantic.structured_semantics import (
+    COMPUTATIONAL_SPEC_FIELD, COMPUTATIONAL_SPEC_REFERENCE, TradeParameters,
+)
 from src.services.trading.market.indicators import atr, ema_series, rsi, sma
 from src.services.trading.market.timeframes import normalize_timeframe
 
@@ -142,6 +145,7 @@ class ConversationalStrategyRequest:
     semantic_unresolved_fields: tuple[str, ...] = ()
     field_sources: tuple[tuple[str, str], ...] = ()
     trading_scope: str = ""
+    trade_parameters: TradeParameters | None = None
 
     @property
     def timeframes(self) -> tuple[str, ...]:
@@ -167,6 +171,7 @@ class ConversationalStrategyRequest:
             "semantic_unresolved_fields": list(self.semantic_unresolved_fields),
             "field_sources": dict(self.field_sources),
             "trading_scope": self.trading_scope,
+            **({"trade_parameters": self.trade_parameters.as_dict()} if self.trade_parameters is not None else {}),
         }
 
     @classmethod
@@ -215,6 +220,9 @@ class ConversationalStrategyRequest:
                 if str(field).strip() and str(source) in FIELD_SOURCES
             ),
             trading_scope=str(payload.get("trading_scope") or ""),
+            trade_parameters=(
+                TradeParameters.model_validate(payload["trade_parameters"]) if "trade_parameters" in payload else None
+            ),
         )
         if len(value.field_sources) != len(dict(payload.get("field_sources") or {})):
             raise ValueError("STRATEGY_FIELD_PROVENANCE_INVALID")
@@ -422,6 +430,11 @@ def project_resolved_semantic_strategy(
 ) -> ConversationalStrategyRequest | None:
     """Project resolved semantic facts into the existing typed strategy contract."""
 
+    semantic = semantic_context.get("input", {})
+    if isinstance(semantic, Mapping) and (
+        COMPUTATIONAL_SPEC_FIELD in semantic or COMPUTATIONAL_SPEC_REFERENCE in (semantic.get("context_references") or ())
+    ):
+        return None
     indicators_payload = semantic_context.get("indicators")
     conditions_payload = semantic_context.get("conditions")
     unresolved_payload = semantic_context.get("unresolved_fields")
@@ -445,7 +458,10 @@ def project_resolved_semantic_strategy(
         indicators.append(spec)
         aliases_by_subject.setdefault(indicator_id, []).append(spec.output_alias)
 
-    unresolved = [str(item) for item in unresolved_payload if str(item).strip()]
+    unresolved = [
+        str(item) for item in unresolved_payload
+        if str(item).strip() and not TradeParameters.owns_path(str(item))
+    ]
     for index, spec in enumerate(indicators):
         definition = INDICATOR_REGISTRY.get(spec.indicator_id)
         if definition is None:
@@ -514,6 +530,10 @@ def project_resolved_semantic_strategy(
             if str(field).strip() and str(source) in FIELD_SOURCES
         ),
         trading_scope=trading_scope,
+        trade_parameters=(
+            TradeParameters.model_validate(semantic_context["input"]["trade_parameters"])
+            if "trade_parameters" in semantic_context.get("input", {}) else None
+        ),
     )
     strategy = ConversationalStrategyRequest(
         **{**provisional.__dict__, "identity": strategy_identity(provisional)}
@@ -599,10 +619,15 @@ def calculate_indicator_snapshot(
         if len(bars) < required:
             blockers.append(f"INSUFFICIENT_COMPLETED_BARS:{spec.output_alias}:{required}")
             continue
+        computed = _compute_indicator(spec, bars)
+        outputs = ("current",) if definition.output_fields == ("value",) else definition.output_fields
+        if any(not isinstance(computed.get(key), (int, float)) or not math.isfinite(computed[key]) for key in outputs):
+            blockers.append(f"INDICATOR_RESULT_INVALID:{spec.output_alias}")
+            continue
         values[spec.output_alias] = {
             "indicator_id": spec.indicator_id,
             "parameters": spec.parameter_map(),
-            **_compute_indicator(spec, bars),
+            **computed,
         }
     if blockers:
         raise ValueError(",".join(blockers))
@@ -698,6 +723,8 @@ def strategy_identity(strategy: ConversationalStrategyRequest) -> StrategyIdenti
         material["semantic_unresolved_fields"] = list(strategy.semantic_unresolved_fields)
     if strategy.trading_scope:
         material["trading_scope"] = strategy.trading_scope
+    if strategy.trade_parameters is not None:
+        material["trade_parameters"] = strategy.trade_parameters.as_dict()
     digest = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return StrategyIdentity("strategy_" + digest[:24], "reasoning-strategy/v2", digest)
 
@@ -760,27 +787,30 @@ def build_reasoning_evidence(
             indicator_values[spec.output_alias] = _compute_indicator(spec, bars)
         per_tf_features[timeframe] = _timeframe_features(bars, indicator_values, timeframe)
 
-    rule_results = [_evaluate_rule(rule, indicator_values) for rule in strategy.entry_rules]
-    failed_rules = [rule for rule, passed in zip(strategy.entry_rules, rule_results) if not passed]
-    if failed_rules:
-        reasons.append(ReasonEvidence("STRUCTURE_CONFIRMATION_MISSING", "WARN", "One or more configured entry rules are not confirmed.", len(failed_rules), 0, feature="entry_rules"))
-    if strategy.requested_mode == "autonomous_live" and failed_rules:
-        evaluations = [
-            evaluate_strategy_rule(rule, indicator_values)
-            for rule in failed_rules
-        ]
+    evaluations = [evaluate_strategy_rule(rule, indicator_values) for rule in strategy.entry_rules]
+    rule_results = [item["triggered"] for item in evaluations]
+    failed = [item for item in evaluations if not item["triggered"]]
+    if failed:
+        reasons.append(ReasonEvidence("STRUCTURE_CONFIRMATION_MISSING", "WARN", "One or more configured entry rules are not confirmed.", len(failed), 0, feature="entry_rules"))
+    if strategy.requested_mode in {"autonomous_live", "human_confirmed_live"} and failed:
+        unknown = any(
+            item["current_condition"] is None
+            or (item["trigger_mode"] == "EDGE" and item["previous_condition"] is None)
+            for item in failed
+        )
         waiting_for_rearm = any(
             item["signal_state"] == "WAITING_FOR_REARM"
-            for item in evaluations
+            for item in failed
         )
         reasons.append(ReasonEvidence(
             (
-                "ENTRY_CONDITION_WAITING_FOR_REARM"
+                "ENTRY_CONDITION_UNKNOWN" if unknown else "ENTRY_CONDITION_WAITING_FOR_REARM"
                 if waiting_for_rearm
                 else "ENTRY_CONDITION_FALSE"
             ),
             "ERROR",
             (
+                "The entry condition cannot be evaluated from available data." if unknown else
                 "The explicit edge condition remains true and must re-arm before another trigger."
                 if waiting_for_rearm
                 else "The entry condition is false on the current completed bar."
@@ -806,7 +836,7 @@ def build_reasoning_evidence(
     scores = {
         "regime": 0.8 if regime in {"TREND_UP", "TREND_DOWN"} else 0.55 if regime in {"RANGE", "TRANSITION"} else 0.35,
         "trend": _clamp(float(primary.get("trend_efficiency") or 0)),
-        "structure": 1.0 if not failed_rules else 0.35,
+        "structure": 1.0 if not failed else 0.35,
         "momentum": 0.8 if primary.get("momentum") in {"BULLISH", "BEARISH"} else 0.5,
         "volatility": 0.8 if regime not in {"UNSTABLE", "INSUFFICIENT_EVIDENCE"} else 0.2,
         "timeframe_alignment": _clamp(alignment_score),
@@ -1006,12 +1036,12 @@ def _evaluate_rule_condition(
 ) -> bool | None:
     left = values.get(rule.left, {})
     current = left.get("previous" if previous else "current")
-    if current is None:
+    if not isinstance(current, (int, float)) or not math.isfinite(current):
         return None
     if rule.right:
         right = values.get(rule.right, {})
         right_value = right.get("previous" if previous else "current")
-        if right_value is None:
+        if not isinstance(right_value, (int, float)) or not math.isfinite(right_value):
             return None
         if rule.operator in {"GREATER_THAN", "CROSSES_ABOVE"}:
             return current > right_value
@@ -1028,12 +1058,12 @@ def _evaluate_rule_condition(
         if previous:
             return None
         prior = left.get("previous")
-        return None if prior is None else left.get("current") > prior
+        return current > prior if isinstance(prior, (int, float)) and math.isfinite(prior) else None
     if rule.operator == "FALLING":
         if previous:
             return None
         prior = left.get("previous")
-        return None if prior is None else left.get("current") < prior
+        return current < prior if isinstance(prior, (int, float)) and math.isfinite(prior) else None
     return False
 
 

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from src.config import Config
+from src.services.trading.market.data_quality import _parse_timestamp
 from src.services.trading.execution.mt5_live_adapter_pre_submit.policy import (
     MT5LiveAdapterPreSubmitConfig,
     autonomous_monitor_permissions_coherent,
@@ -173,11 +174,11 @@ class AutonomousCandidateMonitorJournal:
                     and tuple(row["timeframes"]) == timeframes
                 )
 
-            duplicate = any(
-                same_profile(row)
-                and row["closed_bar_time"] == closed_bar_time
-                for row in rows
-            )
+            requested = _parse_timestamp(closed_bar_time)
+            observed = [_parse_timestamp(row["closed_bar_time"]) for row in rows if same_profile(row)]
+            if requested is None or any(value is None for value in observed):
+                raise AutonomousCandidateMonitorError("MONITOR_BAR_TIMESTAMP_INVALID")
+            duplicate = bool(observed) and requested <= max(observed)
             unresolved = any(
                 same_profile(row)
                 and row["phase"] == "STARTED"

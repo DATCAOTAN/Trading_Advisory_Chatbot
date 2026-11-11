@@ -564,5 +564,11 @@ def test_boundary_is_not_a_queryplan_capability_or_regex_authority():
     assert "CapabilityRegistry" not in source + contract
     assert "import re" not in source + contract
     assert "MetaTrader5" not in source + contract
+    assert "trading.research" not in source + contract
     assert "from pydantic import" in contract
-    assert pydantic_paths == ["src/services/semantic/structured_semantics.py"]
+    # R1 validates research records and separate computation approval, not LLM semantics.
+    assert pydantic_paths == [
+        "src/services/semantic/structured_semantics.py",
+        "src/services/trading/research/descriptive_computation.py",
+        "src/services/trading/research/proposal.py",
+    ]

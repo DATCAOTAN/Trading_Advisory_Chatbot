@@ -219,6 +219,10 @@ def test_stale_tick_blocks():
     assert_market_blocker("MARKET_SNAPSHOT_STALE", timestamp="2026-07-22T00:00:00+00:00")
 
 
+def test_future_tick_outside_clock_tolerance_blocks():
+    assert_market_blocker("MARKET_SNAPSHOT_STALE", timestamp=(NOW + timedelta(seconds=6)).isoformat())
+
+
 def test_missing_symbol_metadata_blocks():
     assert_market_blocker("SYMBOL_METADATA_MISSING", broker_symbol="")
 
@@ -433,6 +437,13 @@ def test_authoritative_assembler_uses_existing_pipeline_in_order():
     assert assembled.semantic_parameter_references == (
         "autonomous_order_proposal_fixture",
     )
+    calls.clear()
+    feature_result.bundle.timeframes = {
+        "M15": SimpleNamespace(bars=[SimpleNamespace(timestamp=NOW.isoformat())])
+    }
+    with pytest.raises(OperatorCandidateInputError, match="MONITOR_MARKET_BAR_CHANGED"):
+        assembler.build(now=NOW, timeframes=("M15",), expected_closed_bar_time=(NOW - timedelta(minutes=15)).isoformat())
+    assert calls == ["feature"]
     assert assembled.order_proposal is proposal_inputs.order_proposal
     assert assembled.order_market_snapshot is proposal_inputs.order_market_snapshot
 

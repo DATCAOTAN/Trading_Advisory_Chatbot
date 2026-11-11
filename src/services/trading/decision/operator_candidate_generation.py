@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Iterable
@@ -35,6 +35,7 @@ from src.services.trading.execution.mt5_live_adapter_pre_submit.lifecycle_superv
     MT5RuntimeSupervisorStatus,
 )
 from src.services.trading.knowledge import KnowledgeRouter, RuntimeContextPackBuilder
+from src.services.trading.market.data_quality import _parse_timestamp
 from src.services.trading.market.live_feature_service import LiveFeatureService
 from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBundleBuilder
 from src.services.trading.market.timeframes import broker_symbol_for
@@ -42,6 +43,7 @@ from src.services.trading.market.regime_detector import MarketRegimeDetector
 from src.services.trading.reasoning import MethodSelectorService
 from src.services.trading.reasoning.strategy_evidence import (
     ConversationalStrategyRequest,
+    conversation_trading_scope,
     evaluate_strategy_rule,
     plan_strategy_data,
     validate_strategy,
@@ -143,6 +145,7 @@ class AuthoritativeAutonomousInputAssembler:
         strategy: ConversationalStrategyRequest | None = None,
         strategy_direction: str = "",
         strategy_action: str = "",
+        expected_closed_bar_time: str = "",
     ) -> AutonomousDecisionInputs:
         market_evaluated_at = _utc(now)
         symbol = str(symbol or Config.MARKET_DEFAULT_SYMBOL).strip().upper()
@@ -199,6 +202,18 @@ class AuthoritativeAutonomousInputAssembler:
             now=market_evaluated_at,
             max_age_seconds=Config.TRADING_AUTONOMOUS_DECISION_INPUT_MAX_AGE_SECONDS,
         )
+        if strategy is not None and strategy.requested_mode == "human_confirmed_live" and strategy.entry_rules:
+            results = getattr(getattr(evidence, "features", None), "data_quality", {}).get("rule_results", ())
+            if any(result is False for result in results):
+                raise OperatorCandidateInputError("ENTRY_CONDITION_FALSE")
+            if len(results) != len(strategy.entry_rules) or any(result is not True for result in results):
+                raise OperatorCandidateInputError("ENTRY_CONDITION_UNKNOWN")
+        if expected_closed_bar_time:
+            snapshot = feature_result.bundle.timeframes.get(selected_timeframes[0])
+            bars = snapshot.bars if snapshot else ()
+            expected = _parse_timestamp(expected_closed_bar_time)
+            if expected is None or not bars or _parse_timestamp(bars[-1].timestamp) != expected:
+                raise OperatorCandidateInputError("MONITOR_MARKET_BAR_CHANGED")
 
         try:
             calendar = self.calendar_builder.build(symbol=symbol, now=market_evaluated_at)
@@ -691,6 +706,23 @@ class EditableTradeDraftCandidateService:
             return EditableTradeDraftCandidateResult(
                 "DRAFT_NOT_ELIGIBLE", exc.blockers[0] if exc.blockers else "DOMAIN_VALIDATION_BLOCKED"
             )
+        if strategy is None and entry.get("immediate_entry") is True:
+            inputs = replace(inputs, trading_scope=conversation_trading_scope(draft.conversation_id))
+
+        risk = draft.risk.value or {}
+        if "requested_input" in risk or (entry.get("canonical_parameters") and draft.risk.source == "USER_EDITED"):
+            snapshot = inputs.order_market_snapshot
+            try:
+                quote = snapshot.ask if proposal.order_type == "BUY" else snapshot.bid
+                prices = (quote, proposal.stop_loss, snapshot.tick_size, snapshot.tick_value,
+                          proposal.proposed_volume, risk.get("amount"))
+                quote, stop_price, tick_size, tick_value, volume, budget = (Decimal(str(v)) for v in prices)
+                if not all(v.is_finite() and v > 0 for v in (quote, stop_price, tick_size, tick_value, volume, budget)):
+                    raise ValueError
+                if abs(quote - stop_price) * tick_value * volume > budget * tick_size:
+                    return EditableTradeDraftCandidateResult("DRAFT_NOT_ELIGIBLE", "RISK_LIMIT_EXCEEDED")
+            except (AttributeError, InvalidOperation, ValueError):
+                return EditableTradeDraftCandidateResult("DRAFT_NOT_ELIGIBLE", "RISK_EVIDENCE_UNAVAILABLE")
 
         run_result = self.decision_orchestrator.run_once(
             inputs, now=now, require_actionable=True
@@ -763,7 +795,14 @@ def _draft_candidate_blockers(
     if draft.mode.value != authoritative_mode:
         blockers.append("DRAFT_MODE_AUTHORITY_MISMATCH")
     identity = getattr(strategy, "identity", None)
-    if (
+    immediate = (
+        strategy is None and draft.mode.value == "human_confirmed_live"
+        and draft.confirmation_policy.value == "CONFIRM_EVERY_TRADE"
+        and not any((draft.strategy_id, draft.strategy_version, draft.strategy_hash))
+        and (draft.entry.value or {}).get("immediate_entry") is True
+        and not (draft.entry.value or {}).get("rules")
+    )
+    if not immediate and (
         identity is None
         or getattr(strategy, "canonical_symbol", None) != (draft.symbol.value or {}).get("canonical_symbol")
         or getattr(strategy, "requested_mode", None) != draft.mode.value

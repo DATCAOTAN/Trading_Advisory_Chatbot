@@ -21,6 +21,7 @@ Pipeline điều phối:
 import os
 import json
 import hashlib
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Iterator, List, Dict, Tuple, Optional, Any
 import time
@@ -61,12 +62,18 @@ from src.services.evidence import (
     AnswerContractEvaluator,
 )
 from src.services.live_data_service import get_live_service
-from src.services.semantic.query_plan import QueryPlanAssembler
+from src.services.semantic.query_plan import QueryPlan, QueryPlanAssembler
 from src.services.semantic.resolved_semantics import (
     ResolvedSemanticState,
+    SemanticCompletionPatch,
+    SemanticFieldUpdate,
+    apply_semantic_completion,
     bind_authoritative_position_reference,
+    computational_completion_choices,
+    computational_completion_value,
 )
 from src.services.semantic.structured_interpreter import StructuredSemanticInterpreter
+from src.services.semantic.structured_semantics import COMPUTATIONAL_SPEC_FIELD, COMPUTATIONAL_SPEC_REFERENCE
 from src.services.semantic.conversational_context import (
     ConversationalIntentContext,
     strategy_response_message,
@@ -83,6 +90,142 @@ from src.pipelines.modules.query_rewriter import QueryRewriterModule
 from src.pipelines.modules.router import RouterModule, RouteAction
 from src.pipelines.modules.reranker import RerankerModule
 from src.pipelines.modules.evaluator import EvaluatorModule
+
+
+def _research_brief_message(brief: dict) -> str:
+    goal = brief["goal"]
+    facts = [
+        ("Objective", goal.get("objective")),
+        ("Market", ", ".join(brief["symbols"])),
+        ("Horizon", goal.get("horizon")),
+        ("Account preference", brief["account_scope"]),
+        ("Requested workflow", brief["requested_mode"]),
+        ("Requested sources", ", ".join(brief["requested_sources"])),
+    ]
+    for key, label in (
+        ("max_risk_per_trade_pct", "Research risk limit per trade"),
+        ("max_drawdown_pct", "Research drawdown limit"),
+    ):
+        if key in goal:
+            facts.append((label, f"{goal[key]:g}%"))
+    lines = ["**Research brief**", *(f"- {label}: {value}" for label, value in facts if value)]
+    lines.append(
+        "No executable strategy has been established. Trading is not authorized. "
+        "Profitability is an objective, not a guarantee."
+    )
+    if brief["missing_information"]:
+        labels = {
+            "symbols": "market or instrument",
+            "research_goal.objective": "research objective",
+            "research_goal.horizon": "evaluation horizon",
+            "research_goal.max_risk_per_trade_pct": "maximum risk per trade (%)",
+            "research_goal.max_drawdown_pct": "maximum drawdown (%)",
+            "context_references.previous_research_goal": "the previous objective to continue",
+        }
+        missing = [labels[field] for field in brief["missing_information"] if field in labels]
+        if missing:
+            lines.append("Please clarify: " + ", ".join(dict.fromkeys(missing)) + ".")
+    lines.append("Next research step: verify the requested evidence and define testable strategy rules. No research or backtest has been run.")
+    return "\n\n".join(lines)
+
+
+def _spec_text(value: Any) -> str:
+    # Keep semantic text literal in Streamlit Markdown, including formulas and links.
+    return re.sub(r"([\\`*_{}\[\]()<>!:~$&|])", r"\\\1", " ".join(str(value).split()))
+
+
+def _spec_field_label(path: str) -> str:
+    path = path.removeprefix(COMPUTATIONAL_SPEC_FIELD + ".")
+    if path == f"context_references.{COMPUTATIONAL_SPEC_REFERENCE}":
+        return "previous specification in this conversation"
+    for plural, singular in (("parameters", "parameter"), ("data_requirements", "data requirement"),
+                             ("outputs", "output")):
+        path = path.replace(plural + "[", singular + "[")
+    path = re.sub(r"\[([0-9]{1,3})\]", lambda match: " " + str(int(match[1]) + 1), path)
+    return path.replace(".", " ").replace("_", " ")
+
+
+def _computational_specification_message(plan: QueryPlan) -> str:
+    spec = plan.computational_specification
+    assert spec is not None
+    prefix = COMPUTATIONAL_SPEC_FIELD
+    summary = plan.constraints[prefix]
+    sources = plan.semantic_context["field_sources"]
+    missing, conflicts = summary["missing_information"], summary["conflicting_fields"]
+    labels = {
+        "USER_EXPLICIT": "",
+        "CONVERSATION_INHERITED": " (from this conversation)",
+        "USER_CONFIRMED_SUGGESTION": " (user-confirmed)",
+    }
+    recorded, suggestions, disputed = [], [], []
+    conflicting_values = set(conflicts)
+    for field in conflicts:
+        if field.endswith(".range"):
+            conflicting_values.update(f"{field.removesuffix('.range')}.{part}" for part in ("value", "minimum", "maximum"))
+
+    def leaves(value, path, label=""):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                yield from leaves(item, f"{path}.{key}", key.replace("_", " "))
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                yield from leaves(item, f"{path}[{index}]", label)
+        elif value is not None:
+            yield path, label, value
+
+    for key, section in spec.as_dict().items():
+        if key in {"schema_version", "conflicts", "unsupported"}:
+            continue
+        for index, row in enumerate(section if isinstance(section, list) else [section]):
+            path = f"{prefix}.{key}" + (f"[{index}]" if isinstance(section, list) else "")
+            groups = ([], [], [])
+            for field, label, value in leaves(row, path):
+                source = sources.get(field)
+                if source == "UNRESOLVED" or any(
+                    field == gap or field.startswith((gap + ".", gap + "[")) for gap in missing
+                ):
+                    continue
+                group = groups[2 if field in conflicting_values else 0 if source in labels else 1]
+                group.append((f"{label}: " if label else "") + _spec_text(value) + labels.get(source, ""))
+            for lines, group in zip((recorded, suggestions, disputed), groups):
+                if group:
+                    lines.append(f"- **{_spec_field_label(path).capitalize()}:** " + "; ".join(group))
+
+    status = {
+        "NEEDS_CLARIFICATION": "Clarification needed",
+        "NEEDS_REVIEW": "Review needed",
+        "SPECIFIED": "Specified for review",
+    }[summary["status"]]
+    sections = ["**Computational specification review**", f"**Status:** {status}. Not ready to run."]
+    sections.append("**Confirmed requirements and parameters**\n" + "\n".join(recorded or ["None recorded."]))
+    if suggestions:
+        sections.append("**Unconfirmed values**\n" + "\n".join(suggestions))
+    if missing:
+        questions = [f"- What is the {_spec_text(_spec_field_label(field))}?" for field in missing]
+        sections.append("**Missing information**\n" + "\n".join(questions))
+    if conflicts or spec.conflicts:
+        questions = []
+        for field in conflicts:
+            if field.endswith(".range"):
+                label = _spec_text(_spec_field_label(field.removesuffix(".range")))
+                questions.append(f"- What value and bounds should {label} use?")
+            else:
+                questions.append(f"- What should the {_spec_text(_spec_field_label(field))} be?")
+        if f"{prefix}.configuration.authorization_mode" in conflicts:
+            requested = plan.semantic_context["input"]["requested_mode"]
+            disputed.append(f"- **Conflicting requested mode:** {_spec_text(requested)}")
+        if spec.conflicts:
+            questions.extend(f"- {_spec_text(conflict)}" for conflict in spec.conflicts)
+            questions.append("- Which interpretation should be used for the ambiguity described above?")
+        sections.append("**Conflicting or ambiguous requirements**\n" + "\n".join(disputed + questions))
+    if spec.unsupported:
+        sections.append("**Unsupported requirements**\n" + "\n".join(f"- {_spec_text(item)}" for item in spec.unsupported))
+    sections.append(
+        "**Runtime blocker:** Dynamic computation is not supported in this workflow. "
+        "Data availability, freshness and completeness were not checked. "
+        "No computation or research was run and trading is not authorized."
+    )
+    return "\n\n".join(sections)
 
 
 def _bind_selected_position_context(query_plan, model) -> bool:
@@ -170,6 +313,70 @@ class RAGOrchestrator:
     def sync_knowledge_base(self, force: bool = False) -> dict:
         return self.vector_service.sync_documents(force=force)
 
+    def inspect_research_readiness(self, session_id: str) -> dict:
+        from src.services.trading.research.evidence_verification import review_research_readiness
+
+        return review_research_readiness(
+            root=Config.DATA_DIR / "research", binding=os.getenv("RESEARCH_READINESS_BINDING", ""),
+            trading_scope=conversation_trading_scope(session_id), now=datetime.now(timezone.utc),
+        )
+
+    def inspect_research_result(self, session_id: str) -> dict:
+        from src.services.trading.research.descriptive_computation import review_research_result
+
+        return review_research_result(
+            root=Config.DATA_DIR / "research", binding=os.getenv("RESEARCH_READINESS_BINDING", ""),
+            result_binding=os.getenv("RESEARCH_RESULT_BINDING", ""),
+            trading_scope=conversation_trading_scope(session_id),
+        )
+
+    def computational_specification_completion_fields(
+        self, state: ResolvedSemanticState,
+    ) -> tuple[dict[str, tuple[str, tuple[str, ...]]], list[str]]:
+        if state.semantic.computational_specification is None:
+            return {}, []
+        plan = self.decision_context_builder.query_plan_assembler.assemble_resolved("", state)
+        missing = plan.constraints[COMPUTATIONAL_SPEC_FIELD]["missing_information"]
+        supported = computational_completion_choices(state, missing)
+        formula = f"{COMPUTATIONAL_SPEC_FIELD}.formula"
+        return {
+            path: (_spec_field_label(path).capitalize(), choices)
+            for path, choices in supported.items()
+        }, [_spec_field_label(gap) for gap in missing if gap not in supported and not (
+            gap == formula + "_or_steps" and formula in supported
+        )]
+
+    def complete_computational_specification(
+        self, state: ResolvedSemanticState, path: str, answer: str,
+    ) -> dict:
+        """Validate an explicit answer and render a new advisory review, without provider or acquisition."""
+        assembler = self.decision_context_builder.query_plan_assembler
+        if state.semantic.computational_specification is None:
+            raise ValueError("There is no specification to clarify.")
+        before = assembler.assemble_resolved("", state).constraints[COMPUTATIONAL_SPEC_FIELD]
+        choices = computational_completion_choices(state, before["missing_information"])
+        if path not in choices:
+            raise ValueError("This field is no longer missing or is not supported by typed clarification.")
+        value = computational_completion_value(path, answer)
+        if choices[path] and value not in choices[path]:
+            raise ValueError("Select one of the supported values for this field.")
+        updated = apply_semantic_completion(state, SemanticCompletionPatch((
+            SemanticFieldUpdate(path, value, "USER_EXPLICIT"),
+        )))
+        plan = assembler.assemble_resolved("", updated)
+        after = plan.constraints[COMPUTATIONAL_SPEC_FIELD]
+        new_conflicts = set(after["conflicting_fields"]) - set(before["conflicting_fields"])
+        if new_conflicts:
+            labels = ", ".join(_spec_field_label(field) for field in sorted(new_conflicts))
+            raise ValueError(f"The answer conflicts with recorded requirements: {labels}.")
+        return {
+            "role": "assistant",
+            "intent": "COMPUTATIONAL_SPECIFICATION",
+            "content": _computational_specification_message(plan),
+            "resolved_semantic_state": plan.semantic_context,
+            "answer_complete": "pass",
+        }
+
     def _interpret_structured_semantics(self, user_query: str):
         interpreter = getattr(self, "structured_semantic_interpreter", None)
         if interpreter is None:
@@ -238,7 +445,7 @@ class RAGOrchestrator:
                 semantic_interpretation.semantic.primary_intent,
                 user_query,
             )
-            if route_action != RouteAction.EARLY_EXIT:
+            if route_action != RouteAction.EARLY_EXIT or semantic_interpretation.semantic.has_computational_request:
                 canonical_query_plan = self.decision_context_builder.query_plan_assembler.assemble(
                     original_query=user_query,
                     structured_semantics=semantic_interpretation.semantic,
@@ -247,6 +454,25 @@ class RAGOrchestrator:
                 canonical_query_plan.constraints["trading_scope"] = conversation_trading_scope(
                     session_id
                 )
+                if canonical_query_plan.computational_specification is not None:
+                    message = _computational_specification_message(canonical_query_plan)
+                    return self._static_stream(message), [], "COMPUTATIONAL_SPECIFICATION", {
+                        "is_bounded_response": True,
+                        "query_plan": canonical_query_plan.as_dict(),
+                        "semantic_provider_calls": semantic_provider_calls,
+                        "provider_calls": semantic_provider_calls,
+                        "retrieval_rewrite_calls": 0,
+                    }
+                brief = canonical_query_plan.constraints.get("research_brief")
+                if brief is not None:
+                    return self._static_stream(_research_brief_message(brief)), [], "RESEARCH_BRIEF", {
+                        "is_bounded_response": True,
+                        "query_plan": canonical_query_plan.as_dict(),
+                        "research_brief": brief,
+                        "semantic_provider_calls": semantic_provider_calls,
+                        "provider_calls": semantic_provider_calls,
+                        "retrieval_rewrite_calls": 0,
+                    }
                 context_requirements = self.decision_context_builder.requirement_planner.plan(canonical_query_plan)
                 context_execution_plan = self.decision_context_builder.execution_planner.plan(context_requirements)
                 if canonical_query_plan.primary_intent in {"position_state_read", "position_management"}:

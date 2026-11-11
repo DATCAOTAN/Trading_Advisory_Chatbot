@@ -331,6 +331,7 @@ def test_stop_failure_keeps_owned_worker_visible(monkeypatch, tmp_path):
     status = owner.status()
     assert status["running"] and status["process_state"] == "RUNNING"
     assert status["stop_requested_at"] and not status["stop_completed_at"]
+    assert status["failure_category"] == "PROCESS_STOP_FAILED"
 
 
 def test_diagnostic_write_failure_blocks_start_but_never_operator_stop(monkeypatch, tmp_path):
@@ -352,9 +353,60 @@ def test_diagnostic_write_failure_blocks_start_but_never_operator_stop(monkeypat
     stopped = owner.stop()
     assert stopped["process_state"] == "STOPPED" and not stopped["running"]
     assert stopped["failure_category"] == "DIAGNOSTIC_WRITE_FAILED"
-    with pytest.raises(PermissionError):
+    with pytest.raises(RuntimeError, match="OWNERSHIP_UNAVAILABLE"):
         owner.start(symbol="XAUUSD", timeframes=("M1",), mandate_id="private")
     launch.assert_called_once()
+
+
+def test_concurrent_owners_cannot_launch_from_a_stale_stopped_status(monkeypatch, tmp_path):
+    first = AutonomousMonitorProcess(tmp_path)
+    second = AutonomousMonitorProcess(tmp_path)
+    args = dict(symbol="XAUUSD", timeframes=("M1",), mandate_id="mandate-a", trading_scope="scope-a")
+    assert second.status("scope-a")["process_state"] == "STOPPED"
+    launches = []
+
+    def launch(*_args, **_kwargs):
+        launches.append(1)
+        with pytest.raises(RuntimeError, match="LAUNCH_LOCK_UNAVAILABLE"):
+            second.start(**args)
+        return SimpleNamespace(poll=lambda: None)
+
+    monkeypatch.setattr("subprocess.Popen", launch)
+    assert first.start(**args)["running"]
+    with pytest.raises(RuntimeError, match="OWNERSHIP_UNAVAILABLE"):
+        second.start(**args)
+    assert len(launches) == 1
+
+
+def test_watch_stops_after_unknown_without_polling_or_rearming(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+    from scripts import run_autonomous_candidate_monitor as cli
+
+    account = {"account_environment": "DEMO", "account_context_fingerprint": "fixture"}
+    adapter = SimpleNamespace(capture_account_context=lambda: dict(account), close=Mock())
+    strategy = SimpleNamespace(canonical_symbol="XAUUSD", timeframes=("M1",))
+    mandate = SimpleNamespace(strategy_direction="BUY", strategy_action="OPEN_POSITION")
+    authority = SimpleNamespace(load_supervisor_strategy=Mock(return_value=(mandate, strategy)))
+    result = SimpleNamespace(status="RESULT_UNKNOWN", to_public_dict=lambda: {"status": "RESULT_UNKNOWN"})
+    coordinator = SimpleNamespace(run_once=Mock(return_value=result))
+    monkeypatch.setattr(cli, "get_live_service", lambda: SimpleNamespace(provider=None))
+    monkeypatch.setattr(cli, "MT5LiveAdapterDisabled", lambda: adapter)
+    monkeypatch.setattr(cli, "TradingAuthorityStore", lambda: object())
+    monkeypatch.setattr(cli, "TradingAuthorityService", lambda _: authority)
+    for factory in (
+        "ApprovalPreSubmitLifecycleService", "AutonomousDecisionJournal", "ProposalIntentJournalStore",
+        "MT5PreSubmitJournalStore", "LiveFeatureService", "MarketSnapshotBundleBuilder",
+        "AuthoritativeAutonomousInputAssembler",
+    ):
+        monkeypatch.setattr(cli, factory, lambda *args, **kwargs: object())
+    monkeypatch.setattr(cli, "AutonomousTradingCoordinator", lambda **kwargs: coordinator)
+    monkeypatch.setattr(cli.time, "sleep", lambda *_: pytest.fail("uncertain results must stop watch"))
+    assert cli.main([
+        "--symbol", "XAUUSD", "--timeframes", "M1", "--mandate-id", "fixture", "--watch",
+        "--journal", str(tmp_path / "monitor.jsonl"),
+    ]) == 2
+    coordinator.run_once.assert_called_once()
+    adapter.close.assert_called_once()
 
 
 @pytest.mark.parametrize("running,age,expected", ((True, 10, "CURRENT"), (False, 10, "HISTORICAL"), (True, 100, "HISTORICAL")))

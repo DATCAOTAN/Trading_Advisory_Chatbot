@@ -22,6 +22,7 @@ FIELD_STATUSES = {
 }
 FIELD_SOURCES = {
     "USER_EXPLICIT", "USER_EDITED", "CONVERSATION_INHERITED",
+    "USER_CONFIRMED_SUGGESTION", "UNRESOLVED",
     "USER_SELECTED_METHOD", "LLM_METHOD_SUGGESTION", "STRATEGY_POLICY",
     "DEMO_DEFAULT", "MARKET_CALCULATED", "SYSTEM_CALCULATED",
 }
@@ -29,6 +30,8 @@ STOP_METHODS = {"USER_EXPLICIT", "ATR_MULTIPLE", "RECENT_STRUCTURE"}
 TARGET_METHODS = {"USER_EXPLICIT", "REWARD_RISK_RATIO", "RECENT_STRUCTURE"}
 SIZING_METHODS = {"USER_EXPLICIT_VOLUME", "ACCOUNT_RISK_FRACTION"}
 SEMANTIC_UNRESOLVED_PREFIX = "SEMANTIC_UNRESOLVED:"
+_PARAMETER_FIELDS = {"stop_loss": "stop_loss", "take_profit": "take_profit", "risk": "risk_fraction", "volume": "requested_volume"}
+_INPUT_SOURCES = {"USER_EXPLICIT", "CONVERSATION_INHERITED", "USER_CONFIRMED_SUGGESTION"}
 
 
 class TradeDraftError(RuntimeError):
@@ -360,7 +363,9 @@ class EditableTradeDraftService:
         if semantic_prerequisite_blockers(request):
             raise TradeDraftError("STRATEGY_COMPLETION_REQUIRED")
         previous = self.store.latest_for_conversation(conversation_id)
-        if previous is not None and previous.source_request_id == request.request_id:
+        if previous is not None and previous.source_request_id == request.request_id and (
+            not _canonical_request(request) or (previous.entry.value or {}).get("canonical_parameters") is True
+        ):
             return previous
         draft = self._build(request, conversation_id, evidence, previous)
         return self.store.append(draft)
@@ -438,23 +443,38 @@ class EditableTradeDraftService:
             or getattr(request, "trade_instruction_text", "")
             or ""
         )
-        extracted = extract_trade_fields(text)
-        values = _draft_values(previous) if previous else {}
-        values.update({key: value for key, value in extracted.items() if value not in (None, "")})
+        canonical = _canonical_request(request)
+        strategy = getattr(request, "strategy", None)
+        values = {} if canonical else _draft_values(previous)
+        sources = dict(getattr(strategy, "field_sources", ()) or getattr(request, "trade_parameter_sources", ()))
+        if canonical:
+            parameters = getattr(strategy, "trade_parameters", None) or getattr(request, "trade_parameters", None)
+            values["parameter_inputs"] = {}
+            for name, item in (parameters.as_dict() if parameters is not None else {}).items():
+                source = sources.get(f"trade_parameters.{name}")
+                values["parameter_inputs"][name] = {
+                    **item, "source": source if source in _INPUT_SOURCES else "UNRESOLVED",
+                }
+            values["canonical_parameters"] = True
+            values["immediate_entry"] = (
+                strategy is None and getattr(request, "trade_action", "") == "OPEN_POSITION"
+                and getattr(request, "requested_mode", "") == "human_confirmed_live"
+                and not getattr(request, "blockers", ())
+            )
+        else:
+            values.update(extract_trade_fields(text))
         values["direction"] = str(getattr(request, "trade_direction", "") or values.get("direction") or "")
         values["action"] = str(getattr(request, "trade_action", "") or values.get("action") or "")
-        strategy = getattr(request, "strategy", None)
-        symbol_explicit = bool(resolve_symbols_from_text(text))
-        symbol_source = "USER_EXPLICIT" if symbol_explicit else "CONVERSATION_INHERITED"
-        timeframe_explicit = bool(re.search(r"\b(?:M1|M5|M15|H1|H4|D1)\b", text, re.I))
-        timeframe_source = "USER_EXPLICIT" if timeframe_explicit else "CONVERSATION_INHERITED"
+        if canonical:
+            symbol_source = sources.get("symbols[0]", "CONVERSATION_INHERITED")
+        else:
+            symbol_source = "USER_EXPLICIT" if resolve_symbols_from_text(text) else "CONVERSATION_INHERITED"
         values.update(
             {
                 "canonical_symbol": str(getattr(request, "canonical_symbol", "") or ""),
                 "broker_symbol": str(getattr(request, "broker_symbol", "") or ""),
                 "timeframes": tuple(getattr(request, "timeframe_profile", ()) or ()),
                 "symbol_source": symbol_source,
-                "timeframe_source": timeframe_source,
                 "entry_rule": tuple(rule.as_dict() for rule in getattr(strategy, "entry_rules", ()) or ()),
                 "entry_rule_source": "USER_EXPLICIT",
                 "mode": str(getattr(request, "requested_mode", "") or ""),
@@ -528,6 +548,14 @@ def build_deterministic_strategy_draft(
     )
 
 
+def _canonical_request(request: Any) -> bool:
+    return (
+        getattr(request, "strategy_description", "") == "STRUCTURED_SEMANTIC_PROJECTION"
+        or getattr(getattr(request, "strategy", None), "strategy_description", "") == "STRUCTURED_SEMANTIC_PROJECTION"
+        or getattr(request, "trade_parameters", None) is not None
+    )
+
+
 @dataclass(frozen=True)
 class _DeterministicStrategyDraftRequest:
     request_id: str
@@ -587,6 +615,7 @@ def market_evidence_from_live_result(
     bundle = result.bundle
     tick = bundle.tick
     indicator = result.feature_snapshot.indicator_snapshots.get(primary_timeframe)
+    feature_blockers = tuple(str(item) for item in getattr(result.feature_snapshot, "blockers", ()) or ())
     return TradeDraftMarketEvidence(
         reference=str(bundle.bundle_id),
         observed_at=str(tick.timestamp if tick else bundle.created_at),
@@ -610,12 +639,32 @@ def market_evidence_from_live_result(
         account_reference=str(getattr(account, "account_id_hash", "") or ""),
         account_environment=str(account_environment or "UNKNOWN").upper(),
         freshness=str(getattr(result.quality_report, "status", "UNKNOWN") or "UNKNOWN"),
-        blockers=tuple(
-            str(item)
-            for item in getattr(result.feature_snapshot, "blockers", ()) or ()
-        ),
-        warnings=tuple(str(item) for item in getattr(result.quality_report, "warnings", ()) or ()),
+        blockers=tuple(item for item in feature_blockers if not item.startswith("ENTRY_CONDITION_")),
+        warnings=tuple(str(item) for item in getattr(result.quality_report, "warnings", ()) or ())
+        + tuple(item for item in feature_blockers if item.startswith("ENTRY_CONDITION_")),
     )
+
+
+def _normalize_trade_parameter(name: str, item: Mapping[str, Any]) -> tuple[Decimal | None, str]:
+    prefix = f"TRADE_PARAMETER_{name.upper()}"
+    raw = item.get("value")
+    unit = str(item.get("unit") or "").strip().upper()
+    if raw is None or not unit or item.get("source") not in _INPUT_SOURCES:
+        return None, f"{prefix}_UNRESOLVED"
+    units = {"stop_loss": {"PRICE"}, "take_profit": {"PRICE"}, "risk": {"PERCENT", "FRACTION"}, "volume": {"LOT"}}
+    if unit not in units[name]:
+        return None, f"{prefix}_UNIT_UNSUPPORTED"
+    value = _optional_decimal(raw)
+    if value is None or (value and abs(value.adjusted()) > 20):
+        return None, f"{prefix}_INVALID"
+    if value.is_zero():
+        value = Decimal(0)
+    elif unit == "PERCENT":
+        sign, digits, exponent = value.as_tuple()
+        value = Decimal((sign, digits, exponent - 2))
+    if value <= 0:
+        return value, f"{prefix}_INVALID"
+    return value, ""
 
 
 def _calculate_draft(
@@ -632,6 +681,20 @@ def _calculate_draft(
         if blocker.startswith(SEMANTIC_UNRESOLVED_PREFIX)
     ]
     warnings: list[str] = []
+    replaced_policy = {"stop_loss": {"stop_method", "atr_multiplier"},
+                       "take_profit": {"target_method", "reward_risk_ratio"}}
+    parameter_inputs = {
+        name: item for name, item in values.get("parameter_inputs", {}).items()
+        if _PARAMETER_FIELDS[name] not in changed
+        and not (replaced_policy.get(name, set()) & changed)
+    }
+    invalid_parameters = set()
+    for name, item in parameter_inputs.items():
+        value, blocker = _normalize_trade_parameter(name, item)
+        values[_PARAMETER_FIELDS[name]] = value
+        if blocker:
+            invalid_parameters.add(name)
+            blockers.append(blocker)
     evidence_not_attempted = any(
         blocker.startswith(SEMANTIC_UNRESOLVED_PREFIX) for blocker in blockers
     )
@@ -657,7 +720,8 @@ def _calculate_draft(
     if action not in {"OPEN_POSITION", "GENERIC_TRADE"}:
         blockers.append("ENTRY_ACTION_MISSING")
     rule = tuple(values.get("entry_rule") or ())
-    if not rule:
+    immediate_entry = values.get("immediate_entry") is True
+    if not rule and not immediate_entry:
         blockers.append("ENTRY_RULE_MISSING")
 
     evidence_valid = bool(
@@ -674,8 +738,9 @@ def _calculate_draft(
         entry = evidence.ask if direction == "BUY" else evidence.bid
     entry_source = "USER_EDITED" if "entry_price" in changed else str(values.get("entry_source") or ("USER_EXPLICIT" if values.get("entry_price") else "MARKET_CALCULATED"))
     entry_field = _field(
-        {"rules": rule, "reference_price": entry, "order_type": "MARKET"},
-        "VALID" if rule and entry is not None else "CALCULATED_PENDING" if rule else "MISSING_REQUIRED",
+        {"rules": rule, "reference_price": entry, "order_type": "MARKET",
+         **({"canonical_parameters": True, "immediate_entry": immediate_entry} if values.get("canonical_parameters") else {})},
+        "VALID" if (rule or immediate_entry) and entry is not None else "CALCULATED_PENDING" if rule or immediate_entry else "MISSING_REQUIRED",
         entry_source,
         (evidence.reference,) if evidence_valid and evidence else (),
     )
@@ -683,7 +748,7 @@ def _calculate_draft(
     stop_method = str(values.get("stop_method") or "")
     stop = _optional_decimal(values.get("stop_loss"))
     atr_multiplier = _optional_decimal(values.get("atr_multiplier"))
-    if stop is not None and stop_method in {"", "USER_EXPLICIT"}:
+    if "stop_loss" in parameter_inputs or (stop is not None and stop_method in {"", "USER_EXPLICIT"}):
         stop_method = "USER_EXPLICIT"
     elif not stop_method:
         stop_method = "ATR_MULTIPLE" if evidence_valid and evidence and evidence.atr else "RECENT_STRUCTURE"
@@ -708,9 +773,15 @@ def _calculate_draft(
             blockers.append("STRUCTURE_EVIDENCE_UNAVAILABLE")
     elif stop_method not in STOP_METHODS:
         blockers.append("STOP_POLICY_MISSING")
-    if stop is not None and evidence and evidence.tick_size:
+    if stop is not None and evidence and evidence.tick_size and "stop_loss" not in parameter_inputs:
         stop = _round_tick(stop, evidence.tick_size)
     stop_status = "VALID" if stop is not None else "CALCULATED_PENDING"
+    if "stop_loss" in invalid_parameters or (
+        "stop_loss" in parameter_inputs and stop is not None and evidence and evidence.tick_size and stop % evidence.tick_size
+    ):
+        stop_status = "INVALID"
+        if "stop_loss" not in invalid_parameters:
+            blockers.append("STOP_PRICE_OFF_TICK")
     if stop is not None and entry is not None and direction:
         minimum = (evidence.minimum_distance_points or Decimal("0")) * (evidence.point or Decimal("0")) if evidence else Decimal("0")
         distance = abs(entry - stop)
@@ -719,9 +790,10 @@ def _calculate_draft(
             stop_status = "INVALID"
     else:
         distance = None
-    stop_source = "USER_EDITED" if {"stop_loss", "stop_method", "atr_multiplier"} & changed else str(values.get("stop_source") or ("USER_EXPLICIT" if values.get("stop_loss") else "STRATEGY_POLICY"))
+    stop_source = parameter_inputs.get("stop_loss", {}).get("source") or ("USER_EDITED" if {"stop_loss", "stop_method", "atr_multiplier"} & changed else str(values.get("stop_source") or ("USER_EXPLICIT" if values.get("stop_loss") else "STRATEGY_POLICY")))
     stop_field = _field(
-        {"method": stop_method, "price": stop, "atr_multiplier": atr_multiplier},
+        {"method": stop_method, "price": stop, "atr_multiplier": atr_multiplier,
+         **({"requested_input": parameter_inputs["stop_loss"]} if "stop_loss" in parameter_inputs else {})},
         stop_status,
         stop_source,
         (evidence.reference,) if stop is not None and evidence_valid and evidence else (),
@@ -730,7 +802,7 @@ def _calculate_draft(
     target_method = str(values.get("target_method") or "")
     target = _optional_decimal(values.get("take_profit"))
     rr = _optional_decimal(values.get("reward_risk_ratio"))
-    if target is not None and target_method in {"", "USER_EXPLICIT"}:
+    if "take_profit" in parameter_inputs or (target is not None and target_method in {"", "USER_EXPLICIT"}):
         target_method = "USER_EXPLICIT"
     elif not target_method:
         target_method = "REWARD_RISK_RATIO"
@@ -751,29 +823,38 @@ def _calculate_draft(
             blockers.append("STRUCTURE_EVIDENCE_UNAVAILABLE")
     elif target_method not in TARGET_METHODS:
         blockers.append("TARGET_POLICY_MISSING")
-    if target is not None and rr is not None and entry is not None and distance is not None:
+    if target is not None and rr is not None and entry is not None and distance:
         implied = abs(target - entry) / distance
         if abs(implied - rr) > Decimal("0.01"):
             blockers.append("TARGET_POLICY_CONFLICT")
-    if target is not None and evidence and evidence.tick_size:
+    if target is not None and evidence and evidence.tick_size and "take_profit" not in parameter_inputs:
         target = _round_tick(target, evidence.tick_size)
     target_status = "VALID" if target is not None else "CALCULATED_PENDING"
+    if "take_profit" in invalid_parameters or (
+        "take_profit" in parameter_inputs and target is not None and evidence and evidence.tick_size and target % evidence.tick_size
+    ):
+        target_status = "INVALID"
+        if "take_profit" not in invalid_parameters:
+            blockers.append("TARGET_PRICE_OFF_TICK")
     if target is not None and entry is not None and direction and ((direction == "BUY" and target <= entry) or (direction == "SELL" and target >= entry)):
         blockers.append("TARGET_DISTANCE_INVALID")
         target_status = "INVALID"
-    target_source = "USER_EDITED" if {"take_profit", "target_method", "reward_risk_ratio"} & changed else str(values.get("target_source") or ("USER_EXPLICIT" if values.get("take_profit") else "STRATEGY_POLICY"))
+    target_source = parameter_inputs.get("take_profit", {}).get("source") or ("USER_EDITED" if {"take_profit", "target_method", "reward_risk_ratio"} & changed else str(values.get("target_source") or ("USER_EXPLICIT" if values.get("take_profit") else "STRATEGY_POLICY")))
     target_field = _field(
-        {"method": target_method, "price": target, "reward_risk_ratio": rr},
+        {"method": target_method, "price": target, "reward_risk_ratio": rr,
+         **({"requested_input": parameter_inputs["take_profit"]} if "take_profit" in parameter_inputs else {})},
         target_status,
         target_source,
         (evidence.reference,) if target is not None and evidence_valid and evidence else (),
     )
 
-    risk_fraction = _optional_decimal(values.get("risk_fraction")) or policy.default_demo_risk_fraction
-    if risk_fraction <= 0 or risk_fraction > policy.maximum_risk_fraction:
+    risk_fraction = _optional_decimal(values.get("risk_fraction"))
+    if risk_fraction is None and "risk" not in parameter_inputs:
+        risk_fraction = policy.default_demo_risk_fraction
+    if risk_fraction is not None and not 0 < risk_fraction <= policy.maximum_risk_fraction:
         blockers.append("RISK_LIMIT_EXCEEDED")
     equity = evidence.account_equity if evidence_valid and evidence else None
-    risk_amount = equity * risk_fraction if equity is not None else None
+    risk_amount = equity * risk_fraction if equity is not None and risk_fraction is not None else None
     authorized_risk_budget = (
         min(risk_amount, sizing_constraints.maximum_risk_amount)
         if risk_amount is not None and sizing_constraints is not None
@@ -781,16 +862,17 @@ def _calculate_draft(
     )
     if equity is None and not evidence_not_attempted:
         blockers.append("ACCOUNT_RISK_BASIS_UNAVAILABLE")
-    risk_source = "USER_EDITED" if "risk_fraction" in changed else str(values.get("risk_source") or ("USER_EXPLICIT" if values.get("risk_fraction") else "DEMO_DEFAULT"))
+    risk_source = parameter_inputs.get("risk", {}).get("source") or ("USER_EDITED" if "risk_fraction" in changed else str(values.get("risk_source") or ("USER_EXPLICIT" if values.get("risk_fraction") is not None else "DEMO_DEFAULT")))
+    explicit_risk = "risk" in parameter_inputs or (values.get("canonical_parameters") and risk_source == "USER_EDITED")
 
     requested_volume = _optional_decimal(values.get("requested_volume"))
-    sizing_method = str(values.get("sizing_method") or ("USER_EXPLICIT_VOLUME" if requested_volume is not None else "ACCOUNT_RISK_FRACTION"))
+    sizing_method = "USER_EXPLICIT_VOLUME" if "volume" in parameter_inputs else str(values.get("sizing_method") or ("USER_EXPLICIT_VOLUME" if requested_volume is not None else "ACCOUNT_RISK_FRACTION"))
     proposed_volume = requested_volume
     required_metadata = bool(evidence and evidence.tick_size and evidence.tick_value and evidence.volume_step and evidence.volume_min and evidence.volume_max)
     volume_by_risk = None
     authorized_volume_cap = None
     if sizing_method == "ACCOUNT_RISK_FRACTION":
-        if authorized_risk_budget is not None and distance and required_metadata:
+        if authorized_risk_budget is not None and authorized_risk_budget > 0 and distance and required_metadata:
             risk_per_lot = (distance / evidence.tick_size) * evidence.tick_value
             volume_by_risk = authorized_risk_budget / risk_per_lot
             if sizing_constraints is None:
@@ -800,6 +882,9 @@ def _calculate_draft(
                     evidence.volume_min,
                     evidence.volume_max,
                 )
+                if explicit_risk and volume_by_risk < evidence.volume_min:
+                    blockers.append("RISK_BUDGET_BELOW_BROKER_MINIMUM")
+                    proposed_volume = None
             else:
                 authorized_volume_cap = min(
                     sizing_constraints.maximum_volume, evidence.volume_max
@@ -825,7 +910,9 @@ def _calculate_draft(
     if proposed_volume is not None and distance and evidence and evidence.tick_size and evidence.tick_value:
         actual_risk = distance / evidence.tick_size * evidence.tick_value * proposed_volume
         actual_fraction = actual_risk / equity if equity else None
-        if actual_fraction is not None and actual_fraction > policy.maximum_risk_fraction:
+        if actual_fraction is not None and actual_fraction > policy.maximum_risk_fraction or (
+            explicit_risk and risk_amount is not None and actual_risk > risk_amount
+        ):
             blockers.append("RISK_LIMIT_EXCEEDED")
         if sizing_constraints is not None:
             if actual_risk > sizing_constraints.maximum_risk_amount:
@@ -834,11 +921,19 @@ def _calculate_draft(
                 blockers.append("MANDATE_VOLUME_LIMIT_EXCEEDED")
             if proposed_volume > evidence.volume_max:
                 blockers.append("BROKER_VOLUME_MAXIMUM_EXCEEDED")
-    sizing_source = "USER_EDITED" if "requested_volume" in changed else str(values.get("sizing_source") or ("USER_EXPLICIT" if requested_volume is not None else "SYSTEM_CALCULATED"))
+    sizing_source = parameter_inputs.get("volume", {}).get("source") or ("USER_EDITED" if "requested_volume" in changed else str(values.get("sizing_source") or ("USER_EXPLICIT" if requested_volume is not None else "SYSTEM_CALCULATED")))
     sizing_status = "VALID" if proposed_volume is not None else "CALCULATED_PENDING"
+    if "volume" in invalid_parameters:
+        sizing_status = "INVALID"
+    elif "volume" in parameter_inputs and required_metadata and requested_volume is not None and (
+        not evidence.volume_min <= requested_volume <= evidence.volume_max or requested_volume % evidence.volume_step
+    ):
+        sizing_status = "INVALID"
+        blockers.append("VOLUME_STEP_OR_BOUNDS_INVALID")
     sizing_field = _field(
         {
             "method": sizing_method,
+            **({"requested_input": parameter_inputs["volume"]} if "volume" in parameter_inputs else {}),
             "requested_volume": requested_volume,
             "proposed_volume": proposed_volume,
             "actual_risk_amount": actual_risk,
@@ -862,6 +957,7 @@ def _calculate_draft(
     risk_field = _field(
         {
             "fraction": risk_fraction,
+            **({"requested_input": parameter_inputs["risk"]} if "risk" in parameter_inputs else {}),
             "amount": risk_amount,
             "policy_risk_amount": risk_amount,
             "mandate_maximum_risk": (
@@ -870,7 +966,7 @@ def _calculate_draft(
             "authorized_risk_budget": authorized_risk_budget,
             "policy_version": policy.policy_version,
         },
-        "VALID" if risk_amount is not None and "RISK_LIMIT_EXCEEDED" not in blockers else "CALCULATED_PENDING" if risk_amount is None else "INVALID",
+        "INVALID" if "risk" in invalid_parameters or "RISK_LIMIT_EXCEEDED" in blockers else "CALCULATED_PENDING" if risk_amount is None else "VALID",
         risk_source,
         (evidence.account_reference,) if evidence and evidence.account_reference else (),
     )
@@ -927,6 +1023,13 @@ def _draft_values(draft: EditableTradeDraft | None) -> dict[str, Any]:
         "direction": draft.direction.value or "",
         "action": draft.action.value or "",
         "entry_rule": tuple(entry.get("rules") or ()),
+        "immediate_entry": entry.get("immediate_entry", False),
+        "canonical_parameters": entry.get("canonical_parameters", False),
+        "parameter_inputs": {
+            name: field["requested_input"]
+            for name, field in (("stop_loss", stop), ("take_profit", target), ("risk", risk), ("volume", sizing))
+            if "requested_input" in field
+        },
         "entry_price": entry.get("reference_price"),
         "entry_source": draft.entry.source,
         "stop_method": stop.get("method"),

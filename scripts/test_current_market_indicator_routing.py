@@ -9,7 +9,7 @@ from src.services.decision_context import (
     ExistingTechnicalSnapshotAdapter,
 )
 from src.services.evidence import EvidenceSelector
-from src.services.semantic.context_acquisition import ContextAcquisitionExecutor
+from src.services.semantic.context_acquisition import ContextAcquisitionExecutor, RuntimeContextStore
 from src.services.semantic.context_execution import ContextExecutionPlanner
 from src.services.semantic.context_requirements import ContextRequirementPlanner
 from src.services.semantic.query_plan import QueryPlanAssembler
@@ -20,9 +20,10 @@ QUERY = "EMA 20 và RSI 14 hiện tại của BTCUSDm trên H1 là bao nhiêu?"
 
 
 class FakeLiveService:
-    def __init__(self, *, bars=80, stale=False):
+    def __init__(self, *, bars=80, stale=False, unclosed=False):
         self.bars = bars
         self.stale = stale
+        self.unclosed = unclosed
         self.calls = []
 
     def get_live_price(self, symbol="XAUUSD"):
@@ -30,7 +31,8 @@ class FakeLiveService:
 
     def get_historical_candles(self, symbol="XAUUSD", timeframe="1h", limit=100, **_):
         self.calls.append((symbol, timeframe, limit))
-        latest = datetime.now(timezone.utc) - (timedelta(days=3) if self.stale else timedelta(hours=2))
+        age = timedelta(days=3) if self.stale else timedelta(minutes=10 if self.unclosed else 120)
+        latest = datetime.now(timezone.utc) - age
         start = latest - timedelta(hours=max(self.bars - 1, 0))
         return [
             {
@@ -45,7 +47,7 @@ class FakeLiveService:
         ]
 
 
-def _run(query=QUERY, *, live=None):
+def _run(query=QUERY, *, live=None, runtime_store=None):
     live = live or FakeLiveService()
     plan = QueryPlanAssembler().assemble(query)
     requirements = ContextRequirementPlanner().plan(plan)
@@ -55,7 +57,7 @@ def _run(query=QUERY, *, live=None):
         technical_adapter=ExistingTechnicalSnapshotAdapter(),
         live_service=live,
     )
-    batch = executor.execute(plan, requirements, execution)
+    batch = executor.execute(plan, requirements, execution, runtime_store=runtime_store)
     return plan, requirements, execution, batch, live
 
 
@@ -69,6 +71,40 @@ def test_configured_broker_alias_resolves_to_canonical_symbol(monkeypatch):
         "RESOLVED",
     )
     assert resolve_symbol("UNKNOWNUSDx").status == "UNRESOLVED"
+
+
+@pytest.mark.parametrize("snapshot", [{}, {"indicators": {"ema_20_h1": 1.0}, "as_of_completed_bar": "2026-01-01T01:00:00Z"}])
+def test_requested_indicator_failure_never_returns_default_summary(monkeypatch, snapshot):
+    monkeypatch.setattr("src.services.decision_context.calculate_indicator_snapshot", lambda *_args, **_kwargs: snapshot)
+    _, _, _, batch, _ = _run()
+    technical = next(result for result in batch.results if result.capability == "technical_snapshot")
+    assert technical.status == "failed"
+    assert technical.error_code == "technical_evidence_invalid"
+    assert not technical.data
+
+
+def test_generic_technical_summary_labels_default_indicators():
+    snapshot = ExistingTechnicalSnapshotAdapter().build(None, [{"rsi_14": 42}])
+    assert snapshot["calculation"] == "DEFAULT_SUMMARY"
+    assert snapshot["indicators"] == {"rsi_14": 42}
+
+
+def test_requested_h1_never_uses_unlabelled_bars_prefetched_from_m15():
+    prefetched = FakeLiveService().get_historical_candles("BTCUSD", "M15", 80)
+    store = RuntimeContextStore.from_legacy_outputs(candles_output=prefetched, symbol="BTCUSD", timeframe="M15")
+    _, _, _, batch, live = _run(runtime_store=store)
+    technical = next(result for result in batch.results if result.capability == "technical_snapshot")
+    assert live.calls == [("BTCUSD", "H1", 60)]
+    assert technical.status == "success"
+    assert technical.provenance["provider"] == "existing_api"
+
+
+def test_requested_indicator_cannot_report_open_candle_as_fresh():
+    _, _, _, batch, _ = _run(live=FakeLiveService(unclosed=True))
+    technical = next(result for result in batch.results if result.capability == "technical_snapshot")
+    assert technical.status == "failed"
+    assert technical.freshness_status != "fresh"
+    assert not technical.data
 
 
 def test_current_indicator_query_has_market_precedence_and_typed_parameters():
@@ -122,6 +158,8 @@ def test_fresh_completed_bars_build_deterministic_indicator_evidence_and_market_
     assert technical.data["freshness"] == "FRESH"
     assert set(technical.data["indicators"]) == {"ema_20_h1", "rsi_14_h1"}
     assert technical.data["as_of_completed_bar"]
+    assert technical.source_timestamp == technical.data["as_of_completed_bar"]
+    assert technical.provenance["calculation"] == "REQUESTED_INDICATORS"
     assert live.calls == [("BTCUSD", "H1", 60)]
 
     context = DecisionContextBuilder().build(

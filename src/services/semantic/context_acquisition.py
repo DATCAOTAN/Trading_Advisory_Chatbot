@@ -227,6 +227,9 @@ class RuntimeContextStore:
             return False
         if result.freshness_status == "stale":
             return False
+        if need.capability == "ohlcv" and need.parameters.get("timeframe"):
+            actual = result.provenance.get("timeframe")
+            return bool(actual and normalize_timeframe(actual) == normalize_timeframe(need.parameters["timeframe"]))
         if need.capability == "official_report":
             return _provenance_matches_official_target(result.provenance, need.target)
         if need.capability == "market_knowledge":
@@ -408,7 +411,15 @@ class ContextAcquisitionExecutor:
     ) -> ContextAcquisitionResult:
         need = need or ContextNeed(task.capability, task.target, task.required, parameters=task.parameters)
         requested_by = self._requested_by(requirements, task.task_id())
-        reused = runtime_store.find_compatible(need)
+        if need.capability == "technical_snapshot" and any(
+            item.startswith(("unsupported_indicator:", "invalid:indicators", "unresolved:indicators"))
+            for item in query_plan.ambiguity
+        ):
+            return self._result_from_task(
+                task, need, "unavailable", reason="requested indicator definition unresolved or unsupported",
+                error_code="technical_evidence_invalid", task_ids=requested_by,
+            )
+        reused = None if need.capability == "technical_snapshot" and need.parameters.get("indicators") else runtime_store.find_compatible(need)
         if reused:
             result = replace(
                 reused,
@@ -776,17 +787,6 @@ class ContextAcquisitionExecutor:
         if not self.technical_adapter:
             return self._result_from_task(task, need, "unavailable", reason="technical adapter missing", task_ids=requested_by)
         market = runtime_store.find_compatible(ContextNeed("market_snapshot", need.target, False))
-        ohlcv = runtime_store.find_compatible(ContextNeed("ohlcv", need.target, True))
-        if not ohlcv:
-            return self._result_from_task(
-                task,
-                need,
-                "skipped",
-                reason=f"failed_dependency:ohlcv:{need.target}",
-                dependency_status="failed",
-                task_ids=requested_by,
-                latency_ms=self._latency(started),
-            )
         indicator_specs = [
             IndicatorSpec(
                 indicator_id=str(item.get("indicator_id") or ""),
@@ -797,6 +797,29 @@ class ContextAcquisitionExecutor:
             for item in need.parameters.get("indicators", [])
             if isinstance(item, dict)
         ]
+        timeframe = indicator_specs[0].timeframe if indicator_specs else ""
+        ohlcv = runtime_store.find_compatible(ContextNeed(
+            "ohlcv", need.target, True, parameters={"timeframe": timeframe} if timeframe else {},
+        ))
+        if not ohlcv:
+            return self._result_from_task(
+                task,
+                need,
+                "skipped",
+                reason=f"failed_dependency:ohlcv:{need.target}",
+                dependency_status="failed",
+                task_ids=requested_by,
+                latency_ms=self._latency(started),
+            )
+        freshness = ohlcv.freshness_status
+        if indicator_specs:
+            freshness, _ = _ohlcv_freshness(ohlcv.data, timeframe, require_completed=True)
+            if freshness != "fresh":
+                return self._result_from_task(
+                    task, need, "failed", reason="completed indicator input not fresh",
+                    error_code="technical_evidence_invalid", task_ids=requested_by,
+                    freshness_status=freshness,
+                )
         try:
             snapshot = self.technical_adapter.build(
                 market.data if market else None,
@@ -815,16 +838,25 @@ class ContextAcquisitionExecutor:
             )
         if not snapshot:
             return self._result_from_task(task, need, "failed", reason="technical snapshot empty", task_ids=requested_by)
+        if indicator_specs and snapshot.get("calculation") != "REQUESTED_INDICATORS":
+            return self._result_from_task(
+                task, need, "failed", reason="requested calculation not verified",
+                error_code="technical_evidence_invalid", task_ids=requested_by,
+            )
         return self._result_from_task(
             task,
             need,
             "success",
-            data=snapshot,
+            data={**snapshot, "freshness": freshness.upper()},
             source=snapshot.get("source", "existing_api"),
             operation="ExistingTechnicalSnapshotAdapter.build",
-            provenance={"provider": snapshot.get("source", "existing_api"), "symbol": need.target},
-            freshness_status="fresh",
-            source_timestamp=str(snapshot.get("as_of_completed_bar") or ""),
+            provenance={
+                "provider": ohlcv.provenance.get("provider", ohlcv.source), "symbol": need.target,
+                "timeframe": snapshot.get("timeframe") or ohlcv.provenance.get("timeframe", ""),
+                "calculation": snapshot.get("calculation", "DEFAULT_SUMMARY"),
+            },
+            freshness_status=freshness,
+            source_timestamp=str(snapshot.get("as_of_completed_bar") or ohlcv.source_timestamp),
             reason="matched",
             task_ids=requested_by,
             latency_ms=self._latency(started),
@@ -1164,7 +1196,9 @@ class ContextAcquisitionExecutor:
         return matching
 
 
-def _ohlcv_freshness(candles: List[Dict[str, Any]], timeframe: str) -> tuple[str, str]:
+def _ohlcv_freshness(
+    candles: List[Dict[str, Any]], timeframe: str, *, require_completed: bool = False,
+) -> tuple[str, str]:
     if not candles:
         return "unknown", ""
     latest = str(candles[-1].get("timestamp") or "")
@@ -1174,7 +1208,9 @@ def _ohlcv_freshness(candles: List[Dict[str, Any]], timeframe: str) -> tuple[str
             opened_at = opened_at.replace(tzinfo=timezone.utc)
         normalized = normalize_timeframe(timeframe)
         closed_at = opened_at.astimezone(timezone.utc) + timedelta(seconds=timeframe_duration_seconds(normalized))
-        age = max((datetime.now(timezone.utc) - closed_at).total_seconds(), 0)
+        age = (datetime.now(timezone.utc) - closed_at).total_seconds()
+        if require_completed and age < 0:
+            return "unknown", latest
         return ("fresh" if age <= stale_seconds_for_timeframe(normalized) else "stale"), latest
     except (TypeError, ValueError):
         return "unknown", latest

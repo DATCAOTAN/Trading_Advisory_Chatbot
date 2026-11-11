@@ -141,6 +141,17 @@ def test_natural_no_action_is_terminal_for_the_bar(tmp_path):
     assert assembler.calls == 1
 
 
+@pytest.mark.parametrize("replayed", ["2026-08-02T00:59:00+00:00", "2026-08-02T08:00:00+07:00"])
+def test_restart_cannot_replay_an_older_or_equivalent_completed_bar(tmp_path, replayed):
+    feature = FeatureService()
+    assert _run(monitor(tmp_path, feature=feature)).status == "GENERATED"
+    feature.bar_time = replayed
+    assembler = Assembler()
+    restarted = monitor(tmp_path, feature=feature, assembler=assembler)
+    assert _run(restarted).status == "NO_NEW_BAR"
+    assert assembler.calls == 0
+
+
 def test_incomplete_started_attempt_is_never_retried(tmp_path):
     journal = AutonomousCandidateMonitorJournal(tmp_path / "monitor.jsonl")
     profile = monitor_profile_id("BTCUSD", ("M1", "H1", "H4"), "account-a")

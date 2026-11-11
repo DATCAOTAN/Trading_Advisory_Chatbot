@@ -17,7 +17,7 @@ from src.services.semantic.context_execution import (
 from src.services.semantic.context_requirements import ContextNeed, ContextRequirements, ContextRequirementPlanner
 from src.services.semantic.context_sufficiency import ContextSufficiencyGate, ContextSufficiencyResult
 from src.services.semantic.query_plan import QueryPlan, QueryPlanAssembler
-from src.services.trading.market.timeframes import broker_symbol_for
+from src.services.trading.market.timeframes import broker_symbol_for, normalize_timeframe
 from src.services.trading.reasoning.strategy_evidence import (
     IndicatorSpec,
     calculate_indicator_snapshot,
@@ -383,17 +383,29 @@ class ExistingTechnicalSnapshotAdapter:
         if not market_snapshot and not candles:
             return None
         latest = (candles or [])[-1] if candles else {}
-        calculated = calculate_indicator_snapshot(indicator_specs, candles or []) if indicator_specs else {}
-        indicators = calculated.get("indicators") or {
-            key: value
-            for key, value in latest.items()
-            if any(str(key).lower().startswith(prefix) for prefix in self.INDICATOR_PREFIXES)
-        }
+        calculated = {}
+        if indicator_specs:
+            timeframes = {item.timeframe for item in indicator_specs}
+            if len(timeframes) != 1 or any(
+                candle.get("timeframe") and normalize_timeframe(candle["timeframe"]) not in timeframes
+                for candle in candles or ()
+            ):
+                raise ValueError("INDICATOR_TIMEFRAME_MISMATCH")
+            calculated = calculate_indicator_snapshot(indicator_specs, candles or [])
+            indicators = calculated.get("indicators", {})
+            if set(indicators) != {item.output_alias for item in indicator_specs} or not calculated.get("as_of_completed_bar"):
+                raise ValueError("INDICATOR_RESULT_UNAVAILABLE")
+        else:
+            indicators = {
+                key: value for key, value in latest.items()
+                if any(str(key).lower().startswith(prefix) for prefix in self.INDICATOR_PREFIXES)
+            }
         snapshot = {
             "trend": market_snapshot.recent_trend if market_snapshot else "",
             "support_resistance": market_snapshot.support_resistance if market_snapshot else {},
             "indicators": indicators,
             "source": "existing_api",
+            "calculation": "REQUESTED_INDICATORS" if indicator_specs else "DEFAULT_SUMMARY",
         }
         if indicator_specs:
             snapshot.update(
@@ -402,7 +414,6 @@ class ExistingTechnicalSnapshotAdapter:
                     "broker_symbol": broker_symbol_for(market_snapshot.symbol) if market_snapshot else "",
                     "timeframe": indicator_specs[0].timeframe,
                     "as_of_completed_bar": calculated.get("as_of_completed_bar", ""),
-                    "freshness": "FRESH",
                 }
             )
         return snapshot

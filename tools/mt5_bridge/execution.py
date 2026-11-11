@@ -760,7 +760,11 @@ class ControlledMT5ExecutionService:
             if request.authorization_source == "STANDING_MANDATE":
                 self._validate_autonomous_integrity(request)
             self.journal.transition(request.idempotency_key, "SUBMISSION_STARTED")
-            return self._submit_once(request, mt5_request)
+            try:
+                return self._submit_once(request, mt5_request)
+            except Exception:
+                # A durable STARTED record still protects the intent if result persistence fails.
+                return {**_receipt("UNKNOWN", "RESULT_UNKNOWN"), "reason": "BROKER_RESULT_UNVERIFIED"}, 200
         except (TypeError, ValueError, RuntimeError, ProtectedExecutionJournalError) as exc:
             return _blocked(_safe_reason(exc)), 403
 

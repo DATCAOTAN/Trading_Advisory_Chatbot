@@ -7,6 +7,7 @@ or catalog code directly.
 
 import hashlib
 import html
+import json
 import logging
 import re
 import time
@@ -38,6 +39,7 @@ from src.services.semantic.conversational_context import (
     resolve_conversational_context,
 )
 from src.services.semantic.resolved_semantics import (
+    OHLCV_INTEGER_FIELDS,
     ResolvedSemanticState,
     SemanticCompletionPatch,
     SemanticFieldUpdate,
@@ -261,7 +263,7 @@ def render(orchestrator, feature_flags: dict):
             if msg["role"] == "assistant":
                 _render_runtime_presentation(msg)
                 _render_sources(msg.get("sources", []), intent=msg.get("intent"))
-                metrics = _extract_metrics(msg["content"])
+                metrics = _extract_metrics(msg["content"]) if msg.get("intent") not in {"RESEARCH_BRIEF", "COMPUTATIONAL_SPECIFICATION"} else {}
                 if metrics:
                     _render_trade_chart(metrics)
 
@@ -275,6 +277,9 @@ def render(orchestrator, feature_flags: dict):
             latest_trading_request,
             latest_trading_state,
         )
+    if not user_query:
+        _render_computational_specification_completion(orchestrator)
+        _render_research_readiness(orchestrator)
 
     if user_query:
         previous_structured_context = _latest_resolved_semantic_state(st.session_state.messages)
@@ -378,7 +383,7 @@ def render(orchestrator, feature_flags: dict):
                 if runtime_artifacts:
                     _render_runtime_presentation(runtime_artifacts)
 
-                metrics = _extract_metrics(full_answer)
+                metrics = _extract_metrics(full_answer) if intent not in {"RESEARCH_BRIEF", "COMPUTATIONAL_SPECIFICATION"} else {}
                 if metrics:
                     _render_trade_chart(metrics)
 
@@ -490,6 +495,125 @@ def render(orchestrator, feature_flags: dict):
                 request_to_render,
                 state_to_render,
             )
+        elif intent == "COMPUTATIONAL_SPECIFICATION":
+            _render_computational_specification_completion(orchestrator)
+
+
+def _render_research_readiness(orchestrator) -> None:
+    session_id = st.session_state.current_session_id
+    if not session_id:
+        return
+    key = hashlib.sha256(session_id.encode()).hexdigest()
+    with st.expander("Research readiness"):
+        inspect_revision = st.button("Inspect existing research revision", key=f"research_readiness_{key}")
+        inspect_result = st.button("Inspect verified result", key=f"research_result_{key}")
+        if not inspect_revision and not inspect_result:
+            return
+        from src.services.history_service import HistoryService
+
+        sessions = HistoryService().get_all_sessions()
+        if not sessions or not any(session["_id"] == session_id for session in sessions):
+            st.warning("NOT_CHECKED: conversation is unavailable.")
+            return
+        report = (orchestrator.inspect_research_result(session_id) if inspect_result
+                  else orchestrator.inspect_research_readiness(session_id))
+        if st.session_state.current_session_id != session_id:
+            return
+        if inspect_result:
+            st.markdown("**Descriptive historical research**")
+            st.text(f"{report['status']} | {report['reason']}")
+            if report["status"] != "VERIFIED":
+                return
+            result = report["result"]
+            st.text(report["objective"])
+            st.text(f"Algorithm: {result['algorithm']} | Formula: {result['formula']}")
+            st.text(f"Proposal: {result['proposal']['proposal_id']}")
+            st.text(f"Revision: {result['proposal']['revision_id']}")
+            dataset = result["dataset"]
+            st.text(f"{dataset['symbol']} / {dataset['broker_symbol']} | {dataset['timeframe']}")
+            st.text(f"UTC window: {result['window']['start_inclusive']} to {result['window']['end_exclusive']} (end-exclusive)")
+            st.text(f"Dataset: {dataset['dataset_id']} | Provenance: {dataset['source']} | {dataset['account_environment']}")
+            st.text(f"Input SHA-256: {result['input_sha256']}")
+            st.text(f"Result SHA-256: {report['result_sha256']}")
+            st.text(f"Verified observations: {result['row_count']} | Range unit: source price unit")
+            st.dataframe(report["observations"], hide_index=True, use_container_width=True)
+            st.caption("Descriptive historical observations only. Not a strategy, signal, backtest, forecast or profitability finding. "
+                       "No new computation or execution authority. Hash/provenance inspection does not rerun the arithmetic.")
+            return
+        proposal, evidence = report["proposal"], report["evidence"]
+        st.markdown("**Proposal revision**")
+        st.text(f"{proposal['status']} | {proposal['reason']}")
+        if "revision_id" in proposal:
+            st.text(f"Revision: {proposal['revision_id']} | Recorded readiness: {proposal['readiness']}")
+        st.markdown("**Historical evidence**")
+        st.text(f"{evidence['outcome']} | {evidence['reason']}")
+        if "checked_at" in evidence:
+            st.text(f"Integrity: {evidence['integrity']} | Provenance: {evidence['provenance']} | "
+                    f"Dataset quality: {evidence['coverage']}")
+            if evidence["symbol"] and evidence["timeframe"]:
+                st.text(f"Observed: {evidence['symbol']} / {evidence['timeframe']}")
+            if evidence["window"]:
+                st.text("Requested window: " + " to ".join(evidence["window"]))
+            for limitation in evidence["limitations"]:
+                st.text(limitation)
+            st.caption(f"Checked at {evidence['checked_at']}")
+        st.caption("Read-only. This does not authorize execution or assess research performance.")
+
+
+def _render_computational_specification_completion(orchestrator) -> None:
+    session_id = st.session_state.current_session_id
+    messages = st.session_state.messages
+    if not session_id or not messages or messages[-1].get("intent") != "COMPUTATIONAL_SPECIFICATION":
+        return
+    tail, count = messages[-1], len(messages)
+    try:
+        state = ResolvedSemanticState.from_dict(tail.get("resolved_semantic_state"))
+    except ValueError:
+        st.warning("Clarification unavailable: the current specification could not be reloaded.")
+        return
+    fields, unsupported = orchestrator.computational_specification_completion_fields(state)
+    if unsupported:
+        st.caption("Not editable in this form: " + ", ".join(unsupported) + ". Clarify these in a new message.")
+    if not fields:
+        return
+    digest = hashlib.sha256(json.dumps((session_id, count, tail), sort_keys=True).encode()).hexdigest()
+    slot = st.empty()
+    with slot.container():
+        field = st.selectbox(
+            "Field to clarify", list(fields), index=0 if len(fields) == 1 else None,
+            format_func=lambda path: fields[path][0], key=f"spec_field_{digest}",
+        )
+        if field is None:
+            return
+        label, choices = fields[field]
+        with st.form(f"spec_completion_{digest}_{field}"):
+            if choices:
+                answer = st.selectbox(label, choices, index=None)
+            else:
+                hint = 'Use a JSON number, true/false, or quoted text.' if field.endswith(".value") else None
+                key = field.rsplit(".", 1)[-1]
+                if key in OHLCV_INTEGER_FIELDS:
+                    unit = "seconds" if key == "max_age_seconds" else "bars"
+                    hint = f"Enter a whole number of {unit}."
+                answer = st.text_input(label, max_chars=1200, help=hint)
+            submitted = st.form_submit_button("Apply clarification")
+    if not submitted:
+        return
+    try:
+        message = orchestrator.complete_computational_specification(state, field, answer or "")
+        from src.services.history_service import HistoryService
+
+        if st.session_state.current_session_id != session_id or not HistoryService().append_message_if_current(
+            session_id, count, tail, message,
+        ):
+            st.warning("This review is stale or its conversation was deleted. Reopen the conversation before clarifying.")
+            return
+    except (ValueError, RuntimeError) as exc:
+        st.warning(f"Clarification not saved: {exc}")
+        return
+    messages.append(message)
+    slot.empty()
+    st.rerun()
 
 
 def _runtime_presentation(runtime_artifacts) -> tuple[str, dict | None]:
@@ -749,6 +873,8 @@ def _latest_trading_authorization(
     messages,
 ) -> tuple[ConversationalTradingRequest | None, ResolvedSemanticState | None]:
     for message in reversed(messages):
+        if isinstance(message, dict) and message.get("intent") in {"RESEARCH_BRIEF", "COMPUTATIONAL_SPECIFICATION"}:
+            return None, None
         payload = message.get("trading_request") if isinstance(message, dict) else None
         if not isinstance(payload, dict):
             continue
@@ -833,7 +959,7 @@ def _render_conversational_trading_authorization(
         request.trade_action in {"OPEN_POSITION", "GENERIC_TRADE"}
         and request.requested_mode == "human_confirmed_live"
         and st.session_state.get("current_session_id")
-        and request.strategy is not None
+        and (request.strategy is not None or (request.trade_parameters is not None and not request.blockers))
     ):
         _render_editable_trade_draft(request, orchestrator=orchestrator)
         return
@@ -1117,7 +1243,7 @@ def _render_editable_trade_draft(
     )
     st.caption(
         "Entry rule: "
-        + (_entry_rule_text(entry.get("rules") or ()) or "MISSING")
+        + (_entry_rule_text(entry.get("rules") or ()) or ("IMMEDIATE" if entry.get("immediate_entry") else "MISSING"))
         + f" | reference={_display_decimal(entry.get('reference_price'))}"
     )
     proposal = st.columns(4)
@@ -2239,6 +2365,8 @@ def _sanitize_user_facing_answer(answer: str) -> str:
 def _render_badge(intent: str):
     """Render intent badge."""
     badge_map = {
+        "COMPUTATIONAL_SPECIFICATION": ("badge-rag", "SPECIFICATION REVIEW"),
+        "RESEARCH_BRIEF": ("badge-rag", "RESEARCH BRIEF"),
         "FINANCIAL_RAG": ("badge-rag", "RAG PIPELINE"),
         "TRASH": ("badge-trash", "NGOAI PHAM VI"),
         "GREETING": ("badge-greet", "GREETING"),

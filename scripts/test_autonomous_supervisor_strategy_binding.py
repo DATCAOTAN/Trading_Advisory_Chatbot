@@ -362,6 +362,7 @@ def test_coordinator_passes_exact_strategy_and_projects_level_condition(tmp_path
         "strategy": strategy,
         "strategy_direction": "BUY",
         "strategy_action": "OPEN_POSITION",
+        "expected_closed_bar_time": "2026-08-10T08:00:00+00:00",
     }]
     assert result.status == "NO_ACTION"
     assert result.strategy_evaluation["trigger_mode"] == "LEVEL"

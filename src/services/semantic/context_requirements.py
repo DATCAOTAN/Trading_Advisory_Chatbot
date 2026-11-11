@@ -162,7 +162,7 @@ class ContextRequirementPlanner:
                 )
             )
 
-        elif primary == "conversational_strategy_request":
+        elif primary in {"conversational_strategy_request", "computational_specification"}:
             pass
 
         elif primary == "multi_intent":

@@ -7,11 +7,19 @@ from src.services.knowledge.answer_mode import AnswerMode, AnswerModeClassifier
 from src.services.knowledge.query_decomposer import QueryDecomposer
 from src.services.knowledge.query_intent import QueryIntent, QueryIntentRouter
 from src.services.semantic.resolved_semantics import (
+    RESEARCH_SOURCE_CAPABILITIES,
     ResolvedSemanticState,
     resolve_operating_mode,
     resolve_structured_semantics,
 )
-from src.services.semantic.structured_semantics import StructuredSemanticResult
+from src.services.semantic.structured_semantics import (
+    AUTHORIZATION_MODE_MAP,
+    COMPUTATIONAL_SPEC_FIELD,
+    ComputationalDataAssessment,
+    ComputationalSpecification,
+    SpecificationConfiguration,
+    StructuredSemanticResult,
+)
 from src.services.trading.market.timeframes import SUPPORTED_TIMEFRAMES, resolve_symbol, resolve_symbols_from_text
 from src.services.trading.reasoning.strategy_evidence import (
     INDICATOR_REGISTRY,
@@ -78,6 +86,7 @@ class QueryPlan:
     source_signals: Dict[str, Any] = field(default_factory=dict)
     conversational_context: Dict[str, Any] = field(default_factory=dict)
     semantic_context: Dict[str, Any] = field(default_factory=dict)
+    computational_specification: ComputationalSpecification | None = None
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -184,11 +193,11 @@ class QueryPlanAssembler:
     ) -> QueryPlan:
         query = original_query or ""
         if structured_semantics is not None:
-            return self._assemble_structured(
+            return self.assemble_resolved(
                 query,
-                rewritten_query,
-                task_id,
                 resolve_structured_semantics(structured_semantics, previous_structured_context),
+                rewritten_query=rewritten_query,
+                task_id=task_id,
             )
         normalized = AnswerModeClassifier.normalize(query)
         query_intent = query_intent or self.intent_router.route(query)
@@ -340,18 +349,24 @@ class QueryPlanAssembler:
             )
         return plan
 
-    def _assemble_structured(
+    def assemble_resolved(
         self,
         query: str,
-        rewritten_query: str,
-        task_id: str,
         state: ResolvedSemanticState,
+        *,
+        rewritten_query: str = "",
+        task_id: str = "",
     ) -> QueryPlan:
+        """Project canonical state without reinterpreting or losing its field provenance."""
         semantic = state.semantic
+        if semantic.computational_specification is not None:
+            return self._computational_plan(query, task_id, state, semantic.computational_specification)
         operating_mode = resolve_operating_mode(semantic)
         event = self._structured_event(semantic.subtype)
         concept = self._structured_concept(semantic, event)
         primary = self._structured_primary(semantic.primary_intent, semantic.secondary_intents, event)
+        if semantic.primary_intent == "STRATEGY_RESEARCH":
+            primary = "strategy_research_brief"
         if semantic.primary_intent == "POSITION_MANAGEMENT" and semantic.action in {"NONE", "EXPLAIN"}:
             primary = "position_state_read"
         elif semantic.primary_intent == "POSITION_MANAGEMENT" and semantic.action in {"CLOSE_POSITION", "MANAGE_POSITION"}:
@@ -417,7 +432,10 @@ class QueryPlanAssembler:
             requested_indicators=requested_indicators,
             current_market_request=current_market_request,
             conceptual_request=conceptual_request,
-            user_action_intent=self.STRUCTURED_ACTION_TO_USER_ACTION[semantic.action],
+            user_action_intent=(
+                "research_strategy" if primary == "strategy_research_brief"
+                else self.STRUCTURED_ACTION_TO_USER_ACTION[semantic.action]
+            ),
             requires_execution=False,
             conversation_dependency="follow_up" if semantic.context_references else "none",
             ambiguity=ambiguity,
@@ -442,6 +460,38 @@ class QueryPlanAssembler:
             },
             semantic_context=state.as_dict(),
         )
+        if primary == "strategy_research_brief":
+            goal = semantic.research_goal.model_dump(exclude_defaults=True) if semantic.research_goal else {}
+            missing = [
+                field for field in state.unresolved_fields
+                if field.startswith(("research_goal.", "symbols", "context_references.previous_research_goal"))
+            ]
+            if not goal.get("objective"):
+                missing.append("research_goal.objective")
+            if not state.canonical_symbols:
+                missing.append("symbols")
+            sources = dict(state.field_sources)
+            plan.constraints["research_brief"] = {
+                "request_id": plan.plan_id,
+                "status": "RESEARCH_REQUIRED",
+                "strategy_status": "STRATEGY_NOT_ESTABLISHED",
+                "requested_mode": semantic.requested_mode if sources.get("requested_mode") == "USER_EXPLICIT" else "",
+                "effective_mode": operating_mode,
+                "execution_allowed": False,
+                "goal": goal,
+                "symbols": list(state.canonical_symbols),
+                "account_scope": semantic.account_scope,
+                "requested_sources": list(semantic.requested_data),
+                "research_capabilities": self._dedupe(
+                    [
+                        capability
+                        for source in semantic.requested_data
+                        for capability in RESEARCH_SOURCE_CAPABILITIES[source]
+                    ]
+                ),
+                "field_sources": sources,
+                "missing_information": self._dedupe(missing),
+            }
         print(
             "[QueryPlan] "
             f"primary_intent={plan.primary_intent} "
@@ -451,6 +501,98 @@ class QueryPlanAssembler:
             "source=structured_semantics"
         )
         return plan
+
+    @staticmethod
+    def _computational_plan(
+        query: str, task_id: str, state: ResolvedSemanticState, spec: ComputationalSpecification,
+    ) -> QueryPlan:
+        prefix = COMPUTATIONAL_SPEC_FIELD
+        sources = dict(state.field_sources)
+        missing = list(state.unresolved_fields)
+        if not (spec.formula or spec.steps):
+            missing.append(f"{prefix}.formula_or_steps")
+        for section in ("objective", "algorithm", "data_requirements", "outputs"):
+            if not getattr(spec, section):
+                missing.append(f"{prefix}.{section}")
+        conflicts = []
+        for index, parameter in enumerate(spec.parameters):
+            if not parameter.name:
+                missing.append(f"{prefix}.parameters[{index}].name")
+            low, high, value = parameter.minimum, parameter.maximum, parameter.value
+            if (low is not None and high is not None and low > high) or (
+                type(value) in {int, float} and (
+                    (low is not None and value < low) or (high is not None and value > high)
+                )
+            ):
+                conflicts.append(f"{prefix}.parameters[{index}].range")
+        for index, requirement in enumerate(spec.data_requirements):
+            required_fields = ("dataset", "fields", "usage")
+            if (requirement.dataset or "").upper() == "OHLCV":
+                required_fields += ("symbol", "timeframe", "lookback_bars")
+            for field_name in required_fields:
+                if getattr(requirement, field_name) in (None, ()):
+                    missing.append(f"{prefix}.data_requirements[{index}].{field_name}")
+        for index, output in enumerate(spec.outputs):
+            if not output.name:
+                missing.append(f"{prefix}.outputs[{index}].name")
+        config = spec.configuration
+        mode_path = f"{prefix}.configuration.authorization_mode"
+        requested_mode = ""
+        if config and sources.get(mode_path) in {
+            "USER_EXPLICIT", "CONVERSATION_INHERITED", "USER_CONFIRMED_SUGGESTION",
+        }:
+            requested_mode = AUTHORIZATION_MODE_MAP.get(config.authorization_mode, "")
+        if (
+            requested_mode and sources.get("requested_mode") == "USER_EXPLICIT"
+            and state.semantic.requested_mode and requested_mode != state.semantic.requested_mode
+        ):
+            conflicts.append(mode_path)
+            requested_mode = ""
+        missing = list(dict.fromkeys(missing))
+        configuration_status = {
+            axis: sources.get(
+                f"{prefix}.configuration.{axis}",
+                "UNRESOLVED" if f"{prefix}.configuration" in missing or prefix in missing else "UNSPECIFIED",
+            )
+            for axis in SpecificationConfiguration.model_fields
+        }
+        if mode_path in conflicts:
+            configuration_status["authorization_mode"] = "CONFLICTING"
+        has_suggestions = any(
+            path.startswith(prefix + ".") and source == "LLM_SUGGESTION"
+            for path, source in sources.items()
+        )
+        if missing or conflicts or spec.conflicts:
+            status = "NEEDS_CLARIFICATION"
+        else:
+            status = "NEEDS_REVIEW" if has_suggestions else "SPECIFIED"
+        return QueryPlan(
+            original_query=query,
+            normalized_query=AnswerModeClassifier.normalize(query),
+            task_id=task_id or "task_1",
+            primary_intent=prefix,
+            user_action_intent="specify_computation",
+            conversation_dependency="follow_up" if state.semantic.context_references else "none",
+            ambiguity=missing + conflicts,
+            constraints={
+                "requested_mode": requested_mode,
+                "effective_mode": "advisory_only",
+                "execution_allowed": False,
+                prefix: {
+                    "specification_id": spec.specification_id,
+                    "status": status,
+                    "runtime_status": "UNSUPPORTED_DYNAMIC_COMPUTATION",
+                    "missing_information": missing,
+                    "conflicting_fields": conflicts,
+                    "configuration_status": configuration_status,
+                    "data_assessments": [
+                        ComputationalDataAssessment().model_dump() for _ in spec.data_requirements
+                    ],
+                },
+            },
+            semantic_context=state.as_dict(),
+            computational_specification=spec,
+        )
 
     @classmethod
     def _structured_primary(

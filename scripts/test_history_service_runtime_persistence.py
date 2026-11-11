@@ -1,5 +1,8 @@
 import threading
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock
+
+import pytest
+from pymongo.errors import AutoReconnect
 
 from src.services.history_service import HistoryService
 
@@ -45,3 +48,31 @@ def test_chat_history_persists_when_vector_memory_is_skipped():
 
     service._cache_session.assert_called_once_with("session-1", [message])
     service.sessions_col.update_one.assert_called_once()
+
+
+@pytest.mark.parametrize("modified", [0, 1])
+def test_compare_and_append_requires_exact_tail_and_never_upserts(modified):
+    service = object.__new__(HistoryService)
+    service.sessions_col = Mock()
+    service.sessions_col.update_one.return_value.modified_count = modified
+    service.redis_client = Mock()
+    expected = {"role": "assistant", "resolved_semantic_state": {"field_sources": {"spec.name": "USER_EXPLICIT"}}}
+    message = {"role": "assistant", "content": "Updated review"}
+
+    assert service.append_message_if_current("session-1", 3, expected, message) is bool(modified)
+    selector, update = service.sessions_col.update_one.call_args.args
+    assert selector == {"_id": "session-1", "messages.2": {"$eq": expected}, "messages.3": {"$exists": False}}
+    assert update["$push"] == {"messages": message}
+    assert service.sessions_col.update_one.call_args.kwargs == {"upsert": False}
+    service.redis_client.delete.assert_called_once_with("session:session-1")
+
+
+def test_compare_and_append_does_not_publish_on_storage_error():
+    service = object.__new__(HistoryService)
+    service.sessions_col = Mock()
+    service.sessions_col.update_one.side_effect = AutoReconnect()
+    service.redis_client = Mock()
+
+    with pytest.raises(RuntimeError, match="not confirmed"):
+        service.append_message_if_current("session-1", 1, {}, {})
+    service.redis_client.delete.assert_not_called()

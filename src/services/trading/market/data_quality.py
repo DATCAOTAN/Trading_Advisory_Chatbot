@@ -122,8 +122,10 @@ class DataQualityGate:
             close_time = latest_dt + timedelta(
                 seconds=timeframe_duration_seconds(timeframe)
             )
-            age = max((datetime.now(timezone.utc) - close_time).total_seconds(), 0)
-            if age > stale_seconds_for_timeframe(timeframe):
+            age = (datetime.now(timezone.utc) - close_time).total_seconds()
+            if age < 0:
+                issues.append(DataQualityIssue("BAR_NOT_COMPLETED", "Latest candle has not closed", timeframe, "ERROR"))
+            elif age > stale_seconds_for_timeframe(timeframe):
                 issues.append(DataQualityIssue("STALE_LATEST_BAR", "Latest candle is stale", timeframe, "WARN"))
 
         if any(issue.severity == "ERROR" for issue in issues):

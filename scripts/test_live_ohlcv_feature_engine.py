@@ -16,6 +16,7 @@ from src.services.trading.market.feature_engine import FeatureEngine  # noqa: E4
 from src.services.trading.market.indicators import IndicatorEngine  # noqa: E402
 from src.services.trading.market.market_snapshot_bundle import MarketSnapshotBundleBuilder  # noqa: E402
 from src.services.trading.market.models import MarketSnapshot, OHLCVBar, TickSnapshot  # noqa: E402
+from src.services.trading.market.timeframes import timeframe_duration_seconds  # noqa: E402
 
 
 def make_bars(mode="up", count=80, timeframe="M15", start_price=2400.0, stale=False, duplicate=False, unsorted=False):
@@ -31,7 +32,7 @@ def make_bars(mode="up", count=80, timeframe="M15", start_price=2400.0, stale=Fa
             price -= 1.0
         elif mode == "range":
             price += 0.6 if index % 2 == 0 else -0.6
-        timestamp = now - timedelta(minutes=15 * (count - index))
+        timestamp = now - timedelta(seconds=timeframe_duration_seconds(timeframe) * (count - index))
         open_price = price - 0.3
         close = price
         high = max(open_price, close) + 0.5
@@ -116,6 +117,17 @@ class LiveOhlcvFeatureEngineTests(unittest.TestCase):
         bundle.timeframes["M15"] = snapshot("up", stale=True)
         quality = DataQualityGate().evaluate(bundle, ["M15"])
         self.assertEqual(quality.per_timeframe_quality["M15"], "STALE")
+
+    def test_open_or_future_candle_is_not_a_completed_bar(self):
+        bundle = MarketSnapshotBundleBuilder(provider_with_fixture({"M15": "up"})).build("XAUUSD", ["M15"], 60)
+        for offset in (-60, 60):
+            with self.subTest(offset=offset):
+                bundle.timeframes["M15"].bars[-1].timestamp = (
+                    datetime.now(timezone.utc) + timedelta(seconds=offset)
+                ).isoformat()
+                report = DataQualityGate().evaluate(bundle, ["M15"])
+                self.assertEqual(report.status, "INVALID")
+                self.assertIn("BAR_NOT_COMPLETED", {issue.code for issue in report.issues})
 
     def test_invalid_high_low_quality(self):
         snap = snapshot("up")

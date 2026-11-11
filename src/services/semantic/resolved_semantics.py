@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import json
 import math
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, get_args
 
 from src.services.semantic.structured_semantics import (
+    COMPUTATIONAL_SPEC_FIELD,
+    COMPUTATIONAL_SPEC_REFERENCE,
+    ComputationalSpecification,
+    ResearchGoal,
     SemanticCondition,
     SemanticIndicator,
+    SpecificationConfiguration,
     StructuredSemanticResult,
+    TradeParameter,
+    TradeParameters,
 )
 from src.services.trading.market.timeframes import (
     SUPPORTED_TIMEFRAMES,
@@ -37,7 +45,14 @@ _PREVIOUS_SYMBOL = "previous_symbol"
 _PREVIOUS_INDICATOR = "previous_indicator"
 _PREVIOUS_TIMEFRAME = "previous_timeframe"
 _PREVIOUS_POSITION = frozenset({"previous_position", "previous_order"})
+_RESEARCH_FACT_SOURCES = frozenset({"USER_EXPLICIT", "USER_CONFIRMED_SUGGESTION", "CONVERSATION_INHERITED"})
+RESEARCH_SOURCE_CAPABILITIES = {
+    "market_data": ("market_snapshot", "ohlcv"),
+    "private_knowledge": ("static_knowledge",),
+    "general_knowledge": ("market_knowledge",),
+}
 _DIRECT_TRADE_ACTIONS = frozenset({"OPEN_POSITION", "CLOSE_POSITION", "MANAGE_POSITION"})
+OHLCV_INTEGER_FIELDS = frozenset({"lookback_bars", "warmup_bars", "max_age_seconds"})
 
 
 @dataclass(frozen=True)
@@ -115,7 +130,7 @@ class SemanticFieldUpdate:
     """One explicit, typed update to an unresolved strategy child field."""
 
     field_path: str
-    value: str | float
+    value: str | int | float | bool
     source: str
 
     def __post_init__(self) -> None:
@@ -138,6 +153,9 @@ def apply_semantic_completion(
     patch: SemanticCompletionPatch,
 ) -> ResolvedSemanticState:
     """Apply form values without reparsing user language or inventing siblings."""
+
+    if state.semantic.computational_specification is not None:
+        return _apply_computational_completion(state, patch)
 
     indicators = list(state.indicators)
     sources = dict(state.field_sources)
@@ -192,6 +210,134 @@ def apply_semantic_completion(
     )
 
 
+def _computational_completion_target(values: dict, path: str) -> tuple[dict, str]:
+    parts = path.split(".")
+    key = parts[-1]
+    if parts[0] == COMPUTATIONAL_SPEC_FIELD:
+        if len(parts) == 2 and key in {"objective", "algorithm", "formula"}:
+            return values, key
+        if len(parts) == 3 and parts[1] == "configuration" and key in SpecificationConfiguration.model_fields:
+            return values.setdefault("configuration", {}), key
+        if len(parts) == 3:
+            match = re.fullmatch(r"(parameters|data_requirements)\[(0|[1-9][0-9]?)]", parts[1])
+            if match:
+                section, index = match[1], int(match[2])
+                rows = values.get(section, [])
+                if index < len(rows):
+                    row = rows[index]
+                    if (section, key) == ("parameters", "value") or (
+                        section == "data_requirements"
+                        and (key == "timeframe" or key in OHLCV_INTEGER_FIELDS)
+                        and (row.get("dataset") or "").upper() == "OHLCV"
+                    ):
+                        return row, key
+    raise ValueError("SEMANTIC_COMPLETION_FIELD_INVALID")
+
+
+def computational_completion_choices(state: ResolvedSemanticState, missing: Iterable[str]) -> dict[str, tuple[str, ...]]:
+    """Project only supported missing leaves, not arbitrary client-selected paths."""
+    spec = state.semantic.computational_specification
+    if spec is None or f"context_references.{COMPUTATIONAL_SPEC_REFERENCE}" in state.unresolved_fields:
+        return {}
+    values, sources = spec.as_dict(), dict(state.field_sources)
+    gaps = dict.fromkeys(missing)
+    result = {}
+    for gap in gaps:
+        path = f"{COMPUTATIONAL_SPEC_FIELD}.formula" if gap == f"{COMPUTATIONAL_SPEC_FIELD}.formula_or_steps" else gap
+        if sources.get(path) in _RESEARCH_FACT_SOURCES:
+            continue
+        try:
+            target, key = _computational_completion_target(values, path)
+        except ValueError:
+            continue
+        parent = path.rsplit(".", 1)[0]
+        if key == "value" and (
+            not target.get("name") or any(f"{parent}.{part}" in gaps for part in ("name", "minimum", "maximum"))
+        ):
+            continue
+        if (key == "timeframe" or key in OHLCV_INTEGER_FIELDS) and f"{parent}.dataset" in gaps:
+            continue
+        choices = ()
+        if path.startswith(f"{COMPUTATIONAL_SPEC_FIELD}.configuration."):
+            literal, _ = get_args(SpecificationConfiguration.model_fields[key].annotation)
+            choices = get_args(literal)
+        elif key == "timeframe":
+            choices = SUPPORTED_TIMEFRAMES
+        result[path] = choices
+    return result
+
+
+def computational_completion_value(path: str, answer: str) -> str | int | float | bool:
+    answer = answer.strip()
+    if not answer:
+        raise ValueError("Enter a value for the selected field.")
+    if len(answer) > 1200:
+        raise ValueError("The answer is too long for a specification field.")
+    key = path.rsplit(".", 1)[-1]
+    if key in OHLCV_INTEGER_FIELDS:
+        if re.fullmatch(r"-?[0-9]+", answer) is None:
+            unit = "seconds" if key == "max_age_seconds" else "bars"
+            raise ValueError(f"Enter one whole number of {unit}, without units or decimals.")
+        return int(answer)
+    if not path.endswith(".value"):
+        return answer
+    try:
+        value = json.loads(answer)
+    except (ValueError, RecursionError):
+        raise ValueError('Enter one JSON number, true/false, or quoted text (for example "price").') from None
+    if type(value) not in {str, int, float, bool} or (isinstance(value, float) and not math.isfinite(value)):
+        raise ValueError("Enter one finite number, boolean, or quoted text; not a list, object, or null.")
+    return value
+
+
+def _apply_computational_completion(
+    state: ResolvedSemanticState, patch: SemanticCompletionPatch,
+) -> ResolvedSemanticState:
+    spec = state.semantic.computational_specification
+    assert spec is not None
+    values = spec.as_dict()
+    sources = dict(state.field_sources)
+    unresolved = list(state.unresolved_fields)
+    for update in patch.updates:
+        target, key = _computational_completion_target(values, update.field_path)
+        if update.source == "USER_CONFIRMED_SUGGESTION" and (
+            sources.get(update.field_path) != "LLM_SUGGESTION"
+            or type(target.get(key)) is not type(update.value)
+            or target.get(key) != update.value
+        ):
+            raise ValueError("COMPUTATIONAL_SUGGESTION_MISMATCH")
+        value = update.value
+        if key == "timeframe" and (not isinstance(value, str) or value not in SUPPORTED_TIMEFRAMES):
+            raise ValueError("Select one supported OHLCV timeframe.")
+        if key in OHLCV_INTEGER_FIELDS:
+            if type(value) is not int:
+                raise ValueError("Enter one whole number.")
+            # BSON stores signed 64-bit integers; this is not a market limit.
+            if not -(1 << 63) <= value < (1 << 63):
+                raise ValueError("The value is outside the supported 64-bit integer range.")
+        if key == "value" and any(target.get(bound) is not None for bound in ("minimum", "maximum")):
+            if type(value) not in {int, float}:
+                raise ValueError("This parameter has numeric bounds and needs a number.")
+            lower, upper = target.get("minimum"), target.get("maximum")
+            if (lower is not None and value < lower) or (upper is not None and value > upper):
+                raise ValueError("The value is outside the parameter's recorded bounds.")
+        target[key] = value
+        sources[update.field_path] = update.source
+        resolved = {update.field_path}
+        if key == "formula":
+            resolved.add(f"{COMPUTATIONAL_SPEC_FIELD}.formula_or_steps")
+        unresolved = [field for field in unresolved if field not in resolved]
+    spec = ComputationalSpecification.from_completion_fields(values)
+    return replace(
+        state,
+        semantic=replace(
+            state.semantic, computational_specification=spec, unresolved_fields=tuple(unresolved),
+        ),
+        field_sources=tuple(sources.items()),
+        unresolved_fields=tuple(unresolved),
+    )
+
+
 def bind_authoritative_position_reference(
     state: ResolvedSemanticState,
     protected_reference: str,
@@ -225,6 +371,19 @@ def resolve_structured_semantics(
     unresolved = list(semantic.unresolved_fields)
     semantic = _resolve_management_reference(semantic, previous, unresolved, field_sources)
     references = set(semantic.context_references)
+    if semantic.has_computational_request:
+        prior = previous if COMPUTATIONAL_SPEC_REFERENCE in references else None
+        if COMPUTATIONAL_SPEC_REFERENCE in references and (not prior or not prior.semantic.computational_specification):
+            unresolved.append(f"context_references.{COMPUTATIONAL_SPEC_REFERENCE}")
+        semantic = _resolve_computational_specification(semantic, prior, field_sources)
+    research_previous = None
+    if semantic.primary_intent == "STRATEGY_RESEARCH":
+        if "previous_research_goal" in references:
+            if previous and previous.semantic.primary_intent == "STRATEGY_RESEARCH":
+                research_previous = previous
+            else:
+                unresolved.append("context_references.previous_research_goal")
+        semantic = _resolve_research_goal(semantic, research_previous, field_sources)
 
     for field_name, value in (
         ("action", semantic.action),
@@ -241,9 +400,12 @@ def resolve_structured_semantics(
                 )
             )
 
+    symbol_previous = previous if _PREVIOUS_SYMBOL in references and previous and previous.canonical_symbols else None
+    if semantic.primary_intent == "STRATEGY_RESEARCH":
+        symbol_previous = None if "symbols" in semantic.explicit_fields else research_previous or symbol_previous
     canonical_symbols, broker_symbols, unresolved_symbols = _resolve_symbols(
         semantic.symbols,
-        previous if not semantic.symbols and _PREVIOUS_SYMBOL in references and previous and previous.canonical_symbols else None,
+        symbol_previous if not semantic.symbols else None,
         field_sources,
     )
     unresolved.extend(f"symbols[{index}]" for index in range(len(unresolved_symbols)))
@@ -251,6 +413,36 @@ def resolve_structured_semantics(
         unresolved.append(f"context_references.{_PREVIOUS_SYMBOL}")
 
     indicators = _resolve_indicators(semantic, previous, references, field_sources, unresolved)
+    if semantic.action == "OPEN_POSITION":
+        explicit = set(semantic.explicit_fields)
+        reuse = (
+            "previous_trade_parameters" in references and previous is not None
+            and previous.semantic.action == semantic.action and previous.semantic.direction == semantic.direction
+            and previous.semantic.account_scope == semantic.account_scope
+            and resolve_operating_mode(previous.semantic) == resolve_operating_mode(semantic)
+            and bool(canonical_symbols) and canonical_symbols == previous.canonical_symbols
+        )
+        prior = previous.semantic.trade_parameters if reuse else None
+        prior_sources = dict(previous.field_sources) if prior is not None else {}
+        if "previous_trade_parameters" in references and prior is None:
+            unresolved.append("context_references.previous_trade_parameters")
+        parameters = {}
+        for name in TradeParameters.model_fields:
+            path = f"trade_parameters.{name}"
+            value = getattr(semantic.trade_parameters, name, None)
+            if any(field == path or field.startswith(path + ".") for field in unresolved) or (
+                path in explicit and value is None
+            ):
+                parameters[name] = value or TradeParameter()
+                field_sources.append((path, "UNRESOLVED"))
+            elif value is not None:
+                parameters[name] = value if path in explicit else TradeParameter()
+                field_sources.append((path, "USER_EXPLICIT" if path in explicit else "UNRESOLVED"))
+            elif prior_sources.get(path) in _RESEARCH_FACT_SOURCES and getattr(prior, name, None) is not None:
+                parameters[name] = getattr(prior, name)
+                field_sources.append((path, "CONVERSATION_INHERITED"))
+        if parameters:
+            semantic = replace(semantic, trade_parameters=TradeParameters(**parameters))
     conditions = tuple(semantic.conditions)
     field_sources.extend((f"conditions[{index}]", "USER_EXPLICIT") for index in range(len(conditions)))
 
@@ -278,7 +470,10 @@ def resolve_structured_semantics(
 def resolve_operating_mode(semantic: StructuredSemanticResult) -> str:
     """Resolve mode from validated semantic facts without granting execution authority."""
 
-    if semantic.negated or semantic.hypothetical:
+    if (
+        semantic.has_computational_request
+        or semantic.primary_intent == "STRATEGY_RESEARCH" or semantic.negated or semantic.hypothetical
+    ):
         return "advisory_only"
     if (
         semantic.requested_mode == "autonomous_live"
@@ -288,6 +483,115 @@ def resolve_operating_mode(semantic: StructuredSemanticResult) -> str:
     if semantic.action in _DIRECT_TRADE_ACTIONS:
         return "human_confirmed_live"
     return "advisory_only"
+
+
+def _resolve_computational_specification(
+    semantic: StructuredSemanticResult,
+    previous: ResolvedSemanticState | None,
+    field_sources: list[tuple[str, str]],
+) -> StructuredSemanticResult:
+    current = (semantic.computational_specification or ComputationalSpecification()).as_dict()
+    prior_spec = previous.semantic.computational_specification if previous else None
+    prior = prior_spec.as_dict() if prior_spec is not None else {}
+    prior_sources = dict(previous.field_sources) if previous else {}
+    explicit = set(semantic.explicit_fields)
+    unresolved = set(semantic.unresolved_fields)
+
+    def is_within(path, parent):
+        return path == parent or path.startswith((parent + ".", parent + "["))
+
+    def mark_sources(path, value, source):
+        if any(is_within(path, field) for field in unresolved):
+            source = "UNRESOLVED"
+        elif path in explicit:
+            source = "USER_EXPLICIT"
+        field_sources.append((path, source))
+        if isinstance(value, dict):
+            for child, item in value.items():
+                mark_sources(f"{path}.{child}", item, source)
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                mark_sources(f"{path}[{index}]", item, source)
+
+    def resolve_sections(current_values, prior_values, prefix):
+        result = {}
+        for name in dict.fromkeys((*current_values, *prior_values)):
+            if name == "schema_version":
+                continue
+            path = f"{prefix}.{name}"
+            if name == "configuration" and prefix == COMPUTATIONAL_SPEC_FIELD:
+                axes = resolve_sections(current_values.get(name, {}), prior_values.get(name, {}), path)
+                if axes:
+                    result[name] = axes
+                continue
+            has_explicit = any(is_within(field, path) for field in explicit)
+            blocked = any(is_within(path, field) or is_within(field, path) for field in unresolved)
+            if name in current_values and (has_explicit or blocked):
+                result[name] = current_values[name]
+                source = "LLM_SUGGESTION"
+            elif (
+                not blocked and not has_explicit and name in prior_values
+                and prior_sources.get(path) in _RESEARCH_FACT_SOURCES
+                and not any(
+                    is_within(child, path) and source not in _RESEARCH_FACT_SOURCES
+                    for child, source in prior_sources.items()
+                )
+                and name not in {"conflicts", "unsupported"}
+            ):
+                result[name] = prior_values[name]
+                source = "CONVERSATION_INHERITED"
+            elif name in current_values:
+                result[name] = current_values[name]
+                source = "LLM_SUGGESTION"
+            else:
+                continue
+            mark_sources(path, result[name], source)
+        return result
+
+    values = resolve_sections(current, prior, COMPUTATIONAL_SPEC_FIELD)
+    return replace(semantic, computational_specification=ComputationalSpecification.model_validate(values))
+
+
+def _resolve_research_goal(
+    semantic: StructuredSemanticResult,
+    previous: ResolvedSemanticState | None,
+    field_sources: list[tuple[str, str]],
+) -> StructuredSemanticResult:
+    prior_sources = dict(previous.field_sources) if previous else {}
+    explicit = set(semantic.explicit_fields)
+    unresolved = set(semantic.unresolved_fields)
+    current = (semantic.research_goal or ResearchGoal()).model_dump(exclude_none=True)
+    prior = (
+        previous.semantic.research_goal.model_dump(exclude_none=True)
+        if previous and previous.semantic.research_goal is not None else {}
+    )
+    goal = {}
+    for field in ResearchGoal.model_fields:
+        path = f"research_goal.{field}"
+        value = current.get(field)
+        if path in explicit and value is not None and value != "":
+            goal[field] = value
+            field_sources.append((path, "USER_EXPLICIT"))
+        elif path not in explicit | unresolved and field in prior and prior_sources.get(path) in _RESEARCH_FACT_SOURCES:
+            goal[field] = prior[field]
+            field_sources.append((path, "CONVERSATION_INHERITED"))
+    context = {}
+    for field, empty in (("account_scope", ""), ("requested_data", ())):
+        if field in explicit:
+            context[field] = getattr(semantic, field)
+            field_sources.append((field, "USER_EXPLICIT"))
+        elif previous and field not in unresolved and prior_sources.get(field) in _RESEARCH_FACT_SOURCES:
+            context[field] = getattr(previous.semantic, field)
+            field_sources.append((field, "CONVERSATION_INHERITED"))
+        else:
+            context[field] = empty
+    context["requested_data"] = tuple(dict.fromkeys(
+        source for source in context["requested_data"] if source in RESEARCH_SOURCE_CAPABILITIES
+    ))
+    return replace(
+        semantic, action="ANALYZE", direction="", indicators=(), conditions=(),
+        research_goal=ResearchGoal(**goal), **context,
+    )
 
 
 def _resolve_management_reference(

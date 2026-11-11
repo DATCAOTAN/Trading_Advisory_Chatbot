@@ -160,8 +160,10 @@ def main(argv: list[str] | None = None) -> int:
                 raise RuntimeError("SUPERVISOR_STRATEGY_BINDING_CHANGED")
             result = coordinator.run_once(symbol=symbol, timeframes=timeframes)
             print(json.dumps(result.to_public_dict(), ensure_ascii=True, sort_keys=True), flush=True)
+            if result.status == "RESULT_UNKNOWN":
+                return 2
             if not args.watch:
-                return 0 if result.status not in {"BLOCKED", "RESULT_UNKNOWN"} else 2
+                return 0 if result.status != "BLOCKED" else 2
             time.sleep(max(1.0, args.interval_seconds))
     except KeyboardInterrupt:
         return 130

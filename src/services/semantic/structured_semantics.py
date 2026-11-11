@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     AfterValidator,
@@ -32,6 +33,7 @@ PRIMARY_INTENTS = frozenset(
         "MARKET_DATA",
         "ANALYSIS",
         "STRATEGY",
+        "STRATEGY_RESEARCH",
         "TRADE_LIFECYCLE",
         "POSITION_MANAGEMENT",
         "CONVERSATION",
@@ -63,6 +65,9 @@ RESULT_FIELDS = frozenset(
         "unresolved_fields",
         "negated",
         "hypothetical",
+        "research_goal",
+        "trade_parameters",
+        "computational_specification",
     }
 )
 FORBIDDEN_AUTHORITY_FIELDS = frozenset(
@@ -124,6 +129,141 @@ StrictFiniteNumber = Annotated[StrictInt | StrictFloat, AfterValidator(_finite_n
 
 class _StrictSemanticPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class ResearchGoal(_StrictSemanticPayload):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    objective: str = Field(default="", max_length=300)
+    horizon: str = Field(default="", max_length=80)
+    max_risk_per_trade_pct: StrictFiniteNumber | None = Field(default=None, gt=0, le=100)
+    max_drawdown_pct: StrictFiniteNumber | None = Field(default=None, ge=0, le=100)
+
+
+class TradeParameter(_StrictSemanticPayload):
+    model_config = ConfigDict(frozen=True)
+
+    value: Annotated[str, Field(max_length=64)] | StrictFiniteNumber | None = None
+    unit: str = Field(default="", max_length=32)
+
+
+class TradeParameters(_StrictSemanticPayload):
+    model_config = ConfigDict(frozen=True)
+
+    stop_loss: TradeParameter | None = None
+    take_profit: TradeParameter | None = None
+    risk: TradeParameter | None = None
+    volume: TradeParameter | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return self.model_dump(exclude_none=True)
+
+    @classmethod
+    def owns_path(cls, path: str) -> bool:
+        parts = path.split(".", 2)
+        return len(parts) >= 2 and parts[0] == "trade_parameters" and parts[1] in cls.model_fields
+
+
+COMPUTATIONAL_SPEC_VERSION = "computational-specification/v1"
+COMPUTATIONAL_SPEC_FIELD = "computational_specification"
+COMPUTATIONAL_SPEC_REFERENCE = "previous_computational_specification"
+AUTHORIZATION_MODE_MAP = {
+    "ADVISORY": "advisory_only",
+    "HUMAN_CONFIRMED": "human_confirmed_live",
+    "AUTONOMOUS": "autonomous_live",
+}
+SpecText = Annotated[str, Field(min_length=1, max_length=1200)]
+SpecLabel = Annotated[str, Field(min_length=1, max_length=100)]
+SpecValue = StrictFiniteNumber | SpecText | StrictBool
+
+
+class SpecificationConfiguration(_StrictSemanticPayload):
+    model_config = ConfigDict(frozen=True)
+
+    strategy_origin: Literal["USER_DEFINED", "AI_RESEARCHED"] | None = None
+    authorization_mode: Literal["ADVISORY", "HUMAN_CONFIRMED", "AUTONOMOUS"] | None = None
+    adaptation_policy: Literal["FIXED", "ADAPTIVE_WITHIN_SCOPE", "RESEARCH_AND_REQUEST_APPROVAL"] | None = None
+
+
+class ComputationalParameter(_StrictSemanticPayload):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    name: SpecLabel | None = None
+    definition: SpecText | None = None
+    value: SpecValue | None = None
+    minimum: StrictFiniteNumber | None = None
+    maximum: StrictFiniteNumber | None = None
+    unit: SpecLabel | None = None
+
+
+class ComputationalDataRequirement(_StrictSemanticPayload):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    dataset: SpecLabel | None = None
+    fields: tuple[SpecLabel, ...] = Field(default=(), strict=False, max_length=16)
+    symbol: SpecLabel | None = None
+    timeframe: SpecLabel | None = None
+    lookback_bars: int | None = Field(default=None, gt=0)
+    warmup_bars: int | None = Field(default=None, ge=0)
+    max_age_seconds: int | None = Field(default=None, gt=0)
+    completeness: SpecText | None = None
+    usage: Literal["RESEARCH_ONLY", "EXECUTION_RELEVANT"] | None = None
+
+
+class ComputationalDataAssessment(_StrictSemanticPayload):
+    """Evidence status, separate from the requirements extracted by the model."""
+
+    model_config = ConfigDict(frozen=True)
+
+    availability: Literal["NOT_CHECKED", "AVAILABLE", "UNAVAILABLE", "INSUFFICIENT_COVERAGE"] = "NOT_CHECKED"
+    freshness: Literal["NOT_CHECKED", "FRESH", "STALE"] = "NOT_CHECKED"
+    completeness: Literal["NOT_CHECKED", "COMPLETE", "INCOMPLETE"] = "NOT_CHECKED"
+
+
+class ComputationalOutput(_StrictSemanticPayload):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    name: SpecLabel | None = None
+    unit: SpecLabel | None = None
+    validity: SpecText | None = None
+
+
+class ComputationalSpecification(_StrictSemanticPayload):
+    """Versioned description of a computation; expressions are inert text."""
+
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: Literal["computational-specification/v1"] = COMPUTATIONAL_SPEC_VERSION
+    objective: SpecText | None = None
+    algorithm: SpecLabel | None = None
+    formula: SpecText | None = None
+    steps: tuple[SpecText, ...] = Field(default=(), strict=False, max_length=12)
+    temporal_requirements: tuple[SpecText, ...] = Field(default=(), strict=False, max_length=12)
+    parameters: tuple[ComputationalParameter, ...] = Field(default=(), strict=False, max_length=12)
+    data_requirements: tuple[ComputationalDataRequirement, ...] = Field(default=(), strict=False, max_length=12)
+    outputs: tuple[ComputationalOutput, ...] = Field(default=(), strict=False, max_length=12)
+    entry: tuple[SpecText, ...] = Field(default=(), strict=False, max_length=12)
+    exit: tuple[SpecText, ...] = Field(default=(), strict=False, max_length=12)
+    reentry: tuple[SpecText, ...] = Field(default=(), strict=False, max_length=12)
+    management: tuple[SpecText, ...] = Field(default=(), strict=False, max_length=12)
+    configuration: SpecificationConfiguration | None = None
+    conflicts: tuple[SpecText, ...] = Field(default=(), strict=False, max_length=12)
+    unsupported: tuple[SpecText, ...] = Field(default=(), strict=False, max_length=12)
+
+    @classmethod
+    def from_completion_fields(cls, fields: dict[str, Any]) -> ComputationalSpecification:
+        try:
+            return cls.model_validate(fields)
+        except ValidationError as exc:
+            raise ValueError(exc.errors(include_input=False)[0]["msg"]) from None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"schema_version": self.schema_version, **self.model_dump(mode="json", exclude_defaults=True)}
+
+    @property
+    def specification_id(self) -> str:
+        canonical = json.dumps(self.as_dict(), sort_keys=True, separators=(",", ":"))
+        return "computational_spec_" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class _PydanticSemanticIndicatorPayload(_StrictSemanticPayload):
@@ -207,6 +347,9 @@ class _PydanticStructuredSemanticPayload(_StrictSemanticPayload):
     unresolved_fields: list[str]
     negated: StrictBool
     hypothetical: StrictBool
+    research_goal: ResearchGoal | None = None
+    trade_parameters: TradeParameters | None = None
+    computational_specification: ComputationalSpecification | None = None
 
     @field_validator("schema_version", mode="before")
     @classmethod
@@ -308,6 +451,9 @@ class _PydanticStructuredSemanticPayload(_StrictSemanticPayload):
             unresolved_fields=tuple(self.unresolved_fields),
             negated=self.negated,
             hypothetical=self.hypothetical,
+            research_goal=self.research_goal,
+            trade_parameters=self.trade_parameters,
+            computational_specification=self.computational_specification,
         )
 
 
@@ -365,6 +511,13 @@ class StructuredSemanticResult:
     negated: bool
     hypothetical: bool
     schema_version: str = SEMANTIC_SCHEMA_VERSION
+    research_goal: ResearchGoal | None = None
+    trade_parameters: TradeParameters | None = None
+    computational_specification: ComputationalSpecification | None = None
+
+    @property
+    def has_computational_request(self) -> bool:
+        return self.computational_specification is not None or COMPUTATIONAL_SPEC_REFERENCE in self.context_references
 
     @classmethod
     def from_json(cls, raw: str) -> "StructuredSemanticResult":
@@ -408,6 +561,11 @@ class StructuredSemanticResult:
             "unresolved_fields": list(self.unresolved_fields),
             "negated": self.negated,
             "hypothetical": self.hypothetical,
+            **({"research_goal": self.research_goal.model_dump(exclude_none=True)}
+               if self.research_goal is not None else {}),
+            **({"trade_parameters": self.trade_parameters.as_dict()} if self.trade_parameters is not None else {}),
+            **({COMPUTATIONAL_SPEC_FIELD: self.computational_specification.as_dict()}
+               if self.computational_specification is not None else {}),
         }
 
 
@@ -428,6 +586,8 @@ def _validation_error_code(exc: ValidationError) -> str:
 
     location = tuple(error.get("loc") or ())
     root = str(location[0]) if location else ""
+    if root == COMPUTATIONAL_SPEC_FIELD:
+        return "COMPUTATIONAL_SPECIFICATION_INVALID"
     if error.get("type") in {"missing", "extra_forbidden"}:
         if root == "indicators":
             return "INDICATOR_FIELDS_INVALID" if len(location) > 1 else "SEMANTIC_INDICATORS_INVALID"

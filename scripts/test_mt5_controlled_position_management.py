@@ -487,6 +487,31 @@ def test_transport_loss_becomes_unknown_and_never_retries(tmp_path):
     assert fake_mt5.calls == 1
 
 
+def test_management_reconciliation_failure_after_broker_call_is_unknown(tmp_path, monkeypatch):
+    observation = _observation(MT5LifecycleState.ORDER_ACTIVE.value, orders=[ORDER_REFERENCE])
+    request = _request(MT5ManagementIntent.CANCEL_PENDING_ORDER.value, observation)
+    execution_path, lifecycle_path = _seed_journals(tmp_path, observation)
+    fake_mt5 = FakeMT5()
+    service = ControlledMT5ManagementService(
+        FakeManagementClient(_target("order"), _snapshot()),
+        config=_config(execution_path, lifecycle_path),
+        mt5_module=fake_mt5,
+        journal=ProtectedExecutionJournal(execution_path),
+    )
+
+    def fail(*_args):
+        raise RuntimeError("private failure")
+
+    monkeypatch.setattr(service, "_reconcile", fail)
+    first, status = service.handle(request.as_protected_dict(), AUTH_TOKEN)
+    duplicate, _ = service.handle(request.as_protected_dict(), AUTH_TOKEN)
+    assert status == 200 and first["status"] == "UNKNOWN"
+    assert first["reason"] == "BROKER_RESULT_UNVERIFIED"
+    assert first["reconciliation_required"] is True
+    assert duplicate["reason"] == "IDEMPOTENCY_DUPLICATE"
+    assert fake_mt5.calls == 1
+
+
 @pytest.mark.parametrize("intent", list(MT5ManagementIntent))
 def test_cancel_modify_close_reconciliation_is_recorded(tmp_path, intent):
     if intent is MT5ManagementIntent.CANCEL_PENDING_ORDER:

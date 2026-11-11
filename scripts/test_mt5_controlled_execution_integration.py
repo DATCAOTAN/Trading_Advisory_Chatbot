@@ -291,6 +291,39 @@ def test_unknown_result_is_persisted_and_never_retried(tmp_path):
     assert "RESULT_UNKNOWN" in Path(bridge_config(tmp_path).journal_path).read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("boundary", ["RESERVED", "SUBMISSION_STARTED", "RESULT_CONFIRMED"])
+def test_journal_failure_never_replays_a_possibly_submitted_request(tmp_path, monkeypatch, boundary):
+    fake_mt5 = FakeMT5()
+    executor = service(tmp_path, mt5=fake_mt5)
+    payload = protected_payload()
+    transition = executor.journal.transition
+
+    def fail_transition(key, state, **kwargs):
+        if state == boundary:
+            raise RuntimeError("private disk detail")
+        return transition(key, state, **kwargs)
+
+    with monkeypatch.context() as fault:
+        if boundary == "RESERVED":
+            fault.setattr(executor.journal, "reserve", lambda *a, **kw: fail_transition("", boundary))
+        else:
+            fault.setattr(executor.journal, "transition", fail_transition)
+        result, _ = executor.handle(payload, AUTH_TOKEN)
+    assert "private disk detail" not in str(result)
+    if boundary == "RESERVED":
+        assert result["status"] == "BLOCKED" and fake_mt5.calls == 0
+        return
+    expected_calls = int(boundary == "RESULT_CONFIRMED")
+    assert result["status"] == ("UNKNOWN" if expected_calls else "BLOCKED")
+    if expected_calls:
+        assert result["idempotency_status"] == "RESULT_UNKNOWN"
+        assert '"state": "SUBMISSION_STARTED"' in Path(bridge_config(tmp_path).journal_path).read_text()
+    restarted = service(tmp_path, mt5=fake_mt5)
+    duplicate, _ = restarted.handle(payload, AUTH_TOKEN)
+    assert duplicate["reason"] == "IDEMPOTENCY_DUPLICATE"
+    assert fake_mt5.calls == expected_calls
+
+
 def test_unsupported_semantic_mapping_blocks_before_order_send(tmp_path):
     fake_mt5 = FakeMT5()
     response, _ = service(tmp_path, mt5=fake_mt5).handle(

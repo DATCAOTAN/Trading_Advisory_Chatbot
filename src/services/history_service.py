@@ -4,6 +4,7 @@ import datetime
 import threading
 from typing import List, Dict, Optional
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 import redis
 
 from src.config import Config
@@ -182,6 +183,34 @@ class HistoryService:
                 print(f"🧠 [Memory] Đã lưu tin nhắn vào Long-term Vector Memory.")
             except Exception as e:
                 print(f"⚠️ [Memory] Lỗi lưu Vector History: {e}")
+
+    def append_message_if_current(
+        self, session_id: str, expected_count: int, expected_tail: Dict, message: Dict,
+    ) -> bool:
+        """Append a clarification only while its exact review is still the persisted tail."""
+        if not session_id or expected_count < 1:
+            return False
+        try:
+            result = self.sessions_col.update_one(
+                {
+                    "_id": session_id,
+                    f"messages.{expected_count - 1}": {"$eq": expected_tail},
+                    f"messages.{expected_count}": {"$exists": False},
+                },
+                {
+                    "$push": {"messages": message},
+                    "$set": {"updated_at": datetime.datetime.now(datetime.timezone.utc)},
+                },
+                upsert=False,
+            )
+            saved = result.modified_count == 1
+        except PyMongoError:
+            raise RuntimeError("Conversation history is unavailable; the clarification was not confirmed.") from None
+        try:
+            self.redis_client.delete(f"session:{session_id}")
+        except redis.RedisError:
+            pass
+        return saved
 
     def delete_session(self, session_id: str):
         """Xóa vĩnh viễn một phiên chat."""

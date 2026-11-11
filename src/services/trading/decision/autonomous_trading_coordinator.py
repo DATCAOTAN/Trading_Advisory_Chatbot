@@ -229,6 +229,7 @@ class AutonomousTradingCoordinator:
                 strategy=self.strategy,
                 strategy_direction=self.strategy_direction,
                 strategy_action=self.strategy_action,
+                expected_closed_bar_time=closed_bar_time,
             )
         except OperatorCandidateInputError as exc:
             no_action = bool(exc.blockers) and (
@@ -481,11 +482,18 @@ class AutonomousTradingCoordinator:
                 approval.report,
                 expected_account_context_fingerprint=account.account_context_fingerprint,
             )
-            receipt = self.execution_adapter.submit_prepared_request(request)
         except (TypeError, ValueError, RuntimeError):
             return self._candidate_result(
                 candidate, symbol, broker_symbol, timeframes, closed_bar_time,
                 account_scope, "BLOCKED", "CONTROLLED_EXECUTION_INTEGRATION_FAILED",
+                authorization_source="STANDING_MANDATE", pre_submit_ready=True,
+            )
+        try:
+            receipt = self.execution_adapter.submit_prepared_request(request)
+        except Exception:
+            return self._candidate_result(
+                candidate, symbol, broker_symbol, timeframes, closed_bar_time,
+                account_scope, "RESULT_UNKNOWN", "CONTROLLED_EXECUTION_RESULT_UNVERIFIED",
                 authorization_source="STANDING_MANDATE", pre_submit_ready=True,
             )
         status = {
@@ -677,12 +685,19 @@ class AutonomousTradingCoordinator:
             request = MT5ControlledManagementRequest.from_mandate_authorization(
                 proposal, authorization, current_time=self.clock()
             )
-            receipt = self.management_adapter.manage_prepared_request(request)
         except (TypeError, ValueError, RuntimeError):
             return self._management_result(
                 proposal, evaluation, symbol, broker_symbol, timeframes,
                 closed_bar_time, account_scope, "BLOCKED",
                 "CONTROLLED_MANAGEMENT_INTEGRATION_FAILED",
+            )
+        try:
+            receipt = self.management_adapter.manage_prepared_request(request)
+        except Exception:
+            return self._management_result(
+                proposal, evaluation, symbol, broker_symbol, timeframes,
+                closed_bar_time, account_scope, "RESULT_UNKNOWN",
+                "CONTROLLED_MANAGEMENT_RESULT_UNVERIFIED",
             )
         status = {
             "ACCEPTED": "RESULT_CONFIRMED",

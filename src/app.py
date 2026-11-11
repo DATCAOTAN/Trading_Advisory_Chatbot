@@ -123,6 +123,7 @@ with st.sidebar:
         valid_ids = [s["_id"] for s in all_sessions]
         if st.session_state.current_session_id not in valid_ids:
             st.session_state.current_session_id = valid_ids[0]
+            st.session_state.messages = history_svc.load_history(st.session_state.current_session_id)
             
         for s in all_sessions:
             s_id = s["_id"]

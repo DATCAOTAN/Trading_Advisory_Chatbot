@@ -209,11 +209,12 @@ def test_all_bounded_rule_operators_are_deterministic():
 
 
 @pytest.mark.parametrize(
-    ("previous", "current", "eligible"),
-    ((5.0, 11.0, True), (11.0, 12.0, True), (5.0, 5.0, False), (11.0, 5.0, False)),
+    ("previous", "current", "blocker"),
+    ((5.0, 11.0, None), (11.0, 12.0, None), (5.0, 5.0, "ENTRY_CONDITION_FALSE"),
+     (11.0, 5.0, "ENTRY_CONDITION_FALSE"), (11.0, None, "ENTRY_CONDITION_UNKNOWN")),
 )
 def test_autonomous_level_condition_uses_current_completed_bar(
-    monkeypatch, previous, current, eligible
+    monkeypatch, previous, current, blocker
 ):
     strategy = replace(
         _request("Use RSI 14 on H1 and buy when RSI is above 10."),
@@ -232,16 +233,13 @@ def test_autonomous_level_condition_uses_current_completed_bar(
 
     evidence = build_reasoning_evidence(strategy, bundle, quality, plan)
 
-    if eligible:
-        assert not any(
-            item.startswith("ENTRY_CONDITION_")
-            for item in evidence.setup.hard_blockers
-        )
-    else:
-        assert "ENTRY_CONDITION_FALSE" in evidence.setup.hard_blockers
+    assert tuple(item for item in evidence.setup.hard_blockers if item.startswith("ENTRY_CONDITION_")) == (
+        (blocker,) if blocker else ()
+    )
 
 
-def test_human_mode_does_not_use_autonomous_rearm_gate(monkeypatch):
+@pytest.mark.parametrize("current, blocker", [(12.0, None), (5.0, "ENTRY_CONDITION_FALSE"), (None, "ENTRY_CONDITION_UNKNOWN")])
+def test_human_level_gates_on_current_condition_without_rearm(monkeypatch, current, blocker):
     strategy = _request("Use RSI 14 on H1 and buy when RSI is above 10.")
     plan = plan_strategy_data(strategy)
     bundle, quality = _bundle(
@@ -250,14 +248,13 @@ def test_human_mode_does_not_use_autonomous_rearm_gate(monkeypatch):
     monkeypatch.setattr(
         strategy_evidence_module,
         "_compute_indicator",
-        lambda _spec, _bars: {"previous": 11.0, "current": 12.0},
+        lambda _spec, _bars: {"previous": 11.0, "current": current},
     )
 
     evidence = build_reasoning_evidence(strategy, bundle, quality, plan)
 
-    assert not any(
-        item.startswith("ENTRY_CONDITION_")
-        for item in evidence.setup.hard_blockers
+    assert tuple(item for item in evidence.setup.hard_blockers if item.startswith("ENTRY_CONDITION_")) == (
+        (blocker,) if blocker else ()
     )
 
 
