@@ -642,7 +642,7 @@ class RAGOrchestrator:
             raise ValueError("RESEARCH_REVISION_CONFLICT")
         return self.inspect_goal_historical_data(session_id)
 
-    def prepare_goal_evaluation_input(self, session_id, key, revision_id, request_id):
+    def prepare_goal_evaluation_input(self, session_id, key, revision_id, request_id, *, feature_only=False):
         from src.services.trading.research.data_integration import historical_requests, matching_history, approved_sources
         from src.services.trading.research.input_package import prepare_evaluation_input
         from src.services.trading.research.historical_dataset import checksum
@@ -660,11 +660,12 @@ class RAGOrchestrator:
             raise ValueError("RESEARCH_SOURCE_NOT_APPROVED")
         readiness = self.inspect_goal_historical_data(session_id)
         if readiness["blockers"] or any(
-            report["blockers"] or report.get("R2", {}).get("outcome") != "VERIFIED_FOR_DECLARED_SCOPE"
+            any(code != "RESEARCH_COST_ASSUMPTIONS_REQUIRED" or not feature_only for code in report["blockers"])
+            or report.get("R2", {}).get("outcome") != "VERIFIED_FOR_DECLARED_SCOPE"
             for report in readiness["requests"]
         ):
             raise ValueError("RESEARCH_EVALUATION_INPUT_NOT_READY")
-        path = prepare_evaluation_input(root, current, request, source, now=datetime.now(timezone.utc))
+        path = prepare_evaluation_input(root, current, request, source, now=datetime.now(timezone.utc), feature_only=feature_only)
         saved = {**record, "historical": {**record.get("historical", {}), storage_key: {
             **item, "input_package": {"path": str(path.relative_to(Config.DATA_DIR)), "sha256": checksum(path.read_bytes()),
                                       "revision_id": current.head.revision_id},
@@ -672,6 +673,76 @@ class RAGOrchestrator:
         if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=record, record=saved):
             raise ValueError("RESEARCH_REVISION_CONFLICT")
         return self.inspect_goal_historical_data(session_id)
+
+    def inspect_goal_research_features(self, session_id):
+        from src.services.trading.research.historical_features import (
+            feature_plan, bound_feature_inputs, inspect_feature_request, load_feature_result,
+        )
+        _, _, _, _, _, _, record = self._goal_research_context(session_id)
+        proposal = self.inspect_goal_research(session_id)["proposal"]
+        if proposal is None:
+            return {"status": "BLOCKED", "reason": "RESEARCH_PROPOSAL_REQUIRED"}
+        plan = feature_plan(proposal)
+        report = {**plan, "status": "BLOCKED", "execution_allowed": False}
+        try:
+            root = Config.DATA_DIR / "research"
+            inputs = bound_feature_inputs(root, proposal, record)
+            descriptor, _ = inspect_feature_request(root, proposal, inputs, now=datetime.now(timezone.utc))
+            prior = record.get("feature_run", {})
+            report.update(status="READY_FOR_EXPLICIT_COMPUTATION_APPROVAL", request=descriptor)
+            if prior.get("request_sha256") == descriptor["request_sha256"]:
+                report.update(status=prior["status"], reason=prior.get("reason", ""))
+                if prior["status"] == "PASS":
+                    report["result"] = load_feature_result(root, descriptor, prior["result_sha256"])
+                    report["result_sha256"] = prior["result_sha256"]
+        except (ValueError, RuntimeError, OSError) as exc:
+            code = str(exc)
+            report.update(status="BLOCKED", reason=code if re.fullmatch(r"[A-Z][A-Z0-9_]{2,90}", code) else "RESEARCH_FEATURE_INPUT_UNAVAILABLE")
+        return report
+
+    def compute_goal_research_features(self, session_id, key, revision_id, request_sha256, *, approved=False, retry=False):
+        from src.services.trading.research.descriptive_computation import DescriptiveComputationApproval
+        from src.services.trading.research.historical_features import (
+            ALGORITHM, bound_feature_inputs, inspect_feature_request, run_historical_features,
+        )
+        from src.services.trading.research.historical_dataset import checksum
+        if approved is not True:
+            raise ValueError("RESEARCH_COMPUTATION_OPERATOR_APPROVAL_REQUIRED")
+        history, _, _, _, _, _, _ = self._goal_research_context(session_id, key)
+        with history.research_generation_lock(key):
+            history, messages, tail, _, scope, _, record = self._goal_research_context(session_id, key)
+            proposal = self.inspect_goal_research(session_id)["proposal"]
+            if proposal is None or proposal.head.revision_id != revision_id:
+                raise ValueError("RESEARCH_REVISION_CONFLICT")
+            root = Config.DATA_DIR / "research"
+            inputs = bound_feature_inputs(root, proposal, record)
+            descriptor, _ = inspect_feature_request(root, proposal, inputs, now=datetime.now(timezone.utc))
+            if descriptor["request_sha256"] != request_sha256:
+                raise ValueError("RESEARCH_FEATURE_APPROVAL_STALE")
+            prior = record.get("feature_run", {})
+            if prior.get("request_sha256") == request_sha256:
+                if prior["status"] == "PASS":
+                    return self.inspect_goal_research_features(session_id)
+                if prior["status"] == "RUNNING" or not retry:
+                    raise ValueError("RESEARCH_FEATURE_ALREADY_CLAIMED_NO_AUTO_RETRY")
+            approval = DescriptiveComputationApproval(decision="APPROVED_FOR_DESCRIPTIVE_COMPUTATION",
+                proposal_id=proposal.proposal_id, revision_id=revision_id, scope=scope,
+                input_sha256=request_sha256, algorithm=ALGORITHM, output_directory=str((root / "results").absolute()))
+            claim = {"status": "RUNNING", "request_sha256": request_sha256, "attempt_id": uuid.uuid4().hex}
+            claimed = {**record, "feature_run": claim}
+            if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=record, record=claimed):
+                raise ValueError("RESEARCH_REVISION_CONFLICT")
+            try:
+                path = run_historical_features(root, proposal, inputs, approval=approval, now=datetime.now(timezone.utc))
+                completed = {**claim, "status": "PASS", "result_sha256": checksum(path.read_bytes())}
+            except Exception as exc:  # Controlled production-computation boundary; never persist raw input/tracebacks.
+                code = str(exc)
+                completed = {**claim, "status": "FAILED", "exception_type": type(exc).__name__,
+                    "reason": code if re.fullmatch(r"[A-Z][A-Z0-9_]{2,90}", code) else "RESEARCH_FEATURE_CALCULATION_FAILED"}
+            saved = {**record, "feature_run": completed}
+            if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=claimed, record=saved):
+                raise ValueError("RESEARCH_REVISION_CONFLICT")
+        return self.inspect_goal_research_features(session_id)
 
     def attach_goal_research_evidence(self, session_id, key, revision_id):
         from src.services.trading.research.evidence_verification import (

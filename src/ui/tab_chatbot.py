@@ -669,6 +669,44 @@ def _render_goal_historical_data(orchestrator, session_id, key, proposal) -> Non
                              disabled=bool(report["blockers"]) or proposal.review_status(proposal.head.revision_id) != "ACCEPTED_FOR_NEXT_RESEARCH_STAGE"):
                     orchestrator.prepare_goal_evaluation_input(session_id, key, proposal.head.revision_id, request_id)
                     st.rerun()
+                if st.button("Prepare feature-only input", key="history_feature_prepare_" + suffix,
+                             disabled=any(code != "RESEARCH_COST_ASSUMPTIONS_REQUIRED" for code in report["blockers"])
+                             or proposal.review_status(proposal.head.revision_id) != "ACCEPTED_FOR_NEXT_RESEARCH_STAGE"):
+                    orchestrator.prepare_goal_evaluation_input(session_id, key, proposal.head.revision_id, request_id, feature_only=True)
+                    st.rerun()
+    _render_goal_research_features(orchestrator, session_id, key, proposal.head.revision_id)
+
+
+def _render_goal_research_features(orchestrator, session_id, key, revision_id):
+    view = orchestrator.inspect_goal_research_features(session_id)
+    with st.expander("Historical research features", expanded=True):
+        st.text(view["status"])
+        st.json({"available": view.get("supported", []), "blocked": view.get("blocked", [])})
+        if view.get("reason"):
+            st.warning(view["reason"])
+        request = view.get("request")
+        if request:
+            st.json(request)
+            suffix = f"{key}_{revision_id}_{request['request_sha256']}"
+            if view["status"] in {"READY_FOR_EXPLICIT_COMPUTATION_APPROVAL", "FAILED"}:
+                approved = st.checkbox("I authorize only these pinned historical feature calculations, not a backtest or trade",
+                                       key="feature_approval_" + suffix)
+                if st.button("Compute research features", disabled=not approved, key="feature_compute_" + suffix):
+                    orchestrator.compute_goal_research_features(session_id, key, revision_id, request["request_sha256"],
+                                                               approved=approved, retry=view["status"] == "FAILED")
+                    st.rerun()
+        if view.get("result"):
+            result = view["result"]
+            st.json({"result_sha256": view["result_sha256"], "status": result["status"],
+                     "numeric_encoding": result["numeric_encoding"], "strategy_evaluated": False})
+            for series in result["series"]:
+                st.markdown(f"**{series['name']} / {series['timeframe']}**")
+                st.json({"parameters": series["parameters"], "output": series["output_field"],
+                         "formula_version": series["formula_version"], "seed_open_time": series["seed_open_time"]})
+                st.dataframe(series["rows"], use_container_width=True)
+            for partition, observations in result["aligned_partitions"].items():
+                st.markdown(f"**{partition} completed-bar alignment**")
+                st.json(observations, expanded=False)
 
 
 def _render_research_readiness(orchestrator) -> None:

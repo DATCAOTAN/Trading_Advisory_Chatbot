@@ -122,7 +122,7 @@ def prepare_research_input(root: Path, expected_binding: dict, *, now: datetime)
     return _publish(root / "inputs", payload)
 
 
-def prepare_evaluation_input(root: Path, proposal: ResearchProposal, request, source: ApprovedHistoricalSource, *, now: datetime) -> Path:
+def _evaluation_input_bytes(root: Path, proposal: ResearchProposal, request, source: ApprovedHistoricalSource, *, now: datetime, feature_only=False) -> bytes:
     """Partition approved real observations; do not simulate signals, fills or performance."""
     from .data_integration import historical_requests, inspect_historical_data
 
@@ -141,8 +141,9 @@ def prepare_evaluation_input(root: Path, proposal: ResearchProposal, request, so
                 "scope": proposal.scope.model_dump(mode="json"), "purpose": "READ_ONLY_HISTORICAL_RESEARCH"}
     report = inspect_historical_data(root, proposal, request,
         {"status": "ACQUIRED", **approval, "source_approval": approval})
-    if report["blockers"]:
-        raise ValueError(report["blockers"][0])
+    blockers = [code for code in report["blockers"] if not (feature_only and code == "RESEARCH_COST_ASSUMPTIONS_REQUIRED")]
+    if blockers:
+        raise ValueError(blockers[0])
     manifest, rows = load_dataset(_local(source.folder), expected_manifest_checksum=source.manifest_checksum)
     first, split, last = (int(utc_value.timestamp()) for utc_value in (
         datetime.fromisoformat(request.start), datetime.fromisoformat(request.split), datetime.fromisoformat(request.end)))
@@ -154,7 +155,7 @@ def prepare_evaluation_input(root: Path, proposal: ResearchProposal, request, so
                    if start - request.warmup * step <= row["time"] < start]
         partitions[name] = {"start_inclusive": start, "end_exclusive": end,
                             "rows": selected, "warmup_context_not_scored": context, "row_count": len(selected)}
-    payload = canonical_bytes({
+    package = {
         "schema_version": "r1-evaluation-input/v1", "execution_allowed": False,
         "proposal_id": proposal.proposal_id, "revision_id": proposal.head.revision_id,
         "proposal_sha256": checksum(proposal.to_json().encode()), "specification_id": proposal.head.content.development.specification.specification_id,
@@ -163,5 +164,29 @@ def prepare_evaluation_input(root: Path, proposal: ResearchProposal, request, so
         "scope": proposal.scope.model_dump(mode="json"), "fields": request.fields,
         "timestamp_encoding": "UTC_UNIX_SECONDS", "costs": report["costs"], "partitions": partitions,
         "research_computation_authorized": False, "strategy_evaluated": False,
-    })
-    return _publish(root / "inputs", payload, prefix="research_evaluation_input")
+    }
+    if feature_only:
+        package["preparation_purpose"] = "FEATURE_INPUT_ONLY"
+    return canonical_bytes(package)
+
+
+def prepare_evaluation_input(root: Path, proposal: ResearchProposal, request, source: ApprovedHistoricalSource, *, now: datetime, feature_only=False) -> Path:
+    return _publish(root / "inputs", _evaluation_input_bytes(root, proposal, request, source,
+        now=now, feature_only=feature_only), prefix="research_evaluation_input")
+
+
+def load_evaluation_input(root: Path, proposal: ResearchProposal, request, source: ApprovedHistoricalSource,
+                          input_sha256: str, *, now: datetime) -> tuple[dict, bytes]:
+    if not isinstance(input_sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", input_sha256):
+        raise ValueError("RESEARCH_INPUT_PIN_INVALID")
+    payload = _local(root / "inputs" / f"research_evaluation_input_{input_sha256}.json").read_bytes()
+    if checksum(payload) != input_sha256:
+        raise ValueError("RESEARCH_INPUT_CHECKSUM_MISMATCH")
+    package = json.loads(payload)
+    if not isinstance(package, dict) or package.get("preparation_purpose") not in {None, "FEATURE_INPUT_ONLY"}:
+        raise ValueError("RESEARCH_INPUT_SCHEMA_INVALID")
+    expected = _evaluation_input_bytes(root, proposal, request, source, now=now,
+                                      feature_only=package.get("preparation_purpose") == "FEATURE_INPUT_ONLY")
+    if expected != payload:
+        raise ValueError("RESEARCH_EVALUATION_INPUT_MISMATCH")
+    return package, payload
