@@ -8,7 +8,7 @@ from typing import Annotated, Callable, Literal, Protocol, TYPE_CHECKING, runtim
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, ValidationError, ValidationInfo, model_serializer, model_validator
 
 from src.services.semantic.structured_semantics import ComputationalParameter, ComputationalSpecification, ResearchGoal, SpecText
-from ..market.timeframes import SUPPORTED_TIMEFRAMES
+from ..market.timeframes import SUPPORTED_TIMEFRAMES, timeframe_duration_seconds
 from ..reasoning.strategy_evidence import ConversationalStrategyRequest, validate_strategy
 from .historical_dataset import canonical_bytes, checksum, utc
 
@@ -102,6 +102,23 @@ StrategySpec = Annotated[
 ]
 
 
+class HistoricalEvaluationWindow(_Record):
+    start: UtcTime | None = None
+    end: UtcTime | None = None
+    split: UtcTime | None = None
+    session_policy: Literal["UTC_WEEKDAYS_CONSERVATIVE_V1", "CONTINUOUS_UTC_V1"] | None = None
+
+    @model_validator(mode="after")
+    def check_window(self):
+        if self.start is not None and self.end is not None and self.start >= self.end:
+            raise ValueError("RESEARCH_EVALUATION_WINDOW_INVALID")
+        if self.split is not None and (
+            self.start is None or self.end is None or not self.start < self.split < self.end
+        ):
+            raise ValueError("RESEARCH_IS_OOS_SPLIT_INVALID")
+        return self
+
+
 class ResearchDevelopment(_Record):
     """Inert G1 specification plus research-design fields, never an executable strategy."""
 
@@ -112,6 +129,30 @@ class ResearchDevelopment(_Record):
     evaluation_criteria: tuple[SpecText, ...] = Field(default=(), max_length=12)
     rejection_criteria: tuple[SpecText, ...] = Field(default=(), max_length=12)
     missing_information: tuple[SpecText, ...] = Field(default=(), max_length=12)
+    historical_window: HistoricalEvaluationWindow | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_identity(self, serialize):
+        payload = serialize(self)
+        if self.historical_window is None:
+            payload.pop("historical_window", None)
+        return payload
+
+    @classmethod
+    def from_editor_json(cls, payload: str):
+        try:
+            return cls.model_validate_json(payload)
+        except ValidationError as exc:
+            error = exc.errors(include_input=False, include_url=False)[0]
+            reason = str(error.get("ctx", {}).get("error", ""))
+            if reason in {"RESEARCH_EVALUATION_WINDOW_INVALID", "RESEARCH_IS_OOS_SPLIT_INVALID",
+                          "UTC_AWARE_DATETIME_REQUIRED", "RESEARCH_HISTORICAL_WINDOW_NOT_ALIGNED"}:
+                raise ValueError(reason) from None
+            if error["loc"] and error["loc"][0] == "historical_window":
+                raise ValueError("RESEARCH_HISTORICAL_WINDOW_INVALID") from None
+            raise ValueError("RESEARCH_SPECIFICATION_INVALID") from None
+        except (ValueError, TypeError):
+            raise ValueError("RESEARCH_SPECIFICATION_INVALID") from None
 
     @model_validator(mode="after")
     def check_authority(self):
@@ -122,6 +163,12 @@ class ResearchDevelopment(_Record):
             or config.adaptation_policy is not None
         ):
             raise ValueError("RESEARCH_SPECIFICATION_AUTHORITY_CONFLICT")
+        window = self.historical_window
+        if window is not None:
+            for requirement in self.specification.data_requirements:
+                step = timeframe_duration_seconds(requirement.timeframe) if requirement.timeframe else 0
+                if step and any(value.timestamp() % step for value in (window.start, window.split, window.end) if value):
+                    raise ValueError("RESEARCH_HISTORICAL_WINDOW_NOT_ALIGNED")
         return self
 
     def review(self) -> dict:

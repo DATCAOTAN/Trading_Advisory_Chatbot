@@ -142,7 +142,8 @@ class HistoricalEvidenceVerifier:
         if sum(first <= row["time"] < last for row in rows) != (last - first) / step:
             return limited
         if development is not None:
-            requirements = development.specification.data_requirements
+            requirements = tuple(item for item in development.specification.data_requirements
+                                 if item.symbol == verified_source.symbol and item.timeframe == verified_source.timeframe)
             for requirement in requirements:
                 if (requirement.dataset != "OHLCV" or requirement.usage != "RESEARCH_ONLY"
                         or requirement.symbol != verified_source.symbol or requirement.timeframe != verified_source.timeframe

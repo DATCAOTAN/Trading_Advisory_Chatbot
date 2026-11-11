@@ -83,6 +83,9 @@ class MT5BridgeWriteSkeletonClient:
     def reconcile(self, payload: dict, auth_token: str) -> dict:
         return self._post_protected("/execution/reconcile", payload, auth_token)
 
+    def export_research_history(self, payload: dict, auth_token: str) -> dict:
+        return self._post_protected("/research/history/export", payload, auth_token)
+
     def lifecycle_snapshot(
         self, history_window_seconds: int, correlation_tags: list[str], auth_token: str
     ) -> dict:

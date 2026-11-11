@@ -352,7 +352,11 @@ class RAGOrchestrator:
             raise ValueError("RESEARCH_BRIEF_STALE")
         proposal = None
         if record and record.get("status") == "SAVED":
-            proposal = ResearchProposal.replay(record["proposal"], scope=scope)
+            from src.services.trading.research.data_integration import approved_sources
+            from src.services.trading.research.evidence_verification import HistoricalEvidenceVerifier
+            sources = approved_sources(Config.DATA_DIR / "research", record, scope)
+            verifier = HistoricalEvidenceVerifier(scope, sources) if sources else None
+            proposal = ResearchProposal.replay(record["proposal"], scope=scope, verify_evidence=verifier)
             expected_brief = ResearchProposal.from_plan(
                 plan, scope=scope, origin="AI_RESEARCHED", content=ResearchContent(), created_at=datetime.now(timezone.utc),
             ).brief
@@ -421,6 +425,8 @@ class RAGOrchestrator:
 
     def revise_goal_research(self, session_id, key, revision_id, hypothesis):
         from src.services.trading.research.proposal import ResearchContent
+        from src.services.trading.research.data_integration import approved_sources
+        from src.services.trading.research.evidence_verification import HistoricalEvidenceVerifier
 
         history, messages, tail, _, scope, key, record = self._goal_research_context(session_id, key)
         current = self.inspect_goal_research(session_id)["proposal"]
@@ -438,10 +444,11 @@ class RAGOrchestrator:
         updated = current.revise(
             scope=scope, parent_revision_id=revision_id, author="USER_AUTHORED", content=content,
             created_at=datetime.now(timezone.utc),
+            verify_evidence=HistoricalEvidenceVerifier(scope, approved_sources(Config.DATA_DIR / "research", record, scope)),
         )
         if updated is current:
             return self.inspect_goal_research(session_id)
-        saved = {"status": "SAVED", "proposal": updated.to_json(), "head_revision_id": updated.head.revision_id}
+        saved = {**record, "status": "SAVED", "proposal": updated.to_json(), "head_revision_id": updated.head.revision_id}
         if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=record, record=saved):
             raise ValueError("RESEARCH_REVISION_CONFLICT")
         return self.inspect_goal_research(session_id)
@@ -449,6 +456,8 @@ class RAGOrchestrator:
     def develop_goal_research(self, session_id, key, revision_id, *, development_json=None):
         from src.services.trading.reasoning.llm_adapter import ProjectLLMReasoningProvider
         from src.services.trading.research.proposal import ResearchContent, ResearchDevelopment, develop_research_strategy
+        from src.services.trading.research.data_integration import approved_sources
+        from src.services.trading.research.evidence_verification import HistoricalEvidenceVerifier
 
         history, _, _, _, _, _, _ = self._goal_research_context(session_id, key)
         with history.research_generation_lock(key):
@@ -465,10 +474,7 @@ class RAGOrchestrator:
                 development = develop_research_strategy(current, provider)
                 author = "AI_SUGGESTED"
             else:
-                try:
-                    development = ResearchDevelopment.model_validate_json(development_json)
-                except (ValueError, TypeError):
-                    raise ValueError("RESEARCH_SPECIFICATION_INVALID") from None
+                development = ResearchDevelopment.from_editor_json(development_json)
                 author = "USER_AUTHORED"
             payload = current.head.content.model_dump()
             payload["development"] = development
@@ -478,7 +484,8 @@ class RAGOrchestrator:
             }) for item in current.head.content.evidence)
             content = ResearchContent.model_validate(payload)
             updated = current.revise(scope=scope, parent_revision_id=revision_id, author=author,
-                                     content=content, created_at=datetime.now(timezone.utc))
+                                     content=content, created_at=datetime.now(timezone.utc),
+                                     verify_evidence=HistoricalEvidenceVerifier(scope, approved_sources(Config.DATA_DIR / "research", record, scope)))
             if updated is current:
                 return self.inspect_goal_research(session_id)
             saved = {**record, "status": "SAVED", "proposal": updated.to_json(),
@@ -487,6 +494,182 @@ class RAGOrchestrator:
                                               expected=record, record=saved):
                 raise ValueError("RESEARCH_REVISION_CONFLICT")
         return self.inspect_goal_research(session_id)
+
+    def inspect_goal_historical_data(self, session_id):
+        from src.services.trading.research.data_integration import historical_requests, inspect_historical_data, matching_history, cost_readiness, approved_sources
+        from src.services.trading.research.evidence_verification import HistoricalEvidenceVerifier
+        _, _, _, _, scope, _, record = self._goal_research_context(session_id)
+        proposal = self.inspect_goal_research(session_id)["proposal"]
+        if proposal is None:
+            return {"requests": [], "blockers": ["RESEARCH_PROPOSAL_REQUIRED"]}
+        requests, missing = historical_requests(proposal)
+        reports = []
+        for request in requests:
+            _, item = matching_history(record, request)
+            report = inspect_historical_data(Config.DATA_DIR / "research", proposal, request, item)
+            report["proposal_decision"] = proposal.review_status(proposal.head.revision_id)
+            if item and item.get("source_approval"):
+                reference = next((r for r in proposal.head.content.evidence if r.evidence_ref == item["dataset_id"]), None)
+                if reference is not None:
+                    verifier = HistoricalEvidenceVerifier(scope, approved_sources(Config.DATA_DIR / "research", record, scope))
+                    proof = verifier.inspect(proposal, revision_id=proposal.head.revision_id, reference=reference, now=datetime.now(timezone.utc))
+                    report["R2"] = {"outcome": proof.outcome, "reason": proof.reason, "claim_support": proof.claim_support,
+                                    "reference_status": reference.status}
+            report["next_operation"] = (
+                "ACQUIRE_READ_ONLY_HISTORY" if item is None else
+                "EXPLICIT_READ_ONLY_RETRY" if report["acquisition"] != "ACQUIRED" else
+                "REVIEW_EXACT_DATA_SOURCE" if report["approval"] == "NOT_APPROVED" else
+                "REVERIFY_R2_FOR_CURRENT_REVISION" if report.get("R2", {}).get("reference_status") != "VALIDATED" else
+                "RESOLVE_INPUT_BLOCKERS" if report["blockers"] else
+                "REVIEW_RESEARCH_REVISION" if report["proposal_decision"] != "ACCEPTED_FOR_NEXT_RESEARCH_STAGE" else
+                "PREPARE_IS_OOS_INPUT_ONLY"
+            )
+            if item and item.get("input_package", {}).get("revision_id") == proposal.head.revision_id:
+                report["input_package"] = item["input_package"]
+            reports.append(report)
+        window = proposal.head.content.development.historical_window if proposal.head.content.development else None
+        return {"requests": reports, "blockers": missing, "costs": cost_readiness(proposal), "execution_allowed": False,
+                "status": "HISTORICAL_ACQUISITION_PENDING_USER_INPUT" if window is None or window.start is None or window.end is None else "HISTORICAL_SCOPE_DEFINED",
+                "is_oos": "MISSING_TYPED_BOUNDARIES" if window is None or window.split is None else "BOUNDARIES_DEFINED_NOT_EVALUATED"}
+
+    def acquire_goal_history(self, session_id, key, revision_id, request_id, *, retry=False):
+        from dataclasses import asdict
+        from src.services.trading.execution.mt5_bridge_write_skeleton.client import MT5BridgeWriteSkeletonClient
+        from src.services.trading.research.data_integration import historical_requests, matching_history, receive_history_export
+
+        history, _, _, _, _, _, _ = self._goal_research_context(session_id, key)
+        with history.research_generation_lock(key):
+            history, messages, tail, _, _, _, record = self._goal_research_context(session_id, key)
+            proposal = self.inspect_goal_research(session_id)["proposal"]
+            if proposal is None or proposal.head.revision_id != revision_id:
+                raise ValueError("RESEARCH_REVISION_CONFLICT")
+            requests, _ = historical_requests(proposal)
+            request = next((item for item in requests if item.request_id == request_id), None)
+            if request is None:
+                raise ValueError("RESEARCH_HISTORICAL_REQUEST_STALE")
+            storage_key, prior = matching_history(record, request)
+            if prior and (prior["status"] == "ACQUIRED" or not retry):
+                return self.inspect_goal_historical_data(session_id)
+            claim = {"request": asdict(request), "status": "ACQUIRING", "attempt_id": uuid.uuid4().hex}
+            claimed = {**record, "historical": {**record.get("historical", {}), storage_key: claim}}
+            if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=record, record=claimed):
+                raise ValueError("RESEARCH_REVISION_CONFLICT")
+            try:
+                client = getattr(self, "research_history_client", None) or MT5BridgeWriteSkeletonClient(Config.MT5_BRIDGE_URL, timeout_seconds=120)
+                account = client.account_context()
+                if account.get("status") != "OK" or account.get("account_environment") != "DEMO":
+                    raise ValueError("DEMO_ACCOUNT_REQUIRED")
+                response = client.export_research_history(asdict(request.export), Config.TRADING_MT5_CONTROLLED_EXECUTION_AUTH_TOKEN)
+                if response.get("status") != "EXPORTED":
+                    code = response.get("reason", "")
+                    raise ValueError(code if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{2,80}", code) else "RESEARCH_HISTORY_ACQUISITION_BLOCKED")
+                _, manifest = receive_history_export(Config.DATA_DIR / "research", response, request.export)
+                completed = {**claim, "status": "ACQUIRED", "dataset_id": manifest["dataset_id"],
+                             "manifest_sha256": manifest["manifest_checksum"], "data_sha256": manifest["data_checksum"]}
+            except (OSError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+                code = str(exc)
+                completed = {**claim, "status": "FAILED", "reason": code if re.fullmatch(r"[A-Z][A-Z0-9_]{2,80}", code) else "RESEARCH_HISTORY_DEPENDENCY_UNAVAILABLE"}
+            updated = {**record, "historical": {**record.get("historical", {}), storage_key: completed}}
+            if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=claimed, record=updated):
+                raise ValueError("RESEARCH_REVISION_CONFLICT")
+        return self.inspect_goal_historical_data(session_id)
+
+    def approve_goal_history(self, session_id, key, revision_id, request_id, manifest_sha256):
+        from src.services.trading.research.data_integration import historical_requests, matching_history, dataset_folder, approved_sources
+        from src.services.trading.research.evidence_verification import ApprovedHistoricalSource, HistoricalEvidenceVerifier, HISTORICAL_EVALUATION_VERSION
+        from src.services.trading.research.proposal import EvidenceReference, ResearchContent
+        from src.services.trading.research.historical_dataset import load_dataset
+
+        history, messages, tail, _, scope, _, record = self._goal_research_context(session_id, key)
+        current = self.inspect_goal_research(session_id)["proposal"]
+        if current is None or current.head.revision_id != revision_id:
+            raise ValueError("RESEARCH_REVISION_CONFLICT")
+        request = next((r for r in historical_requests(current)[0] if r.request_id == request_id), None)
+        if request is None:
+            raise ValueError("RESEARCH_HISTORICAL_REQUEST_STALE")
+        storage_key, item = matching_history(record, request)
+        if not item or item["status"] != "ACQUIRED" or item["manifest_sha256"] != manifest_sha256:
+            raise ValueError("RESEARCH_SOURCE_APPROVAL_STALE")
+        root = Config.DATA_DIR / "research"
+        folder = dataset_folder(root, item["dataset_id"])
+        manifest, _ = load_dataset(folder, expected_manifest_checksum=manifest_sha256)
+        source = ApprovedHistoricalSource(folder, manifest_sha256, scope)
+        sources = {s.folder.name: s for s in (*approved_sources(root, record, scope), source)}
+        verifier = HistoricalEvidenceVerifier(scope, tuple(sources.values()))
+        reference = EvidenceReference(source_ref="MT5_AUTHENTICATED_LOCAL_TERMINAL", evidence_ref=folder.name,
+            kind="HISTORICAL_MARKET_DATA", stance="CONTEXT", window_start=request.start, window_end=request.end)
+        retained = tuple(ref for ref in current.head.content.evidence if ref.evidence_ref != reference.evidence_ref)
+        def revision(ref):
+            content = ResearchContent.model_validate({**current.head.content.model_dump(), "evidence": (*retained, ref)})
+            return current.revise(scope=scope, parent_revision_id=revision_id, author="USER_AUTHORED", content=content,
+                                  created_at=datetime.now(timezone.utc), verify_evidence=verifier)
+        pending = revision(reference)
+        proof = verifier.inspect(pending, revision_id=pending.head.revision_id, reference=reference, now=datetime.now(timezone.utc))
+        if proof.outcome == "VERIFIED_FOR_DECLARED_SCOPE":
+            reference = reference.model_copy(update={"status": "VALIDATED", "data_quality": "VERIFIED",
+                                                    "evaluation_version": HISTORICAL_EVALUATION_VERSION})
+        updated = revision(reference)
+        approval = {"purpose": "READ_ONLY_HISTORICAL_RESEARCH", "scope": scope.model_dump(mode="json"),
+                    "dataset_id": folder.name, "manifest_sha256": manifest_sha256, "data_sha256": manifest["data_checksum"],
+                    "request_id": request_id, "approved_at": datetime.now(timezone.utc).isoformat()}
+        approval = item.get("source_approval") or approval
+        saved = {**record, "proposal": updated.to_json(), "head_revision_id": updated.head.revision_id,
+                 "historical": {**record.get("historical", {}), storage_key: {**item, "source_approval": approval}}}
+        if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=record, record=saved):
+            raise ValueError("RESEARCH_REVISION_CONFLICT")
+        return self.inspect_goal_historical_data(session_id)
+
+    def review_goal_research(self, session_id, key, revision_id):
+        from src.services.trading.research.data_integration import approved_sources
+        from src.services.trading.research.evidence_verification import HistoricalEvidenceVerifier
+        history, messages, tail, _, scope, _, record = self._goal_research_context(session_id, key)
+        current = self.inspect_goal_research(session_id)["proposal"]
+        if current is None or current.head.revision_id != revision_id:
+            raise ValueError("RESEARCH_REVISION_CONFLICT")
+        readiness = self.inspect_goal_historical_data(session_id)
+        if readiness["blockers"] or not readiness["requests"] or any(
+            report.get("R2", {}).get("outcome") != "VERIFIED_FOR_DECLARED_SCOPE" for report in readiness["requests"]
+        ):
+            raise ValueError("RESEARCH_REQUIRED_SOURCES_INCOMPLETE")
+        verifier = HistoricalEvidenceVerifier(scope, approved_sources(Config.DATA_DIR / "research", record, scope))
+        reviewed = current.review(scope=scope, revision_id=revision_id, decision="ACCEPTED_FOR_NEXT_RESEARCH_STAGE",
+                                  reviewed_at=datetime.now(timezone.utc), verify_evidence=verifier)
+        saved = {**record, "proposal": reviewed.to_json()}
+        if reviewed != current and not history.save_research_state(session_id, count=len(messages), tail=tail, key=key,
+                                                                  expected=record, record=saved):
+            raise ValueError("RESEARCH_REVISION_CONFLICT")
+        return self.inspect_goal_historical_data(session_id)
+
+    def prepare_goal_evaluation_input(self, session_id, key, revision_id, request_id):
+        from src.services.trading.research.data_integration import historical_requests, matching_history, approved_sources
+        from src.services.trading.research.input_package import prepare_evaluation_input
+        from src.services.trading.research.historical_dataset import checksum
+        history, messages, tail, _, scope, _, record = self._goal_research_context(session_id, key)
+        current = self.inspect_goal_research(session_id)["proposal"]
+        if current is None or current.head.revision_id != revision_id:
+            raise ValueError("RESEARCH_REVISION_CONFLICT")
+        request = next((r for r in historical_requests(current)[0] if r.request_id == request_id), None)
+        if request is None:
+            raise ValueError("RESEARCH_HISTORICAL_REQUEST_STALE")
+        storage_key, item = matching_history(record, request)
+        root = Config.DATA_DIR / "research"
+        source = next((s for s in approved_sources(root, record, scope) if item and s.folder.name == item.get("dataset_id")), None)
+        if source is None:
+            raise ValueError("RESEARCH_SOURCE_NOT_APPROVED")
+        readiness = self.inspect_goal_historical_data(session_id)
+        if readiness["blockers"] or any(
+            report["blockers"] or report.get("R2", {}).get("outcome") != "VERIFIED_FOR_DECLARED_SCOPE"
+            for report in readiness["requests"]
+        ):
+            raise ValueError("RESEARCH_EVALUATION_INPUT_NOT_READY")
+        path = prepare_evaluation_input(root, current, request, source, now=datetime.now(timezone.utc))
+        saved = {**record, "historical": {**record.get("historical", {}), storage_key: {
+            **item, "input_package": {"path": str(path.relative_to(Config.DATA_DIR)), "sha256": checksum(path.read_bytes()),
+                                      "revision_id": current.head.revision_id},
+        }}}
+        if not history.save_research_state(session_id, count=len(messages), tail=tail, key=key, expected=record, record=saved):
+            raise ValueError("RESEARCH_REVISION_CONFLICT")
+        return self.inspect_goal_historical_data(session_id)
 
     def attach_goal_research_evidence(self, session_id, key, revision_id):
         from src.services.trading.research.evidence_verification import (
@@ -521,7 +704,7 @@ class RAGOrchestrator:
         )
         if updated is not current and not history.save_research_state(
             session_id, count=len(messages), tail=tail, key=key, expected=record,
-            record={"status": "SAVED", "proposal": updated.to_json(), "head_revision_id": updated.head.revision_id},
+            record={**record, "status": "SAVED", "proposal": updated.to_json(), "head_revision_id": updated.head.revision_id},
         ):
             raise ValueError("RESEARCH_REVISION_CONFLICT")
         owner = HistoricalEvidenceVerifier(scope, (

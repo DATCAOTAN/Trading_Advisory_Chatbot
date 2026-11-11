@@ -542,7 +542,8 @@ def _render_goal_research(orchestrator) -> None:
         st.text(f"Proposal: {proposal.proposal_id}")
         st.text(f"Revision: {proposal.head.revision_id} | Origin: {proposal.origin}")
         st.text(f"Review: {proposal.review_status(proposal.head.revision_id)}")
-        st.text("Evidence: EVIDENCE_PENDING (no claim support or research approval inferred)")
+        evidence_status = "EVIDENCE_PENDING" if proposal.head.evidence_status() != "VALIDATED" else "VALIDATED_DATA_ONLY"
+        st.text(f"Evidence: {evidence_status} (no claim support or research approval inferred)")
         if proof:
             st.text(f"Independent data check: {proof['outcome']} | {proof['reason']}")
         st.caption("AI-suggested research only. Not evaluated; no trading or research execution authorization.")
@@ -577,15 +578,95 @@ def _render_goal_research(orchestrator) -> None:
                 orchestrator.develop_goal_research(session_id, key, proposal.head.revision_id,
                                                    development_json=specification_json)
                 st.rerun()
+            _render_goal_historical_data(orchestrator, session_id, key, proposal)
         with st.expander("Revision history"):
             for revision in proposal.revisions:
                 st.text(f"{revision.revision_id} | {revision.author} | {proposal.review_status(revision.revision_id)}")
                 st.text(revision.content.hypothesis)
                 if revision.content.development is not None:
                     st.json(revision.content.development.model_dump(mode="json"))
-    except (ValueError, RuntimeError) as exc:
+    except (ValueError, RuntimeError, OSError) as exc:
         reason = str(exc)
         st.warning(reason if re.fullmatch(r"[A-Z][A-Z0-9_]{2,90}", reason) else "RESEARCH_STATE_INVALID_OR_UNAVAILABLE")
+
+
+def _render_goal_historical_data(orchestrator, session_id, key, proposal) -> None:
+    import json
+
+    development = proposal.head.content.development
+    window = development.historical_window
+    st.subheader("Historical research data")
+    with st.form(f"research_window_{key}_{proposal.head.revision_id}"):
+        start = st.text_input("Evaluation start (UTC, inclusive)", value=window.start.isoformat() if window and window.start else "")
+        end = st.text_input("Evaluation end (UTC, exclusive)", value=window.end.isoformat() if window and window.end else "")
+        split = st.text_input("IS/OOS boundary (UTC)", value=window.split.isoformat() if window and window.split else "")
+        policies = [None, "UTC_WEEKDAYS_CONSERVATIVE_V1", "CONTINUOUS_UTC_V1"]
+        policy = st.selectbox("Historical session policy", policies,
+                              index=policies.index(window.session_policy) if window else 0,
+                              format_func=lambda value: value or "Not specified")
+        save_window = st.form_submit_button("Save historical window revision")
+    if save_window:
+        payload = development.model_dump(mode="json")
+        payload["historical_window"] = {"start": start or None, "end": end or None, "split": split or None, "session_policy": policy}
+        orchestrator.develop_goal_research(session_id, key, proposal.head.revision_id, development_json=json.dumps(payload))
+        st.rerun()
+    with st.form(f"research_costs_{key}_{proposal.head.revision_id}"):
+        costs = []
+        names = ("spread", "commission", "swap", "slippage")
+        for name in names:
+            existing = next((c for c in development.transaction_costs if c.name and c.name.casefold() == name), None)
+            value = st.text_input(name.capitalize() + " value", value=str(existing.value) if existing and existing.value is not None else "")
+            unit = st.text_input(name.capitalize() + " unit", value=existing.unit if existing and existing.unit else "")
+            source = st.text_input(name.capitalize() + " source / assumption", value=existing.definition if existing and existing.definition else "")
+            costs.append((name, value, unit, source))
+        save_costs = st.form_submit_button("Save cost assumptions revision")
+    if save_costs:
+        payload = development.model_dump(mode="json")
+        retained = [c.model_dump(mode="json") for c in development.transaction_costs if not c.name or c.name.casefold() not in names]
+        try:
+            payload["transaction_costs"] = retained + [
+                {"name": name, "value": json.loads(value) if value else None, "unit": unit or None, "definition": source or None}
+                for name, value, unit, source in costs]
+        except ValueError:
+            raise ValueError("RESEARCH_COST_VALUE_INVALID") from None
+        orchestrator.develop_goal_research(session_id, key, proposal.head.revision_id, development_json=json.dumps(payload))
+        st.rerun()
+    view = orchestrator.inspect_goal_historical_data(session_id)
+    st.text(f"{view['status']} | IS/OOS: {view['is_oos']}")
+    st.json({"trading_cost_readiness": view["costs"]})
+    for blocker in view["blockers"]:
+        st.warning(blocker)
+    for report in view["requests"]:
+        request_id = report["request_id"]
+        suffix = f"{key}_{proposal.head.revision_id}_{request_id}"
+        with st.expander(f"{report['request']['export']['canonical_symbol']} / {report['request']['export']['timeframe']} historical input", expanded=True):
+            st.json(report)
+            if report["acquisition"] != "ACQUIRED":
+                confirmed = st.checkbox("I request this exact read-only DEMO historical export", key="history_acquire_confirm_" + suffix)
+                if st.button("Acquire historical DEMO data", disabled=not confirmed, key="history_acquire_" + suffix):
+                    orchestrator.acquire_goal_history(session_id, key, proposal.head.revision_id, request_id,
+                                                      retry=report["acquisition"] != "NOT_ACQUIRED")
+                    st.rerun()
+            elif report["approval"] == "NOT_APPROVED":
+                approved = st.checkbox("I approve only this exact dataset and checksum for read-only research", key="history_approve_confirm_" + suffix)
+                source_eligible = isinstance(report["coverage"], dict) and report["coverage"].get("status") == "VERIFIED"
+                if st.button("Approve dataset source and verify R2", disabled=not approved or not source_eligible, key="history_approve_" + suffix):
+                    orchestrator.approve_goal_history(session_id, key, proposal.head.revision_id, request_id, report["manifest_sha256"])
+                    st.rerun()
+            if report["approval"] == "SOURCE_APPROVED_ONLY":
+                if report.get("R2", {}).get("reference_status") != "VALIDATED":
+                    if st.button("Reverify R2 for current revision", key="history_reverify_" + suffix):
+                        orchestrator.approve_goal_history(session_id, key, proposal.head.revision_id, request_id, report["manifest_sha256"])
+                        st.rerun()
+                if proposal.review_status(proposal.head.revision_id) == "READY_FOR_REVIEW":
+                    reviewed = st.checkbox("I accept this exact research revision for the next research stage only", key="history_review_confirm_" + suffix)
+                    if st.button("Accept research revision", disabled=not reviewed, key="history_review_" + suffix):
+                        orchestrator.review_goal_research(session_id, key, proposal.head.revision_id)
+                        st.rerun()
+                if st.button("Prepare IS/OOS input package", key="history_prepare_" + suffix,
+                             disabled=bool(report["blockers"]) or proposal.review_status(proposal.head.revision_id) != "ACCEPTED_FOR_NEXT_RESEARCH_STAGE"):
+                    orchestrator.prepare_goal_evaluation_input(session_id, key, proposal.head.revision_id, request_id)
+                    st.rerun()
 
 
 def _render_research_readiness(orchestrator) -> None:

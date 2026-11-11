@@ -45,6 +45,12 @@ class MT5BridgeHandler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         parsed = urlparse(self.path)
         try:
+            if parsed.path == "/research/history/export":
+                payload = self._read_json_body()
+                token = self.headers.get("X-MT5-Bridge-Execution-Token", "")
+                response, status = _research_history_response(payload, token)
+                self._send(response, status=status)
+                return
             if parsed.path == "/execution/write-skeleton/check":
                 self._discard_request_body()
                 self._send(_blocked_write_skeleton_response())
@@ -167,6 +173,34 @@ def _lifecycle_snapshot_response(payload, provided_token: str):
 
     end = datetime.now(timezone.utc)
     return CLIENT.lifecycle_snapshot(end - timedelta(seconds=window), end, tags), 200
+
+
+def _research_history_response(payload, provided_token: str):
+    if not _authenticated(provided_token, os.getenv("MT5_BRIDGE_EXECUTION_TOKEN", "")):
+        return {"status": "BLOCKED", "reason": "AUTHENTICATION_FAILED"}, 401
+    from base64 import b64encode
+    from dataclasses import fields
+    from src.services.trading.research.historical_dataset import HistoricalDataRequest
+    from tools.mt5_bridge.export_research_history import export_history
+
+    try:
+        if set(payload) != {field.name for field in fields(HistoricalDataRequest)} or payload.get("kind") != "bars":
+            raise ValueError("HISTORICAL_REQUEST_INVALID")
+        request = HistoricalDataRequest(**payload)
+        folder, _ = export_history(request)
+        data = (folder / "data.jsonl").read_bytes()
+        if len(data) > 32 * 1024 * 1024:
+            raise ValueError("RESEARCH_EXPORT_TOO_LARGE")
+        return {"status": "EXPORTED", "execution_allowed": False,
+                "manifest": (folder / "manifest.json").read_text(encoding="utf-8"),
+                "data_base64": b64encode(data).decode("ascii")}, 200
+    except (ValueError, TypeError, OSError, RuntimeError) as exc:
+        # Fixed vocabulary only: exporter errors must not leak terminal paths or account data.
+        safe = {"DEMO_ACCOUNT_REQUIRED", "ACCOUNT_CHANGED_DURING_EXPORT", "MT5_TERMINAL_DISCONNECTED",
+                "MT5_INITIALIZATION_UNAVAILABLE", "BROKER_SYMBOL_MAPPING_MISMATCH", "BROKER_SYMBOL_UNAVAILABLE",
+                "REQUEST_INCLUDES_UNCOMPLETED_HISTORY", "HISTORICAL_REQUEST_INVALID", "RESEARCH_EXPORT_TOO_LARGE"}
+        reason = str(exc) if str(exc) in safe else "RESEARCH_HISTORY_EXPORT_FAILED"
+        return {"status": "BLOCKED", "reason": reason, "execution_allowed": False}, 400
 
 def _redact_payload(payload):
     if isinstance(payload, dict):

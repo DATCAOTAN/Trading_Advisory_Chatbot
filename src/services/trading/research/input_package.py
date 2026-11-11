@@ -120,3 +120,48 @@ def prepare_research_input(root: Path, expected_binding: dict, *, now: datetime)
     if _local(binding_path).read_bytes() != binding_bytes or _local(snapshot).read_bytes() != proposal_bytes:
         raise ValueError("RESEARCH_INPUT_APPROVAL_CHANGED")
     return _publish(root / "inputs", payload)
+
+
+def prepare_evaluation_input(root: Path, proposal: ResearchProposal, request, source: ApprovedHistoricalSource, *, now: datetime) -> Path:
+    """Partition approved real observations; do not simulate signals, fills or performance."""
+    from .data_integration import historical_requests, inspect_historical_data
+
+    if proposal.review_status(proposal.head.revision_id) != ACCEPTED:
+        raise ValueError("RESEARCH_INPUT_REVISION_NOT_ACCEPTED")
+    if request not in historical_requests(proposal)[0]:
+        raise ValueError("RESEARCH_INPUT_REVISION_MISMATCH")
+    reference = next((item for item in proposal.head.content.evidence if item.evidence_ref == source.folder.name), None)
+    if reference is None or reference.status != "VALIDATED":
+        raise ValueError("RESEARCH_REVISION_EVIDENCE_MISMATCH")
+    proof = HistoricalEvidenceVerifier(proposal.scope, (source,)).inspect(
+        proposal, revision_id=proposal.head.revision_id, reference=reference, now=now)
+    if proof.outcome != "VERIFIED_FOR_DECLARED_SCOPE":
+        raise ValueError(proof.reason)
+    approval = {"dataset_id": source.folder.name, "manifest_sha256": source.manifest_checksum,
+                "scope": proposal.scope.model_dump(mode="json"), "purpose": "READ_ONLY_HISTORICAL_RESEARCH"}
+    report = inspect_historical_data(root, proposal, request,
+        {"status": "ACQUIRED", **approval, "source_approval": approval})
+    if report["blockers"]:
+        raise ValueError(report["blockers"][0])
+    manifest, rows = load_dataset(_local(source.folder), expected_manifest_checksum=source.manifest_checksum)
+    first, split, last = (int(utc_value.timestamp()) for utc_value in (
+        datetime.fromisoformat(request.start), datetime.fromisoformat(request.split), datetime.fromisoformat(request.end)))
+    step = timeframe_duration_seconds(request.export.timeframe)
+    partitions = {}
+    for name, start, end in (("IS", first, split), ("OOS", split, last)):
+        selected = [{field: row[field] for field in request.fields} for row in rows if start <= row["time"] < end]
+        context = [{field: row[field] for field in request.fields} for row in rows
+                   if start - request.warmup * step <= row["time"] < start]
+        partitions[name] = {"start_inclusive": start, "end_exclusive": end,
+                            "rows": selected, "warmup_context_not_scored": context, "row_count": len(selected)}
+    payload = canonical_bytes({
+        "schema_version": "r1-evaluation-input/v1", "execution_allowed": False,
+        "proposal_id": proposal.proposal_id, "revision_id": proposal.head.revision_id,
+        "proposal_sha256": checksum(proposal.to_json().encode()), "specification_id": proposal.head.content.development.specification.specification_id,
+        "dataset_id": manifest["dataset_id"], "manifest_sha256": source.manifest_checksum,
+        "data_sha256": manifest["data_checksum"], "source": manifest["source"],
+        "scope": proposal.scope.model_dump(mode="json"), "fields": request.fields,
+        "timestamp_encoding": "UTC_UNIX_SECONDS", "costs": report["costs"], "partitions": partitions,
+        "research_computation_authorized": False, "strategy_evaluated": False,
+    })
+    return _publish(root / "inputs", payload, prefix="research_evaluation_input")
