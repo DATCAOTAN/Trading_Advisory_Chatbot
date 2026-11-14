@@ -1,6 +1,6 @@
 #property strict
 #property service
-#property version "1.30"
+#property version "1.40"
 #include "G4ImportPins.mqh"
 
 input bool ApproveImport=false;
@@ -231,6 +231,52 @@ bool Configure()
    return true;
 }
 
+struct G4ReadbackComparison
+{
+   int flag_changes;
+   int volume_changes;
+   int generated_bars;
+   int boundary_ticks;
+};
+
+bool CompareHistory(MqlRates &bars[],MqlTick &ticks[],MqlRates &actual_bars[],MqlTick &actual_ticks[],G4ReadbackComparison &comparison)
+{
+   comparison.flag_changes=0; comparison.volume_changes=0;
+   comparison.generated_bars=0; comparison.boundary_ticks=0;
+   int nb=ArraySize(actual_bars),nt=ArraySize(actual_ticks);
+   if(ArraySize(bars)!=G4_BARS || ArraySize(ticks)!=G4_TICKS || nt!=G4_TICKS
+      || (nb!=G4_BARS && nb!=G4_BARS+1)) { Print("G4_VERIFY_FAIL counts outside source/boundary scope"); return false; }
+   for(int i=0;i<G4_BARS;i++)
+      if(actual_bars[i].time!=bars[i].time || actual_bars[i].open!=bars[i].open || actual_bars[i].high!=bars[i].high
+         || actual_bars[i].low!=bars[i].low || actual_bars[i].close!=bars[i].close
+         || actual_bars[i].tick_volume!=bars[i].tick_volume || actual_bars[i].real_volume!=bars[i].real_volume
+         || actual_bars[i].spread!=bars[i].spread) { PrintFormat("G4_VERIFY_FAIL source bar index=%d",i); return false; }
+   datetime boundary=bars[G4_BARS-1].time+60;
+   for(int i=0;i<nt;i++)
+   {
+      if(actual_ticks[i].time!=ticks[i].time || actual_ticks[i].time_msc!=ticks[i].time_msc
+         || actual_ticks[i].bid!=ticks[i].bid || actual_ticks[i].ask!=ticks[i].ask || actual_ticks[i].last!=ticks[i].last)
+      { PrintFormat("G4_VERIFY_FAIL tick index=%d",i); return false; }
+      datetime minute=ticks[i].time-ticks[i].time%60;
+      if(minute<bars[0].time || minute>bars[G4_BARS-1].time)
+      {
+         if(minute!=boundary) { Print("G4_VERIFY_FAIL unapproved tick-only minute"); return false; }
+         comparison.boundary_ticks++;
+      }
+      if(actual_ticks[i].flags!=ticks[i].flags) comparison.flag_changes++;
+      if(actual_ticks[i].volume!=ticks[i].volume || actual_ticks[i].volume_real!=ticks[i].volume_real) comparison.volume_changes++;
+   }
+   if(nb==G4_BARS+1)
+   {
+      if(actual_bars[G4_BARS].time!=boundary || comparison.boundary_ticks==0)
+      { Print("G4_VERIFY_FAIL extra bar lacks exact boundary/source ticks"); return false; }
+      comparison.generated_bars=1;
+      PrintFormat("G4_VERIFY_GENERATED_BAR time=%I64d source_ticks=%d origin=TICK_FORMED_BOUNDARY; OHLC/volume/spread NOT_SOURCE_BAR_EQUALITY",
+         (long)actual_bars[G4_BARS].time,comparison.boundary_ticks);
+   }
+   return true;
+}
+
 bool Roundtrip(MqlRates &bars[],MqlTick &ticks[])
 {
    MqlRates actual_bars[]; MqlTick actual_ticks[];
@@ -242,22 +288,15 @@ bool Roundtrip(MqlRates &bars[],MqlTick &ticks[])
    ResetLastError();
    int nt=CopyTicksRange(G4_SYMBOL,actual_ticks,COPY_TICKS_ALL,0,(ulong)LONG_MAX);
    int ticks_error=GetLastError();
-   if(nb!=G4_BARS || nt!=G4_TICKS) { PrintFormat("G4_IMPORT_FAIL readback bars=%d expected=%d error=%d ticks=%d expected=%d error=%d",
+   if(nb<0 || nt<0) { PrintFormat("G4_IMPORT_FAIL readback bars=%d expected=%d error=%d ticks=%d expected=%d error=%d",
       nb,G4_BARS,bars_error,nt,G4_TICKS,ticks_error); return false; }
-   for(int i=0;i<nb;i++)
-      if(actual_bars[i].time!=bars[i].time || actual_bars[i].open!=bars[i].open || actual_bars[i].high!=bars[i].high
-         || actual_bars[i].low!=bars[i].low || actual_bars[i].close!=bars[i].close
-         || actual_bars[i].tick_volume!=bars[i].tick_volume || actual_bars[i].real_volume!=bars[i].real_volume
-         || actual_bars[i].spread!=bars[i].spread) { PrintFormat("G4_IMPORT_FAIL bar index=%d",i); return false; }
-   int flag_changes=0,volume_changes=0;
-   for(int i=0;i<nt;i++)
-   {
-      if(actual_ticks[i].time!=ticks[i].time || actual_ticks[i].time_msc!=ticks[i].time_msc
-         || actual_ticks[i].bid!=ticks[i].bid || actual_ticks[i].ask!=ticks[i].ask || actual_ticks[i].last!=ticks[i].last)
-      { PrintFormat("G4_IMPORT_FAIL tick index=%d",i); return false; }
-      if(actual_ticks[i].flags!=ticks[i].flags) flag_changes++;
-      if(actual_ticks[i].volume!=ticks[i].volume || actual_ticks[i].volume_real!=ticks[i].volume_real) volume_changes++;
-   }
+   G4ReadbackComparison comparison;
+   if(!CompareHistory(bars,ticks,actual_bars,actual_ticks,comparison)) return false;
+#ifdef G4_VERIFICATION_ONLY
+   PrintFormat("G4_VERIFY_DATA_MATCH source_bars=%d native_bars=%d ticks=%d generated_boundary_bars=%d flags_changed=%d volume_changed=%d; SOURCE_BAR_FIELDS_AND_TICK_TIME_BID_ASK_LAST_EQUAL; flags/volume NOT_SOURCE_EQUALITY; financial/Tester NOT_CERTIFIED",
+      G4_BARS,nb,nt,comparison.generated_bars,comparison.flag_changes,comparison.volume_changes);
+   return true;
+#else
    string output=folder+"roundtrip.csv";
    if(FileIsExist(output)) { Print("G4_IMPORT_FAIL output exists; preserve evidence"); return false; }
    int f=FileOpen(output,FILE_WRITE|FILE_CSV|FILE_ANSI,',');
@@ -266,10 +305,13 @@ bool Roundtrip(MqlRates &bars[],MqlTick &ticks[])
    for(int i=0;i<nt;i++) FileWrite(f,"TICK",i,actual_ticks[i].time,actual_ticks[i].time_msc,
       DoubleToString(actual_ticks[i].bid,3),DoubleToString(actual_ticks[i].ask,3),DoubleToString(actual_ticks[i].last,3),
       actual_ticks[i].flags,actual_ticks[i].volume,actual_ticks[i].volume_real);
-   FileWrite(f,"MATCH",nb,nt,"FLAGS_NOT_SOURCE_EQUALITY",flag_changes,"VOLUME_UNAVAILABLE_PADDING",volume_changes);
+   FileWrite(f,"MATCH",G4_BARS,nt,"NATIVE_BAR_COUNT",nb,"GENERATED_BOUNDARY_BARS",comparison.generated_bars,
+      "FLAGS_NOT_SOURCE_EQUALITY",comparison.flag_changes,"VOLUME_UNAVAILABLE_PADDING",comparison.volume_changes);
    FileClose(f);
-   PrintFormat("G4_IMPORT_ROUNDTRIP_PASS bars=%d ticks=%d; flags/volume NOT original equality; no financial certification",nb,nt);
+   PrintFormat("G4_IMPORT_ROUNDTRIP_PASS source_bars=%d native_bars=%d ticks=%d generated_boundary_bars=%d; flags/volume NOT original equality; no financial certification",
+      G4_BARS,nb,nt,comparison.generated_bars);
    return true;
+#endif
 }
 
 void OnStart()
@@ -297,6 +339,13 @@ void OnStart()
       observed_days|=(1<<stamp.day_of_week);
    }
    if(observed_days!=G4_QUOTE_DAYS_MASK) { Print("G4_IMPORT_FAIL quote day scope mismatch"); return; }
+#ifdef G4_VERIFICATION_ONLY
+   bool custom=false;
+   if(!SymbolExist(G4_SYMBOL,custom) || !custom) { Print("G4_VERIFY_FAIL existing custom symbol required; no writes"); return; }
+   if(bars[G4_BARS-1].time+60!=G4_BOUNDARY_BAR_TIME) { Print("G4_VERIFY_FAIL pinned boundary mismatch"); return; }
+   if(!VerifyConfiguration()) { Print("G4_VERIFY_FAIL data configuration readback; no writes"); return; }
+   if(!Roundtrip(bars,ticks)) Print("G4_VERIFY_INCONCLUSIVE; no writes or retries; financial/Tester NOT_CERTIFIED");
+#else
    bool custom=false;
    if(SymbolExist(G4_SYMBOL,custom))
    {
@@ -335,4 +384,5 @@ void OnStart()
    if(!SymbolSelect(G4_SYMBOL,true)) { Print("G4_IMPORT_FAIL select"); return; }
    if(!VerifyConfiguration()) { Print("G4_IMPORT_FAIL custom specification readback mismatch"); return; }
    if(!Roundtrip(bars,ticks)) PrintFormat("G4_IMPORT_INCONCLUSIVE error=%d; no Tester authorization",GetLastError());
+#endif
 }

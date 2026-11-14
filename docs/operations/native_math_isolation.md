@@ -264,3 +264,113 @@ and volume changes are disclosed separately, not source-equality evidence.
 Read the scoped Experts log and MQL5/Files/G4Import_Rf0386d9a/roundtrip.csv.
 Data import PASS does not establish financial fidelity or Tester acceptance.
 Native compilation/import/readback remain NOT_RUN at packaging time.
+
+## G4_NATIVE_DATA_READBACK_PASS / Next Bounded Tester Capture (2026-11-15)
+
+The operator reports the Experts checkpoint in the existing offline G3 guest:
+G4_DATA_CONFIGURATION_READBACK_MATCH;
+G4_VERIFY_GENERATED_BAR time=1793811600 source_ticks=394;
+G4_VERIFY_DATA_MATCH source_bars=245 native_bars=246 ticks=63156.
+Record G4_NATIVE_DATA_READBACK_PASS only for the verifier's equality scope:
+all 245 source-bar fields and ordered tick time/time_msc/Bid/Ask/Last.
+Generated-bar OHLC and tick flags/volume are not original-source equality.
+This is operator-provided Experts observation, NOT a HOST-hashed raw log or
+EX5 identity. No new screenshot was independently acquired in this task.
+Raw logs and native binary hashes have not been transferred; no trusted
+receipt or EX5 checksum is fabricated. Do not re-import or rerun the verifier.
+
+### Gates
+
+| Gate | Current evidence / remaining condition |
+| --- | --- |
+| Native data | Scoped operator-observed PASS above; HOST raw evidence pending |
+| G3 math | 58 BUY + 58 SELL + 30 numeric PASS reported in-guest, including real_16; no new run or trusted receipt |
+| Decimal source | Capture uses 5cddea29...c569465, identical to the existing G3 pinned library; not proof of a new EA binary |
+| Replay | Approved artifacts contain 290 observations, 5 ENTRY/5 EXIT; capture compares replay, not independent native signal computation |
+| Clock | Custom-symbol archive epoch identity; does not certify historical broker UTC offset or rollover |
+| IS/OOS | Continuous 14:35-17:00 UTC, split 16:00 on 2026-11-04; diagnostic, not independent OOS holdout |
+| Fills/costs | NOT evaluated by CAPTURE_ONLY; FULL_BACKTEST remains BLOCKED |
+| Financial fidelity | Margin XAU/USD mismatch and historical contract/swap uncertainty remain; selected commission/slippage/deposit/leverage are assumptions, not broker facts |
+| Lifecycle | Last signal-based entry at 16:58 may remain open; native SL/TP/exit lifecycle unknown; no forced close or realized P&L inferred |
+| Report admission | Existing trusted receipt, binary/toolchain/run approval/raw report pins and FULL_BACKTEST gates remain mandatory; data PASS cannot admit a performance report |
+
+### One prepared run, not authorized or executed
+
+Existing capture package de82aefd...f96a91b targeted the old G4CAP alias.
+`bind_capture_import` now binds it through the exact approved import manifest
+45415755...8c458ab to XAUUSD_G4Rf0386d9a, retaining original revision/scope,
+source bytes, schedule observations, timestamps and calculation versions.
+It changes only transport alias/job binding and INI expert location; native
+attestation remains false. No proposal/source approval or trading permission
+is written. Private content-addressed package:
+`data/research/results/native_capture_package_06e159f05ff4166f3f27761ff7216cfdf62530c5fe8ee37fd950240c22abd15c.json`.
+SHA-256 equals its filename suffix; strategy SHA-256:
+`153ef579bb13015869af5b81c4f97576f60d4196f3d4bd5b41411b5f865d4e53`.
+It retains proposal_e0d7793097ab46a127a4ecf1439a0dbccb0e18426fd8a2b8441d715cc2cd3823 /
+revision_593b5723e2b58a64f666c1be5c8b543b2fb28918feb73fe092e60890d73987bb;
+this transport binding does not grant/reaffirm approval for a different head.
+Native inputs only: `data/research/mt5_tester/g4_capture_153ef579bb13/`
+contains SignalReplay.mq5, ParityDecimal.mqh, SignalReplay.set,
+replay_schedule.csv and capture.ini; no market history needs re-import.
+Read-only ISO `data/research/mt5_tester/g4_capture_153ef579bb13.iso`, SHA-256
+`2c1a737b73030995fb54b8bb5285ea47feb6783dd7d090130eb6592548500727`,
+contains exactly those five files; existing IMAPI builder reused, 5/5 entries
+read-back/hash matched. It carries no execution authorization.
+
+Source SHA-256: 4b935dcb71551b9359c2a1493111d01d315f7ed43cbd824728c62a98dc3f7e16.
+Decimal SHA-256: 5cddea29b14501bc2fe1988448eae5f46de9b2cb9ce1962153c528bc5c569465.
+Schedule SHA-256: 0b9ab4b1d85514604e8e18c3beeebcf9515b54edcea6d7b2ac2903fe212974ce.
+INI SHA-256: ecaabd32e15f7012c1c17673d274033722c14fe0aef68aae49a6664ee7fbc4b9.
+Prepared SET SHA-256: 2a054d5d2531dd693f63d5fcea2c0a230bcd0afb00ff991076763263947ef42b.
+Prepared SET has ApprovedResearchReplay=false and CaptureOnly=true.
+Expected capture is 52,073 ticks from 14:35 through the first tick at/after
+17:00, plus all 290 observations and both boundaries. This is intentionally
+not all 63,156 imported ticks. No fill, deal, cost, P&L or equity rows allowed.
+
+Operator procedure, ONLY after a separate explicit approval of this exact
+CAPTURE_ONLY run (not FULL_BACKTEST), at most one session and no auto retry:
+
+1. Preserve G3 zero-NIC/all-six-services-disabled isolation and existing custom
+   symbol/history. The approval must name the exact package/revision above;
+   reject any revised scope or revoked source/research approval. Stage only
+   the five pinned native inputs through existing
+   read-only media. No VM/network/profile/broker changes, no new import.
+2. Native processes must be closed. Create NEW
+   MQL5/Experts/G4Capture_153ef579bb13; copy source/library there. Copy schedule
+   to MQL5/Files/replay_schedule.csv and SET to MQL5/Profiles/Tester/SignalReplay.set
+   only if absent. Stop rather than overwriting conflicting files. Stop if
+   any existing replay_result.csv is found under the portable root's Tester
+   agents; preserve it. Existing G3 runner's agent path is
+   Tester/Agent-127.0.0.1-*/MQL5/Files. No other terminal/profile is permitted.
+3. Verify existing toolchain against G3 manifest references (not a rerun of G3):
+   MetaEditor64.exe cf2750bde55d98a1f3b4e56bcdd4f59300d0cff5caa6760985f7ef2c2cc12229;
+   terminal64.exe bf3b5ad0ac2d5da6a4e1a813bf8fc830fde9f0837850cc85776a305bd16dd495;
+   metatester64.exe 5033d9d45d669cebd735e8a6be20b54d74b75274f885c9a0e48e52d872104efb.
+   Compile this exact SignalReplay source, require 0 errors/0 warnings, record
+   new EX5 hash and toolchain/build identities; do not invent an expected EX5.
+4. Preserve the prepared SET. After authorization only, change the GUEST
+   runtime copy to ApprovedResearchReplay=true, CaptureOnly=true and record
+   its actual SHA-256. This is run authorization, not live trading authority.
+   Record package pin, compile log, EX5/toolchain pins and scope together.
+5. Use the pinned capture.ini: Model=4, local agent only, remote/cloud off,
+   optimization/forward off, ReplaceReport=0, no account login. Dates span
+   Nov 4-Nov 5; the schedule enforces the exact intraday capture interval.
+   In the existing G3 root, the one authorized launch is:
+   `terminal64.exe /portable /config:<absolute path to capture.ini>`.
+   Do not launch until all preceding gates and separate approval pass. Stop
+   on unsupported settings, init failure or unexpected broker connection.
+6. Reuse the existing runner's WaitForExit timeout pattern with a 180-second
+   bound, NOT the g3_math_once script or math run. If exceeded, stop the
+   GUEST research process only, retain partial outputs, do not retry. Preserve
+   raw Tester/Experts/agent logs, replay_result.csv, report and hashes without
+   rewriting them. No quarantine or new receipt system is introduced here.
+7. After authorized output transfer, call existing normalize_capture with
+   the exact new package and raw CSV. Require every timestamp/Bid/Ask, signal
+   row and split/end marker to match. Missing/generated ticks, reordered or
+   financial rows, incomplete output or mismatched pins mean INCONCLUSIVE.
+   CAPTURE_COMPLETE plus normalized MATCH is non-financial replay evidence,
+   not a financial result, independent strategy parity or trusted receipt.
+
+Current authorization: NOT_GRANTED for Tester. No VM, MetaEditor, Tester,
+verifier or import was executed. Next native operation is exactly this
+capture-only pilot, after the bounded scope and remaining binary gates pass.

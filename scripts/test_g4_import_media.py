@@ -233,7 +233,7 @@ def configuration_stub_program(tmp_path_factory):
     if compiler is None:
         pytest.skip("C++ compiler unavailable for offline MQL-compatible control-flow checks")
     source = media.RESEARCH_SOURCE.read_text()
-    functions = source.split("bool SetIntegerProperty(", 1)[1].split("bool Roundtrip(", 1)[0]
+    functions = source.split("bool SetIntegerProperty(", 1)[1].split("struct G4ReadbackComparison", 1)[0]
     properties = sorted(set(re.findall(r"\bSYMBOL_[A-Z_]+\b", functions)))
     constants = "enum {" + ",".join(properties) + "};\n"
     program = r'''
@@ -335,6 +335,251 @@ int main(int argc,char** argv){
 def test_actual_configuration_control_flow_with_offline_api_stubs(configuration_stub_program, scenario):
     completed = subprocess.run([str(configuration_stub_program), scenario], capture_output=True, text=True, timeout=5)
     assert completed.returncode == 0, scenario + completed.stdout + completed.stderr
+
+
+@pytest.fixture(scope="module")
+def history_comparison_program(tmp_path_factory):
+    compiler = shutil.which("g++")
+    if compiler is None:
+        pytest.skip("C++ compiler unavailable for actual-source offline history comparison")
+    source = media.RESEARCH_SOURCE.read_text()
+    comparison = "struct G4ReadbackComparison" + source.split("struct G4ReadbackComparison", 1)[1].split("bool Roundtrip(", 1)[0]
+    # Only map MQL array-reference syntax to C++ vectors; retain the actual comparison logic.
+    comparison = re.sub(r"(MqlRates|MqlTick) &(\w+)\[\]", r"std::vector<\1> &\2", comparison)
+    program = r'''
+#include <cassert>
+#include <string>
+#include <vector>
+using datetime=long long;
+const int G4_BARS=245,G4_TICKS=63156;
+struct MqlRates { datetime time; double open=10,high=11,low=9,close=10; long tick_volume=1,real_volume=0; int spread=240; };
+struct MqlTick { datetime time,time_msc; double bid=10,ask=10.2,last=0; int flags=2; long volume=0; double volume_real=0; };
+template<class T> int ArraySize(std::vector<T>& a){return (int)a.size();}
+template<class... T> void PrintFormat(const char*,T...){}
+void Print(const char*){}
+COMPARISON
+int main(int argc,char** argv){
+    assert(argc==2); std::string scenario=argv[1];
+    std::vector<MqlRates> bars;
+    for(int i=0;i<G4_BARS;i++) bars.push_back({1793796900LL+i*60});
+    datetime boundary=bars.back().time+60;
+    std::vector<MqlTick> ticks;
+    for(int i=0;i<G4_TICKS;i++){
+        datetime ms=i<G4_TICKS-394 ? 1793800800000LL+i*170LL : boundary*1000+(i-(G4_TICKS-394))*150LL;
+        ticks.push_back({ms/1000,ms});
+    }
+    auto actual_bars=bars;
+    if(scenario!="exact_source_only") actual_bars.push_back({boundary});
+    auto actual_ticks=ticks;
+    if(scenario=="wrong_extra_time") actual_bars.back().time+=60;
+    if(scenario=="two_extra_bars") actual_bars.push_back({boundary+60});
+    if(scenario=="missing_bar") actual_bars.erase(actual_bars.begin()+3);
+    if(scenario=="reordered_bars") std::swap(actual_bars[0],actual_bars[1]);
+    if(scenario=="duplicate_bar") actual_bars[1]=actual_bars[0];
+    if(scenario=="missing_tick") actual_ticks.pop_back();
+    if(scenario=="extra_tick") actual_ticks.push_back(actual_ticks.back());
+    if(scenario=="reordered_ticks") std::swap(actual_ticks[0],actual_ticks[1]);
+    if(scenario=="duplicate_tick") actual_ticks[1]=actual_ticks[0];
+    if(scenario=="bar_time") actual_bars[100].time++;
+    if(scenario=="bar_open") actual_bars[100].open++;
+    if(scenario=="bar_high") actual_bars[100].high++;
+    if(scenario=="bar_low") actual_bars[100].low++;
+    if(scenario=="bar_close") actual_bars[100].close++;
+    if(scenario=="bar_tick_volume") actual_bars[100].tick_volume++;
+    if(scenario=="bar_real_volume") actual_bars[100].real_volume++;
+    if(scenario=="bar_spread") actual_bars[100].spread++;
+    if(scenario=="tick_time") actual_ticks[100].time++;
+    if(scenario=="tick_time_msc") actual_ticks[100].time_msc++;
+    if(scenario=="tick_bid") actual_ticks[100].bid++;
+    if(scenario=="tick_ask") actual_ticks[100].ask++;
+    if(scenario=="tick_last") actual_ticks[100].last++;
+    if(scenario=="normalized_flags_volume"){actual_ticks[100].flags++;actual_ticks[100].volume++;}
+    if(scenario=="no_source_boundary_ticks"){
+        for(int i=G4_TICKS-394;i<G4_TICKS;i++){
+            ticks[i].time_msc=(boundary-60)*1000+(i-(G4_TICKS-394))*150LL;
+            ticks[i].time=ticks[i].time_msc/1000;
+        }
+        actual_ticks=ticks;
+    }
+    if(scenario=="another_tick_only_minute"){
+        ticks.back().time+=60;ticks.back().time_msc+=60000;actual_ticks=ticks;
+    }
+    G4ReadbackComparison report;
+    bool ok=CompareHistory(bars,ticks,actual_bars,actual_ticks,report);
+    bool expected=scenario=="exact_source_only" || scenario=="source_plus_boundary" || scenario=="normalized_flags_volume";
+    assert(ok==expected);
+    if(ok){assert(report.boundary_ticks==394); assert(report.generated_bars==(scenario=="exact_source_only" ? 0 : 1));}
+    if(scenario=="normalized_flags_volume"){assert(report.flag_changes==1 && report.volume_changes==1);}
+}
+'''.replace("COMPARISON", comparison)
+    directory = tmp_path_factory.mktemp("g4_readback_stubs")
+    fixture, binary = directory / "comparison.cpp", directory / "comparison.exe"
+    fixture.write_text(program, encoding="ascii")
+    compiled = subprocess.run([compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", str(fixture), "-o", str(binary)],
+                              capture_output=True, text=True, timeout=30)
+    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    return binary
+
+
+@pytest.mark.parametrize("scenario", [
+    "exact_source_only", "source_plus_boundary", "normalized_flags_volume", "wrong_extra_time", "two_extra_bars",
+    "missing_bar", "reordered_bars", "duplicate_bar", "missing_tick", "extra_tick", "reordered_ticks", "duplicate_tick",
+    "no_source_boundary_ticks", "another_tick_only_minute",
+    *["bar_" + field for field in ("time", "open", "high", "low", "close", "tick_volume", "real_volume", "spread")],
+    *["tick_" + field for field in ("time", "time_msc", "bid", "ask", "last")],
+])
+def test_actual_history_comparison_offline(history_comparison_program, scenario):
+    completed = subprocess.run([str(history_comparison_program), scenario], capture_output=True, text=True, timeout=5)
+    assert completed.returncode == 0, scenario + completed.stdout + completed.stderr
+
+
+def boundary_package(package):
+    # Controlled fixture: add a real-shaped boundary record, not evidence of native success.
+    changed = copy.deepcopy(package)
+    lines = changed["files"]["ticks.tsv"].splitlines(keepends=True)
+    lines[-1] = "2026.11.04\t17:00:00.000\t4000\t4000.24\t0\t0\n"
+    changed["files"]["ticks.tsv"] = "".join(lines)
+    records = changed["files"]["source_ticks.jsonl"].splitlines(keepends=True)
+    last = json.loads(records[-1])
+    last.update(time=1793811600, time_msc=1793811600000)
+    records[-1] = json.dumps(last) + "\n"
+    changed["files"]["source_ticks.jsonl"] = "".join(records)
+    changed["file_sha256"] = {n: checksum(v.encode()) for n, v in changed["files"].items()}
+    changed["strategy"]["ticks_tsv_sha256"] = changed["file_sha256"]["ticks.tsv"]
+    changed["strategy"]["tick_source"]["data_sha256"] = changed["file_sha256"]["source_ticks.jsonl"]
+    changed["strategy"]["custom_symbol"] = "G4CAP_" + changed["strategy"]["tick_source"]["data_sha256"][:12]
+    changed["strategy_sha256"] = checksum(canonical_bytes(changed["strategy"]))
+    return changed
+
+
+def test_prepare_verification_only_preserves_data_and_compiles_out_mutations(package, tmp_path):
+    changed = boundary_package(package)
+    raw = canonical_bytes(changed)
+    payload, original = media.prepare(raw, checksum(raw), recovery_mode="IMPORT")
+    for name, content in payload.items():
+        (tmp_path / name).write_bytes(content)
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    files, receipt = media.prepare_verification(tmp_path, checksum(payload["manifest.json"]))
+    assert set(files) == {"G4Verify.mq5", "G4ImportPins.mqh", "verification_manifest.json"}
+    assert receipt["allowed_tick_formed_bar_utc"] == "2026-11-04T17:00:00+00:00"
+    assert receipt["boundary_source_ticks"] == 1
+    assert receipt["data_mutation_allowed"] is False and receipt["financial_certification"] is False
+    assert b"#define G4_VERIFICATION_ONLY" in files["G4ImportPins.mqh"]
+    assert f'#define G4_SYMBOL "{original["custom_symbol"]}"'.encode() in files["G4ImportPins.mqh"]
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+    with pytest.raises(ValueError, match="MANIFEST_PIN_MISMATCH"):
+        media.prepare_verification(tmp_path, "0" * 64)
+    (tmp_path / "ticks.tsv").write_bytes(b"changed")
+    with pytest.raises(ValueError, match="MEDIA_PIN_MISMATCH"):
+        media.prepare_verification(tmp_path, checksum(payload["manifest.json"]))
+    compiler = shutil.which("g++")
+    if compiler is None:
+        pytest.skip("C++ preprocessor unavailable for read-only call-path check")
+    source = "\n".join(line for line in files["G4Verify.mq5"].decode().splitlines()
+                       if not line.startswith(("#property", "#include")))
+    preprocessed = subprocess.run([compiler, "-E", "-P", "-x", "c++", "-DG4_VERIFICATION_ONLY", "-"],
+                                 input=source, capture_output=True, text=True, timeout=10)
+    assert preprocessed.returncode == 0, preprocessed.stderr
+    start = preprocessed.stdout.split("void OnStart()", 1)[1]
+    roundtrip = preprocessed.stdout.split("bool Roundtrip(", 1)[1].split("void OnStart()", 1)[0]
+    for forbidden in ("CustomSymbol", "CustomRates", "CustomTicks", "SymbolSelect", "Configure()", "FileOpen", "FileWrite"):
+        assert forbidden not in start + roundtrip
+    assert "VerifyConfiguration()" in start and "CompareHistory(" in roundtrip
+
+
+@pytest.fixture
+def capture_import_case(package, tmp_path):
+    import csv
+    import io
+    changed = boundary_package(package)
+    strategy = changed["strategy"]
+    changed["capture"].update(end=1793811600, split=1793808000,
+        signals=[{"signal_time": 1793808120, "action": "ENTRY", "triggered": True}])
+    strategy.update(schema_version="r1-native-capture/v1", capture_sha256=checksum(canonical_bytes(changed["capture"])),
+                    source_sha256="", decimal_source_sha256="")
+    for name in ("SignalReplay.mq5", "ParityDecimal.mqh"):
+        changed["files"][name] = media.RESEARCH_SOURCE.with_name(name).read_text()
+    strategy["source_sha256"] = checksum(changed["files"]["SignalReplay.mq5"].encode())
+    strategy["decimal_source_sha256"] = checksum(changed["files"]["ParityDecimal.mqh"].encode())
+    changed["strategy_sha256"] = checksum(canonical_bytes(strategy))
+    capture = changed["capture"]
+    stream = io.StringIO(newline="")
+    csv.writer(stream, lineterminator="\n").writerows([
+        ["SIGNAL_CAPTURE_V1", changed["strategy_sha256"], "CONTINUOUS", strategy["custom_symbol"], 60,
+         capture["start"], capture["end"], capture["split"], 1], [1793808120, 0, "ENTRY", 1], ["END"]])
+    changed["files"]["replay_schedule.csv"] = stream.getvalue()
+    changed["files"]["SignalReplay.set"] = "ApprovedResearchReplay=false\nCaptureOnly=true\n"
+    changed["files"]["capture.ini"] = ("[Tester]\nSymbol=" + strategy["custom_symbol"] +
+        "\nExpert=SignalReplay.ex5\nModel=4\nUseLocal=1\nUseRemote=0\nUseCloud=0\nOptimization=0\nForwardMode=0\nReplaceReport=0\n")
+    changed["file_sha256"] = {n: checksum(v.encode()) for n, v in changed["files"].items()}
+    raw = canonical_bytes(changed)
+    files, manifest = media.prepare(raw, checksum(raw), recovery_mode="IMPORT")
+    # This fixture omits pre-start; the original source bars remain its own import bars.
+    manifest["original_bars_tsv_sha256"] = strategy["bars_tsv_sha256"]
+    files["manifest.json"] = canonical_bytes(manifest)
+    for name, content in files.items():
+        (tmp_path / name).write_bytes(content)
+    return raw, tmp_path, checksum(files["manifest.json"]), manifest
+
+
+def test_capture_alias_binding_preserves_research_and_no_execution(capture_import_case):
+    import csv
+    import io
+    raw, directory, manifest_pin, manifest = capture_import_case
+    before = {p.name: p.read_bytes() for p in directory.iterdir()}
+    original = json.loads(raw)
+    bound = media.bind_capture_import(raw, checksum(raw), directory, manifest_pin)
+    assert bound == media.bind_capture_import(raw, checksum(raw), directory, manifest_pin)
+    assert bound["capture"] == original["capture"]
+    assert bound["strategy"]["signal_request"] == original["strategy"]["signal_request"]
+    assert bound["strategy"]["custom_symbol"] == manifest["custom_symbol"]
+    assert bound["strategy"]["import_binding"]["native_execution_attested"] is False
+    for name in ("bars.tsv", "ticks.tsv", "source_ticks.jsonl", "SignalReplay.mq5", "ParityDecimal.mqh", "SignalReplay.set"):
+        assert bound["files"][name] == original["files"][name]
+    old_rows = list(csv.reader(io.StringIO(original["files"]["replay_schedule.csv"])))
+    rows = list(csv.reader(io.StringIO(bound["files"]["replay_schedule.csv"])))
+    assert rows[1:] == old_rows[1:] and rows[0][1] == bound["strategy_sha256"]
+    assert rows[0][3] == manifest["custom_symbol"]
+    assert "UseCloud=0" in bound["files"]["capture.ini"] and "Model=4" in bound["files"]["capture.ini"]
+    assert "Expert=G4Capture_" in bound["files"]["capture.ini"]
+    assert {p.name: p.read_bytes() for p in directory.iterdir()} == before
+
+
+@pytest.mark.parametrize("mutation,reason", [
+    ("package_pin", "PACKAGE_PIN"), ("manifest_pin", "MANIFEST_PIN"), ("data", "MEDIA_PIN"),
+    ("schedule", "BINDING_INVALID"), ("authority", "BINDING_INVALID"),
+    ("remote", "TESTER_CONFIG_INVALID"), ("enabled_default", "BINDING_INVALID"),
+])
+def test_capture_alias_binding_fails_closed(capture_import_case, mutation, reason):
+    raw, directory, manifest_pin, _ = capture_import_case
+    pin = checksum(raw)
+    if mutation == "package_pin":
+        pin = "0" * 64
+    elif mutation == "manifest_pin":
+        manifest_pin = "0" * 64
+    elif mutation == "data":
+        (directory / "ticks.tsv").write_bytes(b"changed")
+    else:
+        changed = json.loads(raw)
+        if mutation == "schedule":
+            changed["files"]["replay_schedule.csv"] += "extra\n"
+        elif mutation == "remote":
+            changed["files"]["capture.ini"] = changed["files"]["capture.ini"].replace("UseRemote=0", "UseRemote=1")
+        elif mutation == "enabled_default":
+            changed["files"]["SignalReplay.set"] = changed["files"]["SignalReplay.set"].replace("Replay=false", "Replay=true")
+        else:
+            changed["strategy"]["execution_allowed"] = True
+        changed["file_sha256"] = {n: checksum(v.encode()) for n, v in changed["files"].items()}
+        raw = canonical_bytes(changed)
+        pin = checksum(raw)
+        # Controlled fixture repinning reaches inner gates; never applied to real approval evidence.
+        manifest = json.loads((directory / "manifest.json").read_bytes())
+        manifest["capture_package_sha256"] = pin
+        manifest_bytes = canonical_bytes(manifest)
+        (directory / "manifest.json").write_bytes(manifest_bytes)
+        manifest_pin = checksum(manifest_bytes)
+    with pytest.raises(ValueError, match=reason):
+        media.bind_capture_import(raw, pin, directory, manifest_pin)
 
 
 def prestart_source(tmp_path, mutation=None):

@@ -1,10 +1,13 @@
 """Prepare inert, pinned G4 custom-symbol import media. Never invoke MT5."""
 import argparse
 import csv
+import configparser
+import copy
 from datetime import datetime, timezone
 from decimal import Decimal
 import io
 import json
+import re
 from pathlib import Path
 
 from src.services.trading.research.historical_dataset import HistoricalDataRequest, canonical_bytes, checksum, load_dataset
@@ -191,21 +194,150 @@ def prepare(package_bytes, expected_sha256, *, prestart_folder=None, prestart_ma
     return payload, manifest
 
 
+def prepare_verification(directory, expected_manifest_sha256):
+    """Pin a read-only helper to already-staged input files; never copy market data."""
+    directory = Path(directory)
+    raw = (directory / "manifest.json").read_bytes()
+    if checksum(raw) != expected_manifest_sha256:
+        raise ValueError("MANIFEST_PIN_MISMATCH")
+    manifest = json.loads(raw)
+    if (manifest["schema_version"] != "g4-custom-import-media/v1"
+            or manifest["native_execution_authorized"] is not False
+            or manifest["recovery"]["mode"] != "IMPORT"
+            or manifest["recovery"]["target_symbol"] != manifest["custom_symbol"]
+            or set(manifest["files"]) != ALLOWLIST):
+        raise ValueError("EXISTING_IMPORT_MEDIA_REQUIRED")
+    contents = {name: (directory / name).read_bytes() for name in ALLOWLIST}
+    if any(checksum(content) != manifest["files"][name] for name, content in contents.items()):
+        raise ValueError("MEDIA_PIN_MISMATCH")
+    bars = list(csv.reader(io.StringIO(contents["bars.tsv"].decode()), delimiter="\t"))[1:]
+    ticks = list(csv.reader(io.StringIO(contents["ticks.tsv"].decode()), delimiter="\t"))[1:]
+    def stamp(row):
+        return int(datetime.strptime(row[0] + " " + row[1][:8], "%Y.%m.%d %H:%M:%S")
+                   .replace(tzinfo=timezone.utc).timestamp())
+    bar_times = [stamp(row) for row in bars]
+    tick_minutes = [stamp(row) // 60 * 60 for row in ticks]
+    if not bar_times or not tick_minutes:
+        raise ValueError("SINGLE_SOURCE_TICK_BOUNDARY_REQUIRED")
+    boundary = bar_times[-1] + 60
+    if (len(bars) != manifest["bar_count"] or len(ticks) != manifest["tick_count"]
+            or any(b - a != 60 for a, b in zip(bar_times, bar_times[1:]))
+            or set(tick_minutes) - set(bar_times) != {boundary}):
+        raise ValueError("SINGLE_SOURCE_TICK_BOUNDARY_REQUIRED")
+    source = RESEARCH_SOURCE.read_bytes()
+    old_define = f'#define G4_IMPORT_SOURCE_SHA256 "{manifest["files"]["G4Import.mq5"]}"'
+    header = contents["G4ImportPins.mqh"].decode()
+    required_defines = [old_define, f'#define G4_SYMBOL "{manifest["custom_symbol"]}"',
+        f'#define G4_BARS {len(bars)}', f'#define G4_TICKS {len(ticks)}',
+        f'#define G4_BAR_PIN "{manifest["files"]["bars.tsv"]}"',
+        f'#define G4_TICK_PIN "{manifest["files"]["ticks.tsv"]}"',
+        '#define G4_CONFIGURATION_ONLY false']
+    if any(header.splitlines().count(line) != 1 for line in required_defines) or "G4_VERIFICATION_ONLY" in header:
+        raise ValueError("EXISTING_HEADER_BINDING_INVALID")
+    header = header.replace(old_define, f'#define G4_IMPORT_SOURCE_SHA256 "{checksum(source)}"')
+    header += f'\n#define G4_VERIFICATION_ONLY\n#define G4_BOUNDARY_BAR_TIME {boundary}\n'
+    payload = {"G4Verify.mq5": source, "G4ImportPins.mqh": header.encode()}
+    receipt = {"schema_version": "g4-existing-symbol-verification/v1",
+        "source_manifest_sha256": expected_manifest_sha256, "symbol": manifest["custom_symbol"],
+        "source_bar_count": len(bars), "source_tick_count": len(ticks),
+        "allowed_tick_formed_bar_utc": datetime.fromtimestamp(boundary, timezone.utc).isoformat(),
+        "allowed_tick_formed_bar_epoch": boundary, "boundary_source_ticks": tick_minutes.count(boundary),
+        "source_data_pins": {name: manifest["files"][name] for name in ("bars.tsv", "ticks.tsv", "source_ticks.jsonl")},
+        "data_mutation_allowed": False, "financial_certification": False,
+        "native_status": "NOT_RUN", "files": {name: checksum(content) for name, content in payload.items()}}
+    payload["verification_manifest.json"] = canonical_bytes(receipt)
+    return payload, receipt
+
+
+def bind_capture_import(package_bytes, expected_sha256, directory, manifest_sha256):
+    """Bind the existing capture contract to a pinned imported alias, not to financial authority."""
+    if checksum(package_bytes) != expected_sha256:
+        raise ValueError("CAPTURE_PACKAGE_PIN_MISMATCH")
+    _, readback = prepare_verification(directory, manifest_sha256)
+    manifest = json.loads((Path(directory) / "manifest.json").read_bytes())
+    package = json.loads(package_bytes)
+    strategy, files = package["strategy"], package["files"]
+    if (manifest["capture_package_sha256"] != expected_sha256
+            or not re.fullmatch(r"[A-Za-z0-9_.-]{1,31}", manifest["custom_symbol"])
+            or strategy.get("schema_version") != "r1-native-capture/v1"
+            or strategy.get("purpose") != "CAPTURE_ONLY" or strategy.get("simulate_orders") is not False
+            or strategy.get("financial_certification") is not False or strategy.get("execution_allowed") is not False
+            or checksum(canonical_bytes(strategy)) != package["strategy_sha256"]
+            or checksum(canonical_bytes(package["capture"])) != strategy["capture_sha256"]
+            or any(checksum(text.encode()) != package["file_sha256"].get(name) for name, text in files.items())
+            or manifest["original_bars_tsv_sha256"] != strategy["bars_tsv_sha256"]
+            or manifest["files"]["ticks.tsv"] != strategy["ticks_tsv_sha256"]
+            or manifest["files"]["source_ticks.jsonl"] != strategy["tick_source"]["data_sha256"]
+            or checksum(files["bars.tsv"].encode()) != strategy["bars_tsv_sha256"]
+            or checksum(files["ticks.tsv"].encode()) != strategy["ticks_tsv_sha256"]
+            or files["SignalReplay.set"] != "ApprovedResearchReplay=false\nCaptureOnly=true\n"
+            or checksum(files["SignalReplay.mq5"].encode()) != strategy["source_sha256"]
+            or checksum(files["ParityDecimal.mqh"].encode()) != strategy["decimal_source_sha256"]):
+        raise ValueError("CAPTURE_IMPORT_BINDING_INVALID")
+    schedule = list(csv.reader(io.StringIO(files["replay_schedule.csv"])))
+    capture = package["capture"]
+    expected_header = ["SIGNAL_CAPTURE_V1", package["strategy_sha256"], "CONTINUOUS", strategy["custom_symbol"],
+                       "60", str(capture["start"]), str(capture["end"]), str(capture["split"]), str(len(capture["signals"]))]
+    expected_rows = [[str(row["signal_time"]), str(i), row["action"], str(int(row["triggered"]))]
+                     for i, row in enumerate(capture["signals"])]
+    if schedule != [expected_header, *expected_rows, ["END"]]:
+        raise ValueError("CAPTURE_SCHEDULE_BINDING_INVALID")
+    bound = copy.deepcopy(package)
+    bound["strategy"].update(custom_symbol=manifest["custom_symbol"],
+        import_binding={"manifest_sha256": manifest_sha256, "source_bar_count": readback["source_bar_count"],
+                        "source_data_pins": readback["source_data_pins"], "native_execution_attested": False})
+    bound["strategy_sha256"] = checksum(canonical_bytes(bound["strategy"]))
+    schedule[0][1], schedule[0][3] = bound["strategy_sha256"], manifest["custom_symbol"]
+    stream = io.StringIO(newline="")
+    csv.writer(stream, lineterminator="\n").writerows(schedule)
+    bound["files"]["replay_schedule.csv"] = stream.getvalue()
+    ini = configparser.ConfigParser(interpolation=None)
+    ini.optionxform = str
+    ini.read_string(files["capture.ini"])
+    if any(ini["Tester"].get(key) != value for key, value in
+           {"Model": "4", "UseLocal": "1", "UseRemote": "0", "UseCloud": "0", "Optimization": "0",
+            "ForwardMode": "0", "ReplaceReport": "0", "Symbol": strategy["custom_symbol"]}.items()):
+        raise ValueError("CAPTURE_TESTER_CONFIG_INVALID")
+    ini["Tester"]["Symbol"] = manifest["custom_symbol"]
+    ini["Tester"]["Expert"] = "G4Capture_" + bound["strategy_sha256"][:12] + "\\SignalReplay.ex5"
+    stream = io.StringIO(newline="")
+    ini.write(stream, space_around_delimiters=False)
+    bound["files"]["capture.ini"] = stream.getvalue()
+    bound["file_sha256"] = {name: checksum(text.encode()) for name, text in bound["files"].items()}
+    bound["status"] = "PREPARED_NOT_NATIVE_ATTESTED"
+    bound["blockers"] = ["SEPARATE_NATIVE_RUN_APPROVAL_REQUIRED", "UPDATED_NATIVE_BINARY_NOT_COMPILED",
+                         "HOST_NATIVE_LOGS_AND_BINARY_HASHES_PENDING"]
+    return bound
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--package", type=Path, required=True)
-    parser.add_argument("--sha256", required=True)
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument("--package", type=Path)
+    inputs.add_argument("--verify-existing-media", type=Path)
+    parser.add_argument("--manifest-sha256")
+    parser.add_argument("--sha256")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--prestart-folder", type=Path)
     parser.add_argument("--prestart-manifest-sha256")
     parser.add_argument("--recovery-mode", choices=("CONFIGURATION_ONLY", "IMPORT"))
     args = parser.parse_args()
-    payload, manifest = prepare(args.package.read_bytes(), args.sha256, prestart_folder=args.prestart_folder,
-        prestart_manifest_sha256=args.prestart_manifest_sha256, recovery_mode=args.recovery_mode)
+    if args.verify_existing_media is not None:
+        if not args.manifest_sha256 or any((args.sha256, args.prestart_folder, args.prestart_manifest_sha256, args.recovery_mode)):
+            parser.error("verification requires only existing media, manifest pin and output")
+        payload, manifest = prepare_verification(args.verify_existing_media, args.manifest_sha256)
+    else:
+        if not args.sha256 or args.manifest_sha256:
+            parser.error("package requires its SHA256 pin")
+        payload, manifest = prepare(args.package.read_bytes(), args.sha256, prestart_folder=args.prestart_folder,
+            prestart_manifest_sha256=args.prestart_manifest_sha256, recovery_mode=args.recovery_mode)
     args.output.mkdir(exist_ok=False)
     for name, content in payload.items():
         with (args.output / name).open("xb") as stream:
             stream.write(content)
+    if args.verify_existing_media is not None:
+        print(json.dumps({"status": "VERIFICATION_ONLY_PREPARED_NOT_NATIVE_VERIFIED", **manifest}))
+        return
     request = manifest["prestart"]["request"]
     request_path = None if request is None else _publish(RESEARCH_SOURCE.parents[3] / "data/research/readiness",
         canonical_bytes(request), prefix="g4_prestart_export_request")

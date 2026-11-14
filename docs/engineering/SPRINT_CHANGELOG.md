@@ -3631,3 +3631,22 @@ Verification: `FOCUSED_PASS` / `NATIVE_RUNTIME_ACCEPTANCE_PENDING`
   MQL compile and native roundtrip pending explicit target-write approval.
 - No VM/MT5/service/import/Tester execution, data acquisition, broker mutation
   or financial acceptance. Private market data/media are excluded from Git.
+
+### 2026-11-15 - G4 Native Data Readback Checkpoint / Capture Alias Binding
+
+- Record operator-provided Experts evidence as G4_NATIVE_DATA_READBACK_PASS:
+  245 source bars, 246 native bars, 63,156 ticks; source-backed 17:00 bar has
+  394 ticks. Preserve equality exclusions. No raw log/EX5 hash or independent
+  HOST receipt is invented; no verifier/import/math-parity repeat.
+- Fix only the concrete old-capture-symbol/new-import-alias gap in existing
+  preparer, with full package/import pin checks and unchanged research scope,
+  source, timings and signals. Keep default run approval false; local-only
+  real-tick config and a fresh EA folder; no financial authority granted.
+- Prepare private content-addressed capture package 06e159f0...22abd15c for
+  290 rows/52,073 expected ticks. No real Tester output or trading results.
+- FOCUSED_PASS: 8 selected alias-binding tests, 107 deselected, on isolated
+  candidate; 13 documentation tests, Python syntax/diff checks passed. Capture
+  ISO 5/5 hash readback matched. Existing verifier/native PASS not repeated.
+- Runbook defines one separately authorized CAPTURE_ONLY session with pinned
+  toolchain/source/input, clean compile, no-overwrite and timeout/stop gates.
+  Full financial/report admission remains blocked; no production/native run.

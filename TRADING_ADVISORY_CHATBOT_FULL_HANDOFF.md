@@ -3829,3 +3829,39 @@ Guest probe safety evidence is not permission to run generated code, and does no
   compare every record and preserve all previous symbols/media. Tick flags
   and volume are not original-equality claims. Financial/Tester fidelity
   remains NOT_CERTIFIED regardless of a future data-only import PASS.
+
+## G4_NATIVE_DATA_READBACK_PASS / Capture Alias Binding (2026-11-15)
+
+- Operator-supplied Experts observation: G4_DATA_CONFIGURATION_READBACK_MATCH;
+  G4_VERIFY_GENERATED_BAR time=1793811600 source_ticks=394;
+  G4_VERIFY_DATA_MATCH source_bars=245 native_bars=246 ticks=63156 on
+  XAUUSD_G4Rf0386d9a. Accept only all-source-bar and ordered tick
+  time/time_msc/Bid/Ask/Last equality. Extra-bar OHLC and tick flags/volume
+  are excluded. No verifier/import/G3 parity repeat was performed.
+- This checkpoint is not HOST raw-log or EX5 hash evidence. No new screenshot
+  was independently acquired here; source is the operator's reported Experts
+  observation. Raw logs/binary hashes remain unavailable on HOST, no trusted
+  receipt or native binary checksum has been manufactured.
+- Concrete preparation gap fixed in existing g4_prepare_import.py: old
+  capture package's G4CAP alias did not match the imported XAUUSD_G4R target.
+  bind_capture_import validates original package/import pins, retains exact
+  revision/scope, ticks/source bytes and all signal rows, then rebinds only
+  transport symbol/job identity and fresh INI expert folder. No approvals,
+  financial gates or execution permissions change.
+- Private package 06e159f05ff4166f3f27761ff7216cfdf62530c5fe8ee37fd950240c22abd15c
+  binds strategy 153ef579bb13015869af5b81c4f97576f60d4196f3d4bd5b41411b5f865d4e53.
+  CAPTURE_ONLY: 290 observations, 5 ENTRY/5 EXIT, expected 52,073 captured
+  ticks over 14:35-17:00 including the first boundary tick. All 63,156 archive
+  ticks remain imported; no new data acquisition/import occurred.
+- G3 math 146/146 remains operator-observed in-guest evidence; capture Decimal
+  library matches its existing pin. No new EA EX5 or trusted numeric receipt.
+  CAPTURE_ONLY may compare real Tester ticks/schedule after separate approval;
+  it cannot evaluate fills, costs, equity, swap, lifecycle or profitability.
+- FULL_BACKTEST remains blocked by historical contract/margin/swap/clock,
+  actual native lifecycle/cost evidence and strict report receipt admission.
+  IS/OOS are diagnostic, open end must not be forced closed or called realized.
+- FOCUSED_PASS: 8 new alias-binding tests on isolated candidate (107 deselected),
+  plus 13 documentation tests; Python syntax and diff checks passed. No repeat
+  of native/48-test acceptance. Private capture ISO readback 5/5 matched.
+  One bounded capture procedure is in native_math_isolation.md, defaults off.
+  No VM, MT5, Tester, broker authority or application process was changed.
