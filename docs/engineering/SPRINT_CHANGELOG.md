@@ -3612,3 +3612,22 @@ Verification: `FOCUSED_PASS` / `NATIVE_RUNTIME_ACCEPTANCE_PENDING`
 - Added offline normalization to the existing raw/result artifacts. The host must separately review exact schedule, source, binary and capture evidence and issue the existing trusted receipt; the producer does not issue one. UI distinguishes replay match from independent native calculation parity.
 - Windows venv `python -m pytest scripts/test_native_replay.py scripts/test_native_backtest.py scripts/test_historical_signals.py scripts/test_research_input_package.py scripts/test_mt5_tester_parity.py -q -p no:cacheprovider --tb=short --show-capture=no -rs`: 180 passed, 60 skipped, two dependency warnings. Documentation, compilation and diff checks separate. No full regression because shared live core was untouched.
 - No native compilation, Tester run, generated code, live app restart or MT5 mutation. Remaining: verified isolation, new binary math parity, approved replay policy/source and exact separately authorized native run.
+
+### 2026-11-14 - G4 Pinned Data-Only Import Tooling and Operator Media
+
+- Checkpoint existing G4 preparer, ISO/staging helper, one-shot MQL importer
+  and offline tests without unrelated G3, replay, UI or Trading Core changes.
+- Correct the proven V10 margin-getter early return: retain XAU expectation
+  and financial BLOCKED/NOT_CERTIFIED status, but separate financial snapshot
+  checks from mandatory data/safety/provenance and source-day quote sessions.
+- Preserve volumes, offline/approval gates, old symbols and no-overwrite data.
+  API roundtrip compares each bar/tick; tick flags/volume are explicitly not
+  source-equality evidence. Recovery README names the exact staged helper.
+- FOCUSED_PASS: isolated integration 79 import-tool + 13 documentation tests,
+  including 17 actual-source offline API-stub scenarios, not MT5 evidence.
+  Real package pins/data were revalidated before inert IMPORT preparation.
+- One private ISO built and all eight entries read-back/hash verified; 245
+  bars/63,156 ticks unchanged. New target XAUUSD_G4Rf0386d9a; guest absence,
+  MQL compile and native roundtrip pending explicit target-write approval.
+- No VM/MT5/service/import/Tester execution, data acquisition, broker mutation
+  or financial acceptance. Private market data/media are excluded from Git.

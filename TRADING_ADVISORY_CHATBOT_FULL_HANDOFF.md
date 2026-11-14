@@ -3806,3 +3806,26 @@ Guest probe safety evidence is not permission to run generated code, and does no
 - publish_replay_package writes no-overwrite content-addressed package and two CSV schedules; for a later separately authorized run, each schedule becomes replay_schedule.csv in a separate isolated Tester session for its partition. SignalReplay.mq5 defaults disabled and rejects non-Tester, optimization and forward mode; first tick strictly after the completed-bar timestamp is used, with no actions at the final boundary. Requires FOK, verified real ticks, zero Tester execution delay and flat boundaries; no forced end liquidation. Captures all consumed signal fields, native actions, deals/orders, actual timestamped quotes/costs and equity. Missing or ambiguous data prevents COMPLETE or admission.
 - normalize_replay checks host-reviewed run-evidence pin, schedule/source/capture/binary bindings, consumed signals, action/position correlation and native equity/P&L. publish_replay_result stages the existing result/raw artifact format without creating a receipt. An independent reviewer still has to validate terminal settings, tick/clock/cost provenance, parity, isolation and explicit run approval before providing the existing trusted receipt; replay receipt must also pin evaluation_mode and run_evidence_sha256. UI displays VERIFIED_SIGNAL_REPLAY_BACKTEST / REPLAY_MATCH_ONLY, never independent strategy parity.
 - FOCUSED_PASS: 180 passed, 60 archived-private-evidence skips; retained CSV separately rechecked read-only. Compile/diff and documentation integrity separate. No production trading-core change, native compile/run, app restart or broker mutation. Status NATIVE_RUNTIME_ACCEPTANCE_PENDING. Do not request or start a run until isolation and exact approved policy/dataset prerequisites are established.
+
+## G4 Data-Only Import Checkpoint (2026-11-14)
+
+- Existing G4 tooling is checkpointed independently of the dirty research
+  worktree: g4_prepare_import.py, g4_import_media.ps1, G4Import.mq5 and focused
+  tests. No production source, replay policy, G3 VM tooling or private data
+  is part of this checkpoint. See native_math_isolation.md for operator steps.
+- Operator V10 evidence: expected margin XAU / actual USD caused Configure
+  to return before Description/session setters. Current source retains the
+  requested snapshot; financial mismatch remains BLOCKED and historical
+  certification unavailable. Data integrity has its own strict readback gate.
+- Source-day quote mask includes every pinned bar/tick; current sample needs
+  Wednesday only, not assumed seven-day broker sessions. Required sessions,
+  Description, price representation and Disabled trading must read back.
+- New private IMPORT ISO g4_import_once_e50d45c275df.iso is read-back verified
+  8/8 entries; 245 bars/63,156 ticks unchanged. New target XAUUSD_G4Rf0386d9a,
+  native approval false. Guest target absence, MQL compile and API roundtrip
+  remain unverified; no guest/native execution or broker changes performed.
+- FOCUSED_PASS: 79 import-tool plus 13 documentation tests on the isolated candidate; offline API
+  stubs are not native MT5 evidence. A separately approved single import must
+  compare every record and preserve all previous symbols/media. Tick flags
+  and volume are not original-equality claims. Financial/Tester fidelity
+  remains NOT_CERTIFIED regardless of a future data-only import PASS.

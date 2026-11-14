@@ -213,3 +213,54 @@ No preliminary Tester smoke run: even a failed attempt must be reported, not
 retried automatically or reset by reopening a disposable guest. Record a trusted
 host-side consumption receipt before the separately approved one session.
 Prepared tooling is not proof of guest isolation, compatibility or native parity.
+
+## G4 Data-Only Import into the Existing Offline G3 Guest
+
+Use `scripts/g4_prepare_import.py` and `scripts/g4_import_media.ps1`; these
+prepare/stage inert inputs, never start a VM or MT5. The existing G3 guest
+must already be isolated, with zero host VM NICs, integration services disabled,
+no broker account, disconnected terminal and trading disabled. This is not a
+VM provisioning procedure or authorization to run Tester.
+
+The V10 operator log proved that the margin getter expected XAU but returned
+USD, stopping Configure before Description/session setters. Keep requested
+metadata unchanged. Financial mismatches stay BLOCKED; even snapshot matches
+are NOT_CERTIFIED historically. Only quote representation, Disabled trading,
+Description provenance and source-day sessions gate the data roundtrip.
+Source weekdays include pre-start bars and boundary ticks, not an inferred
+broker calendar. The helper independently checks the pinned day mask.
+
+Prepared private media (not committed):
+- ISO: `data/research/mt5_tester/g4_import_once_e50d45c275df.iso`
+- ISO SHA-256: `84198dd68edb96ad5ba457798e083cfc439c5e6999985ef06102ef7d7629d8bd`
+- Manifest SHA-256: `454157554095b9828cdd8148a9444b197b53ba9c640a9673fab5229898c458ab`
+- Source SHA-256: `e50d45c275df04ea43379b730c1d5a16d988995e71aa761d0d785a60ef1053e9`
+- Target: `XAUUSD_G4Rf0386d9a`; folder: `G4Import_Rf0386d9a`.
+- IMPORT mode; ApproveImport=false; native_execution_authorized=false.
+- 245 M1 bars, 63,156 ticks; Shift 0, Wednesday quote session only.
+
+The target identifier is new among preserved media; guest absence is NOT
+verified from the host. SymbolExist must guard before writes. Existing symbols
+are never deleted/reconfigured or overwritten (existing targets are read-only).
+Require explicit approval for exactly this new target's configuration and
+one import/readback attempt; stop on collision or failure, no automatic retry.
+
+Operator staging, after host zero-NIC/integration checks and VM-Off DVD attach:
+```powershell
+& 'D:\g4_import_media.ps1' -InputDirectory 'D:\' -ManifestSha256 '454157554095b9828cdd8148a9444b197b53ba9c640a9673fab5229898c458ab' -StageGuest
+```
+Staging requires the verified read-only DVD, native processes closed and
+preserved V8 source pin. Compile ONLY the staged
+`MQL5/Services/G4Import_Rf0386d9a/G4Import.mq5` in the existing portable terminal
+root. Record source/header/EX5 hashes and require zero errors/zero warnings.
+After separate import authorization, use Navigator > Services >
+G4Import_Rf0386d9a > G4Import, setting ApproveImport=true for that attempt only.
+No Tester or broker-order permission is granted.
+
+Acceptance requires API counts AND index-by-index equality: all 245 bar time,
+OHLC, tick/real volume and spread fields; all 63,156 tick time/time_msc and
+Bid/Ask/Last values, in original order. Extra/missing records fail. Tick flags
+and volume changes are disclosed separately, not source-equality evidence.
+Read the scoped Experts log and MQL5/Files/G4Import_Rf0386d9a/roundtrip.csv.
+Data import PASS does not establish financial fidelity or Tester acceptance.
+Native compilation/import/readback remain NOT_RUN at packaging time.
